@@ -212,8 +212,7 @@ cmd_install() {
         "$BOLD" "$RESET" "$created" "$updated" "$skipped"
     case ":$PATH:" in
         *":$INSTALL_DIR:"*) ;;
-        # shellcheck disable=SC2016  # $PATH is literal output, not expansion
-        *) printf '  %snote%s       %s is not on $PATH — add it in ~/.zshrc\n\n' \
+        *) printf "  %snote%s       %s is not on \$PATH — add it in ~/.zshrc\n\n" \
             "$BOLD$YELLOW" "$RESET" "$INSTALL_DIR" ;;
     esac
 }
