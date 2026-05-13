@@ -25,7 +25,7 @@ jobs:
 
       - name: shellcheck
         run: |
-          shellcheck \
+          shellcheck -x \
             tools encrypt decrypt vault backup inbox open-age \
             lib/common.sh lib/init.sh lib/key.sh \
             config/crypt.sh config/vault.sh config/backup.sh.example

@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # init.sh — bootstrap for the personal CLI tools.
 #
 # Each tool sources this with one line:

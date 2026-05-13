@@ -1,3 +1,5 @@
+# shellcheck shell=bash
+# shellcheck disable=SC2034  # AGE_IDENTITY is set here, read by callers (decrypt)
 # key.sh — SSH passphrase cache (macOS Keychain) + age private-key unlock.
 # Sourced by tools that need keychain access (decrypt, tools key).
 #
