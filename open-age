@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# open-age <file.age> — decrypt to a temp file, open in the default app,
+# remove the temp when the app closes the file.
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" crypt
+
+usage() {
+    cat <<EOF
+Usage: open-age [options] <file.age>
+
+Decrypts a .age file to a temporary file under \$TMPDIR (mode 600,
+owner-only), opens it in the default macOS app for the underlying
+extension via 'open -W', then deletes the temporary file when the app
+finishes with it.
+
+The plaintext never lands in the source directory or anywhere persistent.
+\$TMPDIR is per-user and cleared by macOS on reboot.
+
+Set as the default opener for .age files via:
+  duti -s <bundle.id.of.this.script> .age all
+…or wrap this script in a tiny .app bundle (Automator: Run Shell Script).
+
+Options:
+  --no-cache       Skip the cached passphrase, let age prompt directly
+  -h, --help       Show this help
+EOF
+}
+
+PASSTHRU=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)   usage; exit 0 ;;
+        --no-cache)  PASSTHRU+=(--no-cache); shift ;;
+        --)          shift; break ;;
+        -*)          die "usage" "unknown option: $1 (try -h)" 2 ;;
+        *)           break ;;
+    esac
+done
+
+[[ $# -eq 1 ]] || die "usage" "open-age <file.age> (try -h)" 2
+src="$1"
+[[ -f "$src"      ]] || die "error" "not a file: $src"
+[[ "$src" == *.age ]] || die "usage" "expected a .age file"  2
+
+# Strip the .age suffix; the remaining extension (e.g. .md) is what 'open'
+# uses to pick the right app. Per-call temp dir under $TMPDIR.
+base="${src##*/}"
+stem="${base%.age}"
+workdir="$(mktemp -d -t openage)"
+chmod 700 "$workdir"
+tmp="$workdir/$stem"
+
+# Always clean up on exit — success, failure, or interrupt.
+cleanup() {
+    rm -rf "$workdir"
+}
+trap cleanup EXIT INT TERM
+
+# Decrypt via the regular `decrypt` tool so Keychain logic stays in one place.
+if (( ${#PASSTHRU[@]} > 0 )); then
+    "$TOOLS_HOME/decrypt" "${PASSTHRU[@]}" -p "$src" > "$tmp"
+else
+    "$TOOLS_HOME/decrypt" -p "$src" > "$tmp"
+fi
+chmod 600 "$tmp"
+
+# 'open -W' blocks until the opened app is done with the file (fully quits
+# in the case of single-document apps; for multi-window apps like VS Code,
+# the wait is shorter — see the README caveat).
+open -W "$tmp"
+
+# trap fires here, removing the workdir.

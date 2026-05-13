@@ -1,0 +1,426 @@
+#!/usr/bin/env bash
+# tools <command> — umbrella command for the personal CLI tools
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" ""
+
+# tools' subcommands read every config without having one of its own. Each
+# config asserts its layout env var with ${VAR:?…}, which in bash kills the
+# WHOLE shell from a sourced file (no, `|| true` doesn't catch it). We gate
+# each source on the relevant env var so `doctor` can still report what's
+# missing instead of dying at startup.
+# shellcheck source=config/vault.sh
+[[ -n "${NOTES_HOME-}"   ]] && source "$TOOLS_HOME/config/vault.sh"
+# shellcheck source=config/backup.sh
+[[ -n "${BACKUPS_HOME-}" ]] && source "$TOOLS_HOME/config/backup.sh"
+# shellcheck source=config/crypt.sh
+[[ -n "${KEYS_HOME-}"    ]] && source "$TOOLS_HOME/config/crypt.sh"
+source "$TOOLS_HOME/lib/key.sh"
+
+TOOL_NAMES=(encrypt decrypt inbox vault backup tools open-age dns-test)
+INSTALL_DIR="${TOOLS_INSTALL_DIR:-$HOME/.local/bin}"
+
+usage() {
+    cat <<EOF
+Usage: tools <command>
+
+Commands:
+  status        One-screen health check across vault, inbox, backup, keys
+  doctor        Verify environment, deps, and installed symlinks
+  install       Create symlinks in $INSTALL_DIR for every tool
+  key           Cache / forget / test the age key passphrase in Keychain
+  watch         Manage the optional launchd auto-sync agent (off by default)
+  -h, --help    Show this help
+
+Environment:
+  TOOLS_HOME            Read from ~/.zshrc; root of this repo
+  TOOLS_INSTALL_DIR     Override install target (default: ~/.local/bin)
+EOF
+}
+
+# ---------- status ----------
+
+cmd_status() {
+    echo
+
+    if [[ -d "${VAULT:-}" && -d "${VAULT:-}/.git" ]]; then
+        local tree remote tree_color="$GREEN" remote_color="$GREEN"
+        tree=$(vault_tree   "$VAULT")
+        remote=$(vault_remote "$VAULT")
+        [[ "$tree"   != "clean"   ]] && tree_color="$YELLOW"
+        [[ "$remote" != "in sync" ]] && remote_color="$YELLOW"
+        msg "$RESET" "vault" "${tree_color}${tree}${RESET}, ${remote_color}${remote}${RESET} ${DIM}($VAULT)${RESET}"
+    else
+        msg "$RED" "vault" "not a git repo or VAULT not set"
+    fi
+
+    if [[ -d "${INBOX_DIR:-}" ]]; then
+        local n; n=$(inbox_count "$INBOX_DIR")
+        if (( n > 0 )); then
+            msg "$YELLOW" "inbox" "$n pending note$([[ $n -eq 1 ]] || echo s)"
+        else
+            msg "$GREEN" "inbox" "empty"
+        fi
+    else
+        msg "$RED" "inbox" "INBOX_DIR not set or missing"
+    fi
+
+    if [[ -n "${BACKUPS_HOME:-}" && -d "$BACKUPS_HOME/.git" ]]; then
+        local last_msg last_when
+        last_msg=$(git -C "$BACKUPS_HOME" log -1 --pretty='%s' 2>/dev/null || echo "")
+        last_when=$(git -C "$BACKUPS_HOME" log -1 --pretty='%cr' 2>/dev/null || echo "")
+        if [[ -n "$last_msg" ]]; then
+            msg "$GREEN" "backup" "last commit ${DIM}${last_when}${RESET} — $last_msg"
+        else
+            msg "$YELLOW" "backup" "no commits yet"
+        fi
+    elif [[ -n "${BACKUPS_HOME:-}" ]]; then
+        msg "$YELLOW" "backup" "$BACKUPS_HOME ${DIM}(not a git repo)${RESET}"
+    else
+        msg "$RED" "backup" "BACKUPS_HOME not set"
+    fi
+
+    local pub_ok=0 key_ok=0
+    [[ -f "${AGE_PUBKEY:-}" ]] && pub_ok=1
+    [[ -f "${AGE_KEY:-}"    ]] && key_ok=1
+    if (( pub_ok && key_ok )); then
+        msg "$GREEN" "keys" "pub + private present"
+    else
+        local detail=""
+        (( pub_ok )) || detail+="missing pub "
+        (( key_ok )) || detail+="missing private"
+        msg "$RED" "keys" "$detail"
+    fi
+
+    echo
+}
+
+# ---------- doctor ----------
+
+check() {
+    local label="$1" ok="$2" detail="${3:-}"
+    if (( ok )); then
+        msg "$GREEN" "ok" "$label${detail:+ ${DIM}($detail)${RESET}}"
+        return 0
+    else
+        msg "$RED" "missing" "$label${detail:+ ${DIM}($detail)${RESET}}"
+        return 1
+    fi
+}
+
+cmd_doctor() {
+    local fail=0
+    echo
+
+    # Layout env vars
+    for var in TOOLS_HOME KEYS_HOME NOTES_HOME BACKUPS_HOME; do
+        if [[ -n "${!var:-}" ]]; then
+            check "\$$var" 1 "${!var}" || fail=1
+        else
+            check "\$$var" 0 "not exported in current shell" || fail=1
+        fi
+    done
+
+    # Resolved paths. Plain if/else — the [[ ]] && a || b shorthand drops
+    # commands inside the `b` branch under `set -e`, so the function would
+    # exit early on the first missing path.
+    check_path() {
+        local kind="$1" label="$2" path="${3:-}"
+        local ok=0
+        if [[ -n "$path" ]]; then
+            [[ "$kind" == "d" && -d "$path" ]] && ok=1
+            [[ "$kind" == "f" && -f "$path" ]] && ok=1
+        fi
+        if (( ok )); then
+            check "$label" 1 "$path" || fail=1
+        else
+            check "$label" 0 "${path:-unset}" || fail=1
+        fi
+    }
+    check_path d "VAULT directory" "${VAULT:-}"
+    check_path d "INBOX_DIR"       "${INBOX_DIR:-}"
+    check_path f "AGE_PUBKEY"      "${AGE_PUBKEY:-}"
+    check_path f "AGE_KEY"         "${AGE_KEY:-}"
+
+    # External deps
+    for cmd in age git rsync; do
+        if command -v "$cmd" >/dev/null; then
+            check "$cmd" 1 "$(command -v "$cmd")" || fail=1
+        else
+            check "$cmd" 0 "not installed" || fail=1
+        fi
+    done
+
+    # Symlinks in install dir (top-level tools + lib helpers)
+    for name in "${TOOL_NAMES[@]}"; do
+        local link="$INSTALL_DIR/$name"
+        if [[ -L "$link" ]]; then
+            local target
+            target="$(readlink "$link")"
+            if [[ "$target" == "$TOOLS_HOME/$name" ]]; then
+                check "$name symlink" 1 "$link"
+            else
+                check "$name symlink" 0 "points to $target, expected $TOOLS_HOME/$name"
+                fail=1
+            fi
+        else
+            check "$name symlink" 0 "not in $INSTALL_DIR (run: tools install)"
+            fail=1
+        fi
+    done
+
+    echo
+    if (( fail )); then
+        printf '  %sdoctor%s    one or more checks failed\n\n' "$BOLD$RED" "$RESET"
+        return 1
+    else
+        printf '  %sdoctor%s    all checks passed\n\n' "$BOLD$GREEN" "$RESET"
+    fi
+}
+
+# ---------- install ----------
+
+cmd_install() {
+    mkdir -p "$INSTALL_DIR"
+    echo
+    local created=0 updated=0 skipped=0
+    for name in "${TOOL_NAMES[@]}"; do
+        local src="$TOOLS_HOME/$name" dst="$INSTALL_DIR/$name"
+        [[ -x "$src" ]] || { msg "$RED" "skipped" "$name ${DIM}(not executable at $src)${RESET}"; skipped=$((skipped+1)); continue; }
+        if [[ -L "$dst" ]]; then
+            local current
+            current="$(readlink "$dst")"
+            if [[ "$current" == "$src" ]]; then
+                msg "$DIM" "ok" "$name ${DIM}(already linked)${RESET}"
+                skipped=$((skipped+1))
+                continue
+            fi
+            ln -sf "$src" "$dst"
+            msg "$YELLOW" "updated" "$name ${DIM}→ $src${RESET}"
+            updated=$((updated+1))
+        elif [[ -e "$dst" ]]; then
+            msg "$RED" "skipped" "$name ${DIM}($dst exists, not a symlink)${RESET}"
+            skipped=$((skipped+1))
+        else
+            ln -s "$src" "$dst"
+            msg "$GREEN" "linked" "$name ${DIM}→ $src${RESET}"
+            created=$((created+1))
+        fi
+    done
+    echo
+    printf '  %sinstall%s    %d created, %d updated, %d skipped\n\n' \
+        "$BOLD" "$RESET" "$created" "$updated" "$skipped"
+    case ":$PATH:" in
+        *":$INSTALL_DIR:"*) ;;
+        *) printf '  %snote%s       %s is not on $PATH — add it in ~/.zshrc\n\n' \
+            "$BOLD$YELLOW" "$RESET" "$INSTALL_DIR" ;;
+    esac
+}
+
+# ---------- watch (opt-in launchd auto-sync) ----------
+
+WATCH_LABEL="${TOOLS_WATCH_LABEL:-com.tools.vault-sync}"
+WATCH_PLIST="$HOME/Library/LaunchAgents/$WATCH_LABEL.plist"
+WATCH_LOG_DIR="$TOOLS_HOME/.logs"
+WATCH_LOG="$WATCH_LOG_DIR/vault-sync.log"
+WATCH_INTERVAL="${TOOLS_WATCH_INTERVAL:-900}"  # 15 minutes
+
+watch_usage() {
+    cat <<EOF
+Usage: tools watch <enable|disable|status|run-now>
+
+Optional launchd agent that runs 'vault sync' on a timer (every 15 min).
+Off by default. The agent only fires its command when the timer triggers
+— it doesn't sit running between fires.
+
+  enable    Install and load $WATCH_PLIST.
+  disable   Unload and remove the plist. Vault stops auto-syncing.
+  status    Show whether the agent is loaded, plus the last few log lines.
+  run-now   Run a single 'vault sync' immediately (does not affect schedule).
+EOF
+}
+
+watch_enable() {
+    mkdir -p "$(dirname "$WATCH_PLIST")" "$WATCH_LOG_DIR"
+    cat > "$WATCH_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$WATCH_LABEL</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>-lc</string>
+        <string>$TOOLS_HOME/vault sync 2>&amp;1 | sed "s/^/[\$(date +%Y-%m-%dT%H:%M:%S)] /" &gt;&gt; $WATCH_LOG; exit 0</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>$WATCH_INTERVAL</integer>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>$WATCH_LOG_DIR/vault-sync.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>$WATCH_LOG_DIR/vault-sync.stderr.log</string>
+</dict>
+</plist>
+EOF
+    launchctl unload "$WATCH_PLIST" 2>/dev/null || true
+    if launchctl load "$WATCH_PLIST"; then
+        echo
+        msg "$GREEN" "enabled" "vault sync every $((WATCH_INTERVAL/60)) min"
+        msg "$DIM"   "plist"   "$WATCH_PLIST"
+        msg "$DIM"   "log"     "$WATCH_LOG"
+        echo
+    else
+        die "error" "launchctl load failed"
+    fi
+}
+
+watch_disable() {
+    if [[ ! -f "$WATCH_PLIST" ]]; then
+        echo
+        msg "$YELLOW" "disabled" "no agent installed"
+        echo
+        return 0
+    fi
+    launchctl unload "$WATCH_PLIST" 2>/dev/null || true
+    rm -f "$WATCH_PLIST"
+    echo
+    msg "$GREEN" "disabled" "agent removed"
+    echo
+}
+
+watch_status() {
+    echo
+    # Optional migration helper: if you previously used a different label,
+    # set TOOLS_LEGACY_WATCH_LABEL to the old name to get a one-line nag
+    # with the unload command. Unset (the default) means no check.
+    if [[ -n "${TOOLS_LEGACY_WATCH_LABEL-}" ]]; then
+        local legacy="$HOME/Library/LaunchAgents/$TOOLS_LEGACY_WATCH_LABEL.plist"
+        if [[ -f "$legacy" ]]; then
+            msg "$YELLOW" "legacy" "old plist found: $legacy"
+            msg "$DIM"    "hint"   "launchctl unload \"$legacy\" && rm \"$legacy\" && tools watch enable"
+        fi
+    fi
+    if [[ -f "$WATCH_PLIST" ]] && launchctl list "$WATCH_LABEL" >/dev/null 2>&1; then
+        msg "$GREEN" "watch" "loaded ${DIM}(every $((WATCH_INTERVAL/60)) min)${RESET}"
+    elif [[ -f "$WATCH_PLIST" ]]; then
+        msg "$YELLOW" "watch" "plist exists but not loaded"
+    else
+        msg "$DIM" "watch" "not enabled"
+        echo
+        return 0
+    fi
+    if [[ -f "$WATCH_LOG" ]]; then
+        local lines
+        lines=$(wc -l < "$WATCH_LOG" | tr -d ' ')
+        msg "$DIM" "log" "$WATCH_LOG ($lines lines)"
+        if (( lines > 0 )); then
+            echo
+            tail -n 3 "$WATCH_LOG" | sed 's/^/    /'
+        fi
+    fi
+    echo
+}
+
+cmd_watch() {
+    case "${1:-}" in
+        enable)      watch_enable ;;
+        disable)     watch_disable ;;
+        status)      watch_status ;;
+        run-now)     "$TOOLS_HOME/vault" sync ;;
+        -h|--help|"") watch_usage ;;
+        *)           die "usage" "unknown watch command: $1 (try -h)" 2 ;;
+    esac
+}
+
+# ---------- key (SSH passphrase cached in macOS Keychain) ----------
+# Keychain + unlock logic lives in lib/key.sh; this is the user-facing CLI.
+
+key_usage() {
+    cat <<EOF
+Usage: tools key <cache|forget|status|test>
+
+Manage the cached SSH passphrase for your age private key. Once cached,
+'decrypt' and 'open-age' (and the Finder Quick Actions) run silently.
+
+  cache    Prompt for the passphrase and store it in the login Keychain.
+           Uses an osascript dialog if not on a TTY, terminal prompt if it is.
+           The passphrase is validated against \$AGE_KEY before being stored.
+  forget   Remove the cached passphrase. Next decrypt will prompt again.
+  status   Show whether a passphrase is cached.
+  test     Fetch the cached passphrase and attempt a no-op key unlock to
+           verify it still matches \$AGE_KEY. Doesn't decrypt any data.
+
+Storage: macOS login Keychain (service "$KEY_SERVICE"). Same mechanism
+git-credential-osxkeychain uses for HTTPS credentials.
+EOF
+}
+
+cmd_key() {
+    [[ -n "${AGE_KEY:-}" ]] || die "error" "AGE_KEY not set (KEYS_HOME missing?)"
+    case "${1:-status}" in
+        cache)
+            local pass
+            pass=$(key_prompt)
+            [[ -n "$pass" ]] || die "error" "no passphrase entered"
+            if ! key_validate "$pass"; then
+                die "error" "passphrase does not unlock $AGE_KEY"
+            fi
+            key_store "$pass"
+            echo
+            msg "$GREEN" "cached" "passphrase stored in login Keychain ${DIM}(service: $KEY_SERVICE)${RESET}"
+            echo
+            ;;
+        forget)
+            echo
+            if key_has; then
+                key_forget
+                msg "$GREEN" "forgotten" "passphrase removed from Keychain"
+            else
+                msg "$DIM" "forgotten" "no cached passphrase"
+            fi
+            echo
+            ;;
+        status)
+            echo
+            if key_has; then
+                msg "$GREEN" "key" "passphrase cached ${DIM}(decrypt runs silently)${RESET}"
+            else
+                msg "$YELLOW" "key" "no cached passphrase ${DIM}(run: tools key cache)${RESET}"
+            fi
+            echo
+            ;;
+        test)
+            echo
+            if ! key_has; then
+                msg "$YELLOW" "key" "no cached passphrase"
+                echo
+                return 1
+            fi
+            local pass; pass=$(key_get)
+            if key_validate "$pass"; then
+                msg "$GREEN" "key" "cached passphrase unlocks $AGE_KEY"
+            else
+                msg "$RED" "key" "cached passphrase does NOT match $AGE_KEY ${DIM}(run: tools key cache to refresh)${RESET}"
+                echo
+                return 1
+            fi
+            echo
+            ;;
+        -h|--help) key_usage ;;
+        *)         die "usage" "unknown key command: $1 (try -h)" 2 ;;
+    esac
+}
+
+case "${1:-}" in
+    status)        shift; cmd_status  "$@" ;;
+    doctor)        shift; cmd_doctor  "$@" ;;
+    install)       shift; cmd_install "$@" ;;
+    watch)         shift; cmd_watch   "$@" ;;
+    key)           shift; cmd_key     "$@" ;;
+    -h|--help|"")  usage; exit 0 ;;
+    *)             die "usage" "unknown command: $1 (try -h)" 2 ;;
+esac

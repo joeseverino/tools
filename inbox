@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# inbox [text...] — quick-capture a note into the vault inbox
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" vault
+
+usage() {
+    cat <<EOF
+Usage: inbox [options] [text...]
+       cmd | inbox [options]
+
+Capture a quick note into your vault inbox folder. The filename is
+"YYYY-MM-DD HHMMSS <first words>.md" and the body is the captured text.
+
+Options:
+  -e, --edit    Open the captured note in \$EDITOR after writing.
+                With no text/stdin, creates an empty note, opens the
+                editor, then renames the file from its first non-empty
+                content line on save.
+  -h, --help    Show this help
+
+Environment:
+  NOTES_HOME    Read from ~/.zshrc; resolves VAULT
+  VAULT         Per-invocation override for the vault path
+  INBOX_DIR     Per-invocation override for the inbox folder
+  EDITOR        Used by -e (defaults to nano)
+
+Examples:
+  inbox "remember to update the homelab certs"
+  pbpaste | inbox
+  echo "lookup later" | inbox
+  inbox -e                                  # blank note, opens editor
+  inbox -e "draft: post-mortem template"    # seed + open editor
+EOF
+}
+
+EDIT=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help) usage; exit 0 ;;
+        -e|--edit) EDIT=1; shift ;;
+        --)        shift; break ;;
+        -*)        die "usage" "unknown option: $1 (try -h)" 2 ;;
+        *)         break ;;
+    esac
+done
+
+# Slug a single line of text into something safe for a filename:
+# strip control/path-hostile chars, trim whitespace, cap length.
+slugify() {
+    printf '%s' "$1" \
+        | head -1 \
+        | tr -d '\r' \
+        | tr '/\\:?*<>|"' '---------' \
+        | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+        | cut -c1-50 \
+        | sed 's/[[:space:]]*$//'
+}
+
+# Source content: args (joined) > stdin (if piped) > empty (only with -e)
+if [[ $# -gt 0 ]]; then
+    text="$*"
+elif [[ ! -t 0 ]]; then
+    text="$(cat)"
+elif (( EDIT )); then
+    text=""
+else
+    die "usage" "no text provided (give args or pipe input; try -h)" 2
+fi
+
+# Trim surrounding whitespace.
+text="${text#"${text%%[![:space:]]*}"}"
+text="${text%"${text##*[![:space:]]}"}"
+if [[ -z "$text" ]] && (( ! EDIT )); then
+    die "usage" "empty input" 2
+fi
+
+[[ -d "$INBOX_DIR" ]] || die "error" "inbox directory not found: $INBOX_DIR"
+
+# Build filename: timestamp + slug from first line.
+timestamp="$(date +'%Y-%m-%d %H%M%S')"
+slug="$(slugify "$text")"
+[[ -z "$slug" ]] && slug="note"
+filename="$timestamp $slug.md"
+filepath="$INBOX_DIR/$filename"
+
+# Write the note with minimal frontmatter.
+{
+    echo "---"
+    echo "created: $(date +'%Y-%m-%d %H:%M:%S')"
+    echo "---"
+    echo
+    [[ -n "$text" ]] && echo "$text"
+} > "$filepath"
+
+if (( EDIT )); then
+    "${EDITOR:-nano}" "$filepath"
+
+    # If the file started empty (no seed text), rename based on the first
+    # non-frontmatter, non-empty line the user actually wrote.
+    if [[ -z "$text" ]]; then
+        first_line="$(awk '
+            /^---$/ { fm = !fm; next }
+            fm      { next }
+            NF      { print; exit }
+        ' "$filepath")"
+        new_slug="$(slugify "$first_line")"
+        if [[ -n "$new_slug" && "$new_slug" != "note" ]]; then
+            new_filename="$timestamp $new_slug.md"
+            new_filepath="$INBOX_DIR/$new_filename"
+            if [[ "$new_filepath" != "$filepath" ]]; then
+                mv "$filepath" "$new_filepath"
+                filename="$new_filename"
+                filepath="$new_filepath"
+            fi
+        fi
+    fi
+fi
+
+echo
+msg "$GREEN" "captured" "$filename"
+echo

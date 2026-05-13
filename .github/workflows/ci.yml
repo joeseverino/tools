@@ -1,0 +1,31 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bash 4+ and zsh
+        run: brew install bash zsh shellcheck
+
+      - name: bash -n on bash scripts
+        run: |
+          for f in tools encrypt decrypt vault backup inbox open-age; do
+            bash -n "$f"
+          done
+
+      - name: zsh -n on dns-test
+        run: zsh -n dns-test
+
+      - name: shellcheck
+        run: |
+          shellcheck \
+            tools encrypt decrypt vault backup inbox open-age \
+            lib/common.sh lib/init.sh lib/key.sh \
+            config/crypt.sh config/vault.sh config/backup.sh.example

@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# vault <command> — operations on the vault repo
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" vault
+
+usage() {
+    cat <<EOF
+Usage: vault <command>
+
+Commands:
+  sync          Pull and push the vault repo
+  status        Working tree, inbox count, and remote sync state
+  inbox         List notes currently in the inbox
+  -h, --help    Show this help
+
+Environment:
+  NOTES_HOME    Read from ~/.zshrc; resolves VAULT
+  VAULT         Per-invocation override for the vault path
+  INBOX_DIR     Per-invocation override for the inbox folder
+EOF
+}
+
+require_vault() {
+    [[ -d "$VAULT" ]]      || die "error" "vault not found: $VAULT"
+    [[ -d "$VAULT/.git" ]] || die "error" "not a git repo: $VAULT"
+}
+
+vault_sync() {
+    require_vault
+    cd "$VAULT"
+    echo
+
+    if out=$(git pull --rebase 2>&1); then
+        msg "$GREEN" "pulled" "$(echo "$out" | tail -1)"
+    else
+        msg "$RED" "failed" "pull: $(echo "$out" | tail -1)"
+        echo; exit 1
+    fi
+
+    if out=$(git push 2>&1); then
+        msg "$GREEN" "pushed" "$(echo "$out" | tail -1)"
+    else
+        msg "$RED" "failed" "push: $(echo "$out" | tail -1)"
+        echo; exit 1
+    fi
+
+    echo
+}
+
+vault_status() {
+    require_vault
+    echo
+
+    local tree remote n
+    tree=$(vault_tree   "$VAULT")
+    n=$(inbox_count     "$INBOX_DIR")
+    remote=$(vault_remote "$VAULT")
+
+    if [[ "$tree" == "clean" ]]; then
+        msg "$GREEN"  "tree" "clean"
+    else
+        msg "$YELLOW" "tree" "$tree"
+    fi
+
+    if (( n > 0 )); then
+        msg "$YELLOW" "inbox" "$n pending note$([[ $n -eq 1 ]] || echo s)"
+    else
+        msg "$GREEN"  "inbox" "empty"
+    fi
+
+    if [[ "$remote" == "in sync" ]]; then
+        msg "$GREEN"  "remote" "in sync"
+    else
+        msg "$YELLOW" "remote" "$remote"
+    fi
+
+    echo
+}
+
+vault_inbox() {
+    [[ -d "$INBOX_DIR" ]] || die "error" "inbox not found: $INBOX_DIR"
+    echo
+
+    local count=0
+    local f
+    for f in "$INBOX_DIR"/*.md; do
+        [[ -f "$f" ]] || continue
+        printf '  %s\n' "$(basename "$f" .md)"
+        count=$((count+1))
+    done
+
+    if (( count == 0 )); then
+        msg "$GREEN" "inbox" "empty"
+    else
+        echo
+        printf '  %s%d note%s%s\n' "$BOLD" "$count" "$([ "$count" -eq 1 ] || echo s)" "$RESET"
+    fi
+    echo
+}
+
+case "${1:-}" in
+    sync)              shift; vault_sync   "$@" ;;
+    status)            shift; vault_status "$@" ;;
+    inbox)             shift; vault_inbox  "$@" ;;
+    -h|--help|"")      usage; exit 0 ;;
+    *)                 die "usage" "unknown command: $1 (try -h)" 2 ;;
+esac

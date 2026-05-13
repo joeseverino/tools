@@ -1,0 +1,10 @@
+.DS_Store
+.logs/
+.claude/
+
+# Personal backup list — see config/backup.sh.example for the template.
+config/backup.sh
+
+# Automator .app bundles are user-specific and contain compiled stubs +
+# localization data. Adopters should build their own — see README.
+apps/
