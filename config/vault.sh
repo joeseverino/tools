@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # vault.sh — defaults for the vault and inbox tools.
 #
 # Derives from NOTES_HOME exported by ~/.zshrc. No duplicated paths —

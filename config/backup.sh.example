@@ -1,3 +1,5 @@
+# shellcheck shell=bash
+# shellcheck disable=SC2034  # BACKUP_ITEMS is consumed by the backup tool
 # backup.sh — files and directories that the `backup` tool mirrors.
 #
 # Copy this file to backup.sh and edit. The real backup.sh is gitignored

@@ -1,3 +1,5 @@
+# shellcheck shell=bash
+# shellcheck disable=SC2034  # color vars are read by tools that source this file
 # common.sh — shared helpers for the personal CLI tools.
 # Sourced, not executed.
 

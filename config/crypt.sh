@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # crypt.sh — defaults for encrypt / decrypt.
 #
 # Derives from KEYS_HOME exported by ~/.zshrc. No duplicated paths —
