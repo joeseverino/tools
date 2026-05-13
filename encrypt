@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# encrypt <file>... — age-encrypt files to your public key, remove originals
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" crypt
+
+usage() {
+    cat <<EOF
+Usage: encrypt [options] <file>...
+
+Encrypts files to your default age public key (and any extras passed
+with -k). The original file is removed on success unless -c is given.
+
+Options:
+  -c, --copy          Keep the original file (encrypt a copy)
+  -f, --force         Overwrite existing .age output files
+  -k, --key <path>    Add another public key as a recipient (repeatable)
+  -h, --help          Show this help
+
+Environment:
+  KEYS_HOME           Read from ~/.zshrc; resolves AGE_PUBKEY
+  AGE_PUBKEY          Per-invocation override for the public key path
+
+Examples:
+  encrypt notes.md                          # original removed
+  encrypt -c ~/.ssh/id_ed25519              # original kept (backup pattern)
+  encrypt -k ~/keys/coworker.pub notes.md
+  encrypt -k a.pub -k b.pub *.md
+  encrypt -f *.txt
+  encrypt -- -starts-with-dash.md
+EOF
+}
+
+FORCE=0
+COPY=0
+EXTRA_KEYS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)  usage; exit 0 ;;
+        -c|--copy)  COPY=1; shift ;;
+        -f|--force) FORCE=1; shift ;;
+        -k|--key)
+            [[ -n "${2:-}" ]] || die "usage" "-k requires a key path" 2
+            EXTRA_KEYS+=("$2"); shift 2 ;;
+        --)         shift; break ;;
+        -*)         die "usage" "unknown option: $1 (try -h)" 2 ;;
+        *)          break ;;
+    esac
+done
+
+[[ -f "$AGE_PUBKEY" ]] || die "error" "no default public key at: $AGE_PUBKEY"
+if (( ${#EXTRA_KEYS[@]} > 0 )); then
+    for k in "${EXTRA_KEYS[@]}"; do
+        [[ -f "$k" ]] || die "error" "additional key not found: $k"
+    done
+fi
+[[ $# -ge 1 ]] || die "usage" "encrypt <file>... (try -h)" 2
+command -v age >/dev/null || die "error" "age not installed (brew install age)"
+
+# Build age recipient args: default + any extras.
+recipients=("-R" "$AGE_PUBKEY")
+if (( ${#EXTRA_KEYS[@]} > 0 )); then
+    for k in "${EXTRA_KEYS[@]}"; do
+        recipients+=("-R" "$k")
+    done
+fi
+
+ok=0; failed=0; skipped=0
+header "encrypting" "$#"
+
+for f in "$@"; do
+    if [[ ! -f "$f" ]]; then
+        msg "$YELLOW" "skipped" "$f ${DIM}(not a file)${RESET}"
+        skipped=$((skipped+1))
+        continue
+    fi
+    out="${f}.age"
+    if [[ -e "$out" && $FORCE -eq 0 ]]; then
+        msg "$YELLOW" "skipped" "$f ${DIM}($out exists, -f to overwrite)${RESET}"
+        skipped=$((skipped+1))
+        continue
+    fi
+    if err=$(age "${recipients[@]}" -o "$out" "$f" 2>&1); then
+        (( COPY )) || rm "$f"
+        msg "$GREEN" "encrypted" "$f ${DIM}→${RESET} $out"
+        ok=$((ok+1))
+    else
+        msg "$RED" "failed" "$f ${DIM}($(age_reason "$err"))${RESET}"
+        failed=$((failed+1))
+    fi
+done
+
+footer "encrypted" "$ok" "$skipped" "$failed"
+(( failed == 0 ))

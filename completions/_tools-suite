@@ -1,0 +1,125 @@
+#compdef tools vault encrypt decrypt inbox backup open-age dns-test
+# Completion for the personal CLI tools.
+#
+# Install by adding to ~/.zshrc, BEFORE `compinit`:
+#
+#     fpath=("$TOOLS_HOME/completions" $fpath)
+#
+# Then restart your shell (or `autoload -U compinit && compinit`).
+
+_tools_keyfiles() {
+    # Suggest .pub for encrypt -k, raw key paths for decrypt -k.
+    local pattern="$1"
+    _files -g "$pattern"
+}
+
+_tools() {
+    local -a subs watch_subs key_subs
+    subs=(
+        'status:vault + inbox + backup health check'
+        'doctor:verify env, deps, and installed symlinks'
+        'install:create symlinks for every tool'
+        'key:cache / forget / test the age key passphrase'
+        'watch:manage the launchd auto-sync agent'
+    )
+    watch_subs=(
+        'enable:install and load the auto-sync agent'
+        'disable:unload and remove the agent'
+        'status:show whether the agent is loaded + log tail'
+        'run-now:run vault sync once, no schedule change'
+    )
+    key_subs=(
+        'cache:prompt for passphrase and store it in login Keychain'
+        'forget:remove the cached passphrase'
+        'status:show whether a passphrase is cached'
+        'test:verify the cached passphrase still unlocks $AGE_KEY'
+    )
+    _arguments -C \
+        '(-h --help)'{-h,--help}'[show help]' \
+        '1: :->cmd' \
+        '2: :->subcmd'
+    case $state in
+        cmd)    _describe 'subcommand' subs ;;
+        subcmd)
+            case $words[2] in
+                watch) _describe 'watch subcommand' watch_subs ;;
+                key)   _describe 'key subcommand'   key_subs ;;
+            esac
+            ;;
+    esac
+}
+
+_vault() {
+    local -a subs
+    subs=(
+        'sync:git pull --rebase, then git push'
+        'status:working tree, inbox count, remote sync state'
+        'inbox:list pending notes in the inbox'
+    )
+    _arguments -C \
+        '(-h --help)'{-h,--help}'[show help]' \
+        '1: :->cmd'
+    case $state in
+        cmd) _describe 'subcommand' subs ;;
+    esac
+}
+
+_encrypt() {
+    _arguments \
+        '(-h --help)'{-h,--help}'[show help]' \
+        '(-c --copy)'{-c,--copy}'[keep the original file]' \
+        '(-f --force)'{-f,--force}'[overwrite existing .age outputs]' \
+        '*'{-k,--key}'[add another public key recipient]:public key:_files -g "*.pub"' \
+        '*:file:_files'
+}
+
+_decrypt() {
+    _arguments \
+        '(-h --help)'{-h,--help}'[show help]' \
+        '(-f --force)'{-f,--force}'[overwrite existing decrypted outputs]' \
+        '(-p --stdout)'{-p,--stdout}'[write decrypted bytes to stdout]' \
+        '--no-cache[skip the cached passphrase, let age prompt directly]' \
+        '*'{-k,--key}'[add another identity (private key)]:private key:_files' \
+        '*:.age file:_files -g "*.age"'
+}
+
+_open_age() {
+    _arguments \
+        '(-h --help)'{-h,--help}'[show help]' \
+        '--no-cache[skip the cached passphrase, let age prompt directly]' \
+        '1:.age file:_files -g "*.age"'
+}
+
+_inbox() {
+    _arguments \
+        '(-h --help)'{-h,--help}'[show help]' \
+        '(-e --edit)'{-e,--edit}'[open the captured note in $EDITOR]' \
+        '*::text:'
+}
+
+_backup() {
+    _arguments \
+        '(-h --help)'{-h,--help}'[show help]' \
+        '(-n --dry-run)'{-n,--dry-run}'[show what would be copied; do not write]' \
+        '--no-commit[skip the auto-commit step]'
+}
+
+_dns_test() {
+    _arguments \
+        '(-h)-h[show help]' \
+        '-d[domain to query]:domain' \
+        '-n[queries per path]:count' \
+        '-a[AdGuard LAN IP]:ip' \
+        '-b[baseline path label]:label:(System\ DNS AdGuard\ LAN Cloudflare\ 1.1.1.1 Cloudflare\ DoH)'
+}
+
+case "$service" in
+    tools)    _tools    "$@" ;;
+    vault)    _vault    "$@" ;;
+    encrypt)  _encrypt  "$@" ;;
+    decrypt)  _decrypt  "$@" ;;
+    inbox)    _inbox    "$@" ;;
+    backup)   _backup   "$@" ;;
+    open-age) _open_age "$@" ;;
+    dns-test) _dns_test "$@" ;;
+esac

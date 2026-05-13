@@ -1,0 +1,21 @@
+# backup.sh — files and directories that the `backup` tool mirrors.
+#
+# Copy this file to backup.sh and edit. The real backup.sh is gitignored
+# so it can hold your personal list without leaking into the repo.
+#
+# Each entry is "<source path><TAB><destination path under $BACKUPS_HOME>".
+# Use a real tab between the two columns; spaces inside a path are fine.
+# Permissions and xattrs are preserved on copy (rsync -a).
+
+: "${BACKUPS_HOME:?set in ~/.zshrc}"
+
+BACKUP_ITEMS=(
+    "$HOME/.zshrc"$'\t'"dotfiles/zshrc"
+    "$HOME/.gitconfig"$'\t'"dotfiles/gitconfig"
+    "$HOME/.ssh/config"$'\t'"dotfiles/ssh-config"
+    # Add your own — directories are mirrored with --delete, files are copied
+    # in place. Examples:
+    #
+    # "$HOME/.config/nvim"$'\t'"config/nvim"
+    # "$HOME/Library/Application Support/Code/User/keybindings.json"$'\t'"vscode/keybindings.json"
+)

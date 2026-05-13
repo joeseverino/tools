@@ -1,0 +1,178 @@
+#!/bin/zsh
+# dns-test — compare DNS resolver latency across paths
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" ""
+
+ADGUARD_IP="${ADGUARD_IP:-192.168.1.233}"
+DOMAIN="google.com"
+RUNS=20
+BASELINE="AdGuard LAN"
+
+usage() {
+    cat <<EOF
+Usage: dns-test [-d domain] [-n runs] [-a adguard_ip] [-b baseline] [-h]
+
+Measures DNS latency across System DNS, a LAN AdGuard resolver,
+Cloudflare 1.1.1.1, and Cloudflare DoH. Reports avg/min/p50/p95/max and
+the delta of each path against a chosen baseline.
+
+The AdGuard IP defaults to an example LAN address; set ADGUARD_IP in your
+environment (or pass -a) to point at your own resolver.
+
+Options:
+  -d domain     Domain to query (default: $DOMAIN)
+  -n runs       Queries per path (default: $RUNS)
+  -a ip         AdGuard LAN IP (default: $ADGUARD_IP, env ADGUARD_IP)
+  -b label      Path label to use as delta baseline (default: "$BASELINE")
+  -h            Show this help
+EOF
+}
+
+while getopts ":d:n:a:b:h" opt; do
+    case $opt in
+        d)  DOMAIN=$OPTARG ;;
+        n)  RUNS=$OPTARG ;;
+        a)  ADGUARD_IP=$OPTARG ;;
+        b)  BASELINE=$OPTARG ;;
+        h)  usage; exit 0 ;;
+        \?) die "usage" "unknown option: -$OPTARG (try -h)" 2 ;;
+        :)  die "usage" "-$OPTARG requires an argument (try -h)" 2 ;;
+    esac
+done
+
+for cmd in dig curl awk sort; do
+    command -v "$cmd" >/dev/null || die "error" "missing required command: $cmd"
+done
+
+if ! dig @"$ADGUARD_IP" "$DOMAIN" +tries=1 +time=2 +short >/dev/null 2>&1; then
+    echo
+    msg "$YELLOW" "warn" "AdGuard at $ADGUARD_IP not reachable; its row will show 0 successes."
+fi
+
+# --- Samplers: each prints a single millisecond integer on success, returns non-zero on failure.
+
+sample_dig() {
+    local server="$1" out
+    local args=(+tries=1 +time=2)
+    [[ -n $server ]] && args=(@"$server" "${args[@]}")
+    out=$(dig "${args[@]}" "$DOMAIN" 2>/dev/null) || return 1
+    awk '/Query time/ {print $4; found=1; exit} END {exit !found}' <<<"$out"
+}
+
+sample_doh() {
+    local url="$1" t
+    t=$(curl -fsS -o /dev/null \
+            -H "accept: application/dns-json" \
+            -w "%{time_total}" \
+            "${url}?name=${DOMAIN}&type=A" 2>/dev/null) || return 1
+    awk -v t="$t" 'BEGIN { printf "%.0f", t * 1000 }'
+}
+
+# --- Runner + stats.
+
+measure() {
+    local sampler="$1"; shift
+    local times=() t i
+    for i in $(seq 1 "$RUNS"); do
+        if t=$("$sampler" "$@" 2>/dev/null) && [[ $t == <-> ]]; then
+            times+=("$t")
+        fi
+    done
+    summarize "$RUNS" "${times[@]}"
+}
+
+summarize() {
+    local want=$1; shift
+    local got=$#
+    if (( got == 0 )); then
+        printf "N/A N/A N/A N/A N/A 0/%d" "$want"
+        return
+    fi
+    printf "%s\n" "$@" | sort -n | awk -v got="$got" -v want="$want" '
+        function pct(p,    i) {
+            i = int(p * NR + 0.9999)
+            if (i < 1) i = 1
+            if (i > NR) i = NR
+            return v[i]
+        }
+        { v[NR]=$1; sum+=$1 }
+        END {
+            printf "%.1f %d %d %d %d %d/%d",
+                sum/NR, v[1], pct(0.50), pct(0.95), v[NR], got, want
+        }'
+}
+
+# --- Paths table: "Label|sampler|arg". Add a line to add a path.
+
+paths=(
+    "System DNS|sample_dig|"
+    "AdGuard LAN|sample_dig|$ADGUARD_IP"
+    "Cloudflare 1.1.1.1|sample_dig|1.1.1.1"
+    "Cloudflare DoH|sample_doh|https://cloudflare-dns.com/dns-query"
+)
+
+typeset -A RESULTS
+labels=()
+for entry in "${paths[@]}"; do
+    IFS='|' read -r label sampler arg <<<"$entry"
+    labels+=("$label")
+    printf '  measuring %s ... ' "$label" >&2
+    RESULTS[$label]=$(measure "$sampler" "$arg")
+    printf 'done\n' >&2
+done
+
+# --- Output.
+
+echo
+echo "DNS latency comparison"
+echo "  Domain:   $DOMAIN"
+echo "  Runs:     $RUNS"
+echo "  Baseline: $BASELINE"
+echo
+
+printf "%-22s %8s %8s %8s %8s %8s %10s\n" \
+    "Path" "Avg" "Min" "p50" "p95" "Max" "OK/Total"
+printf -- '-%.0s' {1..80}; echo
+
+for label in "${labels[@]}"; do
+    r=(${=RESULTS[$label]})
+    if [[ ${r[1]} == "N/A" ]]; then
+        printf "%-22s %8s %8s %8s %8s %8s %10s\n" \
+            "$label" "N/A" "N/A" "N/A" "N/A" "N/A" "${r[6]}"
+    else
+        printf "%-22s %6sms %6sms %6sms %6sms %6sms %10s\n" \
+            "$label" "${r[1]}" "${r[2]}" "${r[3]}" "${r[4]}" "${r[5]}" "${r[6]}"
+    fi
+done
+
+echo
+echo "Note: DoH includes TCP+TLS handshake per query (curl reopens the connection);"
+echo "      dig figures are UDP round-trips. Treat the comparison accordingly."
+
+# --- Delta vs baseline.
+
+echo
+if [[ -z ${RESULTS[$BASELINE]:-} ]]; then
+    die "error" "baseline '$BASELINE' not in path list"
+fi
+
+base=(${=RESULTS[$BASELINE]})
+base_avg=${base[1]}
+if [[ $base_avg == "N/A" ]]; then
+    die "error" "baseline '$BASELINE' had no successful queries"
+fi
+
+echo "Delta vs $BASELINE (avg):"
+for label in "${labels[@]}"; do
+    [[ $label == "$BASELINE" ]] && continue
+    r=(${=RESULTS[$label]})
+    [[ ${r[1]} == "N/A" ]] && continue
+    awk -v label="$label" -v avg="${r[1]}" -v base="$base_avg" '
+        BEGIN {
+            d = avg - base
+            tag = (d >= 0) ? "slower" : "faster"
+            printf "  %-22s %+7.1f ms (%s)\n", label, d, tag
+        }'
+done
+echo

@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# backup — mirror the items listed in config/backup.sh into $BACKUPS_HOME
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" backup
+
+usage() {
+    cat <<EOF
+Usage: backup [options]
+
+Mirror each tracked file into \$BACKUPS_HOME using the mapping in
+config/backup.sh. Uses rsync, so permissions, xattrs, and timestamps
+are preserved and unchanged files are skipped at the byte level.
+
+If \$BACKUPS_HOME is a git repo, an auto-commit is made after the copy
+so each backup run leaves a point-in-time entry in the local history.
+
+Options:
+  -n, --dry-run    Show what would be copied; do not write
+      --no-commit  Skip the auto-commit step
+  -h, --help       Show this help
+
+Environment:
+  BACKUPS_HOME     Read from ~/.zshrc; backup destination root
+
+Add or remove items by editing tools/config/backup.sh.
+EOF
+}
+
+DRY=0
+NO_COMMIT=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)    usage; exit 0 ;;
+        -n|--dry-run) DRY=1; shift ;;
+        --no-commit)  NO_COMMIT=1; shift ;;
+        --)           shift; break ;;
+        -*)           die "usage" "unknown option: $1 (try -h)" 2 ;;
+        *)            die "usage" "unexpected argument: $1 (try -h)" 2 ;;
+    esac
+done
+
+(( ${#BACKUP_ITEMS[@]} >= 1 )) || die "error" "no items defined in config/backup.sh"
+command -v rsync >/dev/null || die "error" "rsync not installed"
+
+ok=0; failed=0; skipped=0
+header "backing up" "${#BACKUP_ITEMS[@]}"
+
+for item in "${BACKUP_ITEMS[@]}"; do
+    # Tab-separated: <source><TAB><dest under BACKUPS_HOME>.
+    src="${item%%$'\t'*}"
+    dst_rel="${item#*$'\t'}"
+    if [[ "$src" == "$item" || -z "$dst_rel" ]]; then
+        msg "$RED" "failed" "malformed entry: $item ${DIM}(missing tab)${RESET}"
+        failed=$((failed+1))
+        continue
+    fi
+    dst="$BACKUPS_HOME/$dst_rel"
+
+    if [[ ! -e "$src" ]]; then
+        msg "$YELLOW" "skipped" "$src ${DIM}(not found)${RESET}"
+        skipped=$((skipped+1))
+        continue
+    fi
+
+    if (( DRY )); then
+        msg "$YELLOW" "would copy" "$src ${DIM}→${RESET} $dst_rel"
+        ok=$((ok+1))
+        continue
+    fi
+
+    # For directories: trailing slashes on both sides make dst's contents
+    # mirror src's contents (with --delete pruning anything no longer in src).
+    # For files: plain rsync -a copies src to the dst path.
+    if [[ -d "$src" ]]; then
+        mkdir -p "$dst"
+        rsync_src="$src/"; rsync_dst="$dst/"
+        rsync_args=(-a --delete)
+    else
+        mkdir -p "$(dirname "$dst")"
+        rsync_src="$src"; rsync_dst="$dst"
+        rsync_args=(-a)
+    fi
+    if err=$(rsync "${rsync_args[@]}" "$rsync_src" "$rsync_dst" 2>&1); then
+        msg "$GREEN" "backed up" "$src ${DIM}→${RESET} $dst_rel"
+        ok=$((ok+1))
+    else
+        msg "$RED" "failed" "$src ${DIM}($(echo "$err" | head -1))${RESET}"
+        failed=$((failed+1))
+    fi
+done
+
+# Auto-commit if BACKUPS_HOME is a git repo and we actually copied things.
+if (( ! DRY )) && (( ! NO_COMMIT )) && [[ -d "$BACKUPS_HOME/.git" ]]; then
+    (
+        cd "$BACKUPS_HOME"
+        git add -A
+        if git diff --cached --quiet; then
+            msg "$DIM" "git" "no changes to commit"
+        elif git commit -m "backup: $(date +'%Y-%m-%d %H:%M')" --quiet; then
+            msg "$GREEN" "committed" "$(git rev-parse --short HEAD)"
+        else
+            msg "$RED" "git" "commit failed"
+        fi
+    )
+fi
+
+footer "backed up" "$ok" "$skipped" "$failed"
+(( failed == 0 ))
