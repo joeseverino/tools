@@ -10,7 +10,7 @@
 
 : "${TOOLS_HOME:?set in ~/.zshrc}"
 
-# shellcheck source=common.sh
+# shellcheck source=lib/common.sh
 source "$TOOLS_HOME/lib/common.sh"
 
 if [[ ${1-} ]]; then
