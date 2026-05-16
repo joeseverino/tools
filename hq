@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+# hq — sync vault frontmatter to Severino HQ, and a few quality-of-life ops.
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" hq
+
+LIB_DIR="$TOOLS_HOME/lib"
+
+usage() {
+    cat <<EOF
+Usage: hq <command> [args]
+
+Severino HQ glue. Reads YAML frontmatter from the vault and keeps the HQ
+docs index + future MCP in sync.
+
+Commands:
+  manifest             Print the manifest JSON (frontmatter from every doc)
+                       to stdout. Useful for inspection or piping elsewhere.
+
+  sync                 Pipe the manifest into HQ's manage.py import_docs_manifest
+                       on $HQ_SSH_HOST. Upserts by doc_id; safe to re-run.
+
+  doctor               Report vault docs that are missing or have invalid
+                       frontmatter — the gap between vault state and HQ state.
+
+  open                 Open https://hq.jseverino.com (\$HQ_URL) in the browser.
+
+  shell                ssh -t into the HQ Django shell. Handy for poking the ORM.
+
+  superuser            ssh -t into HQ and run createsuperuser interactively.
+
+  export <year> [md|json]
+                       Download the year summary (.md or .json) to ./ and print
+                       the path. Defaults to current year and md.
+
+Env (read from ~/.zshrc unless overridden per-invocation):
+  NOTES_HOME           Vault root (= $NOTES_HOME)
+  HQ_VAULT_DIRS        Colon-separated subdirs to index (= $HQ_VAULT_DIRS)
+  HQ_SSH_HOST          SSH alias of the HQ server (= $HQ_SSH_HOST)
+  HQ_REMOTE_PATH       HQ checkout path on the server (= $HQ_REMOTE_PATH)
+  HQ_URL               Public URL of HQ (= $HQ_URL)
+
+Examples:
+  hq sync                       # most common — push vault → HQ
+  hq manifest | jq '.[] | .doc_id'
+  hq doctor                     # find docs missing frontmatter
+  hq export 2026                # download year-summary-2026.md
+EOF
+}
+
+cmd_manifest() {
+    python3 "$LIB_DIR/hq-manifest.py" "$VAULT" "$HQ_VAULT_DIRS"
+}
+
+cmd_sync() {
+    local tmp
+    tmp="$(mktemp -t hq-manifest.XXXXXX.json)"
+    trap 'rm -f "${tmp:-}"' EXIT
+
+    # Generate locally so we can show counts before pushing.
+    python3 "$LIB_DIR/hq-manifest.py" "$VAULT" "$HQ_VAULT_DIRS" > "$tmp"
+
+    msg "$DIM" "pushing" "$HQ_SSH_HOST:$HQ_REMOTE_PATH"
+    ssh "$HQ_SSH_HOST" "cd '$HQ_REMOTE_PATH' && sudo docker compose exec -T app python manage.py import_docs_manifest -" < "$tmp"
+
+    msg "$GREEN" "synced" "vault → HQ"
+}
+
+cmd_doctor() {
+    python3 - "$VAULT" "$HQ_VAULT_DIRS" <<'PY'
+import sys
+from pathlib import Path
+
+vault = Path(sys.argv[1])
+subdirs = [s for s in sys.argv[2].split(":") if s]
+problems = []
+
+for sub in subdirs:
+    root = vault / sub
+    if not root.is_dir():
+        continue
+    for path in sorted(root.rglob("*.md")):
+        if "00 Templates" in path.parts or "Templates" in path.parts:
+            continue
+        if path.name.startswith("_"):
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if not text.lstrip().startswith("---"):
+            problems.append((path, "no frontmatter"))
+            continue
+        if "doc_id:" not in text.split("---", 2)[1]:
+            problems.append((path, "missing doc_id"))
+
+if not problems:
+    print("ok: every indexed doc has frontmatter with a doc_id")
+    sys.exit(0)
+
+print(f"{len(problems)} doc(s) need attention:")
+for p, why in problems:
+    print(f"  - [{why}] {p.relative_to(vault)}")
+sys.exit(1)
+PY
+}
+
+cmd_open() {
+    if command -v open >/dev/null 2>&1; then
+        open "$HQ_URL"
+    else
+        msg "$DIM" "open" "$HQ_URL"
+    fi
+}
+
+cmd_shell() {
+    ssh -t "$HQ_SSH_HOST" "cd '$HQ_REMOTE_PATH' && sudo docker compose exec app python manage.py shell"
+}
+
+cmd_superuser() {
+    ssh -t "$HQ_SSH_HOST" "cd '$HQ_REMOTE_PATH' && sudo docker compose exec app python manage.py createsuperuser"
+}
+
+cmd_export() {
+    local year="${1:-$(date +%Y)}"
+    local fmt="${2:-md}"
+    case "$fmt" in
+        md|markdown) ext="md"; route="year-summary.md" ;;
+        json) ext="json"; route="year-summary.json" ;;
+        *) die "unknown format: $fmt (use md or json)" ;;
+    esac
+    local out="year-summary-$year.$ext"
+    msg "$DIM" "fetching" "$HQ_URL/reports/export/$route?year=$year"
+    # Use curl with the system's resolver — Tailscale + AdGuard handle DNS.
+    # The endpoint requires auth; this expects /tmp/hq-cookies.txt to exist
+    # from a prior browser sign-in via `tailscale + browser`. If absent, run
+    # `hq open` and sign in, then re-export.
+    curl -fsSL --cookie-jar /tmp/hq-cookies.txt --cookie /tmp/hq-cookies.txt \
+        "$HQ_URL/reports/export/$route?year=$year" -o "$out"
+    msg "$GREEN" "wrote" "$out"
+    printf '%s\n' "$out"
+}
+
+case "${1:-}" in
+    ""|-h|--help|help) usage; exit 0 ;;
+    manifest)   shift; cmd_manifest "$@" ;;
+    sync)       shift; cmd_sync "$@" ;;
+    doctor)     shift; cmd_doctor "$@" ;;
+    open)       shift; cmd_open "$@" ;;
+    shell)      shift; cmd_shell "$@" ;;
+    superuser)  shift; cmd_superuser "$@" ;;
+    export)     shift; cmd_export "$@" ;;
+    *) die "unknown command: $1 (try \`hq --help\`)" ;;
+esac
