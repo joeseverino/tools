@@ -30,13 +30,16 @@ tools/
   vault                # vault: sync / status / inbox listing
   backup               # backup: mirror tracked files into $BACKUPS_HOME
   dns-test             # diag: compare DNS resolver latency across paths
+  hq                   # severino-hq: sync vault frontmatter → HQ docs index
   lib/
     common.sh          # shared: colors, msg, die, header, footer, state
     init.sh            # bootstrap sourced by every tool
     key.sh             # SSH passphrase + age-key unlock
+    hq-manifest.py     # severino-hq: extract YAML frontmatter, emit manifest JSON
   config/
     crypt.sh           # default key paths from $KEYS_HOME
     vault.sh           # default vault + inbox paths from $NOTES_HOME
+    hq.sh              # default homelab-server + HQ paths
     backup.sh.example  # template — copy to backup.sh, edit, ignore
   completions/
     _tools-suite       # zsh completion for every tool
@@ -296,6 +299,41 @@ vault inbox      # list pending notes in the inbox
 ```
 
 Defaults in `config/vault.sh`.
+
+---
+
+### hq
+
+Glue between the Obsidian vault and Severino HQ (the private Django ops app at
+`hq.jseverino.com`). Reads YAML frontmatter from every `.md` under
+`01 Projects/`, `02 Infrastructure/`, `03 Runbooks/` and upserts the HQ docs
+index. Frontmatter shape: see `02 Infrastructure/Severino HQ/Frontmatter Schema.md`
+in the vault.
+
+```
+hq sync          # walk vault → push manifest → HQ upserts by doc_id
+hq doctor        # report docs missing or with invalid frontmatter
+hq manifest      # print the manifest JSON to stdout (inspect / pipe)
+hq open          # open https://hq.jseverino.com in the browser
+hq shell         # ssh -t into the HQ Django shell
+hq superuser     # ssh -t and run createsuperuser
+hq export 2026   # download year-summary-2026.md from HQ
+```
+
+Defaults in `config/hq.sh`. The push goes over SSH (`HQ_SSH_HOST=homelab-server`)
+and runs `docker compose exec -T app python manage.py import_docs_manifest -`
+on the HQ container.
+
+#### Adding a new doc
+
+1. Copy `00 Templates/Runbook.md` (or `Infra Doc.md` / `Decision Record.md`) in the vault.
+2. Fill in `doc_id`, `title`, `system`, the rest of the frontmatter.
+3. `hq sync`.
+
+#### Editing an existing doc
+
+Change its frontmatter (e.g. bump `last_reviewed`, flip `status` to `deprecated`),
+save, `hq sync`. The doc_id is the upsert key — no duplicates.
 
 ---
 
