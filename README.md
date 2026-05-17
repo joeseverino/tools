@@ -39,7 +39,7 @@ tools/
   config/
     crypt.sh           # default key paths from $KEYS_HOME
     vault.sh           # default vault + inbox paths from $NOTES_HOME
-    hq.sh              # default homelab-server + HQ paths
+    hq.sh              # HQ_SSH_HOST + HQ_REMOTE_PATH + HQ_URL guards
     backup.sh.example  # template — copy to backup.sh, edit, ignore
   completions/
     _tools-suite       # zsh completion for every tool
@@ -304,25 +304,70 @@ Defaults in `config/vault.sh`.
 
 ### hq
 
-Glue between the Obsidian vault and Severino HQ (the private Django ops app at
-`hq.jseverino.com`). Reads YAML frontmatter from every `.md` under
-`01 Projects/`, `02 Infrastructure/`, `03 Runbooks/` and upserts the HQ docs
-index. Frontmatter shape: see `02 Infrastructure/Severino HQ/Frontmatter Schema.md`
-in the vault.
+Glue between an Obsidian vault and **Severino HQ** — a small private Django
+ops app (sources at [`joeseverino/severino-hq`](https://github.com/joeseverino/severino-hq))
+that I use as a documentation + projects + assets index. `hq` reads YAML
+frontmatter from every `.md` under `01 Projects/`, `02 Infrastructure/`,
+`03 Runbooks/` and upserts the HQ docs index, and wraps the routine
+`ssh + docker compose` calls for managing the deployment.
 
 ```
 hq sync          # walk vault → push manifest → HQ upserts by doc_id
 hq doctor        # report docs missing or with invalid frontmatter
 hq manifest      # print the manifest JSON to stdout (inspect / pipe)
-hq open          # open https://hq.jseverino.com in the browser
+hq create <kind> <slug> [flags]   # upsert a Project or Asset record
+hq deploy        # git pull + docker compose up -d --build on $HQ_SSH_HOST
+hq logs [-f]     # app container logs (default --tail 50)
+hq restart       # docker compose restart app (no rebuild)
+hq open          # open $HQ_URL in the browser
 hq shell         # ssh -t into the HQ Django shell
 hq superuser     # ssh -t and run createsuperuser
 hq export 2026   # download year-summary-2026.md from HQ
 ```
 
-Defaults in `config/hq.sh`. The push goes over SSH (`HQ_SSH_HOST=homelab-server`)
-and runs `docker compose exec -T app python manage.py import_docs_manifest -`
-on the HQ container.
+`hq <subcommand> --help` for full flag lists. Subcommands that touch HQ
+records (`sync`, `create`) are idempotent — re-running upserts by key.
+
+`config/hq.sh` requires three env vars in your `~/.zshrc`:
+
+```bash
+export HQ_SSH_HOST=hq-host                       # entry in ~/.ssh/config
+export HQ_REMOTE_PATH=/opt/apps/severino-hq      # path on the server
+export HQ_URL=https://hq.example.com             # URL where HQ is served
+```
+
+`sync` pipes the manifest through `ssh "$HQ_SSH_HOST"` and runs
+`docker compose exec -T app python manage.py import_docs_manifest -` on the
+target container. `deploy` / `logs` / `restart` wrap the equivalent
+`docker compose` calls; they assume `severino-hq`'s repo layout but are easy
+to adapt if you fork.
+
+#### Example workflow
+
+A typical day touches three surfaces — vault docs, HQ records, and the
+running container — without leaving the terminal:
+
+```bash
+# Edit a runbook in Obsidian, bump last_reviewed in the frontmatter, save.
+hq sync                              # push the change to HQ's docs index
+
+# Add a new project + supporting asset.
+hq create project my-tool \
+    --name "My Tool" --category automation --status active \
+    --repo https://github.com/me/my-tool
+hq create asset my-tool-com --name "my-tool.com" --category domain
+
+# Ship a code change to the Django app.
+cd ~/Projects/severino-hq && git push origin main
+hq deploy                            # pulls + rebuilds on $HQ_SSH_HOST
+
+# Tail logs after deploy. Restart if you only edited the .env on the server.
+hq logs --tail 100
+hq restart
+```
+
+Every subcommand is idempotent (`sync`, `create`, `deploy`) or read-only
+(`logs`, `manifest`, `doctor`), so the whole flow is safe to retry.
 
 #### Adding a new doc
 
