@@ -84,7 +84,7 @@ cmd_sync() {
     python3 "$LIB_DIR/hq-manifest.py" "$VAULT" "$HQ_VAULT_DIRS" > "$tmp"
 
     msg "$DIM" "pushing" "$HQ_SSH_HOST:$HQ_REMOTE_PATH"
-    ssh "$HQ_SSH_HOST" "cd '$HQ_REMOTE_PATH' && sudo docker compose exec -T app python manage.py import_docs_manifest -" < "$tmp"
+    ssh "$HQ_SSH_HOST" "cd '$HQ_REMOTE_PATH' && sudo docker compose exec -T app python manage.py import_docs_manifest --report-orphans -" < "$tmp"
 
     msg "$GREEN" "synced" "vault → HQ"
 }
