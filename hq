@@ -17,8 +17,9 @@ usage() {
     cat <<EOF
 Usage: hq <command> [args]
 
-Severino HQ glue. Reads YAML frontmatter from the vault and keeps the HQ
-docs index + future MCP in sync.
+Severino HQ glue. Reads YAML frontmatter from the vault and upserts the
+HQ docs index. Also wraps the routine ssh + docker compose calls for
+managing the HQ deployment.
 
 Commands:
   manifest             Print the manifest JSON (frontmatter from every doc)
