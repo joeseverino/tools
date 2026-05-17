@@ -31,6 +31,9 @@ HQ_KEYS = {
     "status", "sensitivity", "obsidian_path", "github_path",
     "external_url", "last_reviewed", "notes",
     "related_projects", "related_assets",
+    # Publishing pipeline fields (used by public_article_draft docs to
+    # also upsert a ContentItem row in HQ).
+    "published_at", "content_type", "tags",
 }
 
 
