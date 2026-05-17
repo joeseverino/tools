@@ -16,7 +16,7 @@ jobs:
 
       - name: bash -n on bash scripts
         run: |
-          for f in tools encrypt decrypt vault backup inbox open-age; do
+          for f in tools encrypt decrypt vault backup inbox open-age hq; do
             bash -n "$f"
           done
 
@@ -26,6 +26,6 @@ jobs:
       - name: shellcheck
         run: |
           shellcheck -x \
-            tools encrypt decrypt vault backup inbox open-age \
+            tools encrypt decrypt vault backup inbox open-age hq \
             lib/common.sh lib/init.sh lib/key.sh \
-            config/crypt.sh config/vault.sh config/backup.sh.example
+            config/crypt.sh config/vault.sh config/backup.sh.example config/hq.sh

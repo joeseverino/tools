@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 # hq — sync vault frontmatter to Severino HQ, and a few quality-of-life ops.
+#
+# Every `ssh "$HQ_SSH_HOST" "<remote command>"` call in this file deliberately
+# expands $HQ_REMOTE_PATH on the client side — the remote shell needs the
+# resolved literal path, not the env var. SC2029 flags this pattern as
+# potentially ambiguous; here it's intentional.
+# shellcheck disable=SC2029
+
 set -euo pipefail
 
 source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" hq
@@ -23,7 +30,22 @@ Commands:
   doctor               Report vault docs that are missing or have invalid
                        frontmatter — the gap between vault state and HQ state.
 
-  open                 Open https://hq.jseverino.com (\$HQ_URL) in the browser.
+  create <kind> <slug> [flags]
+                       Create or update a Project or Asset in HQ.
+                       \`hq create project --help\` / \`hq create asset --help\`
+                       for the full flag list. Idempotent (upserts by slug).
+
+  deploy [--no-build]  git pull on $HQ_SSH_HOST and \`docker compose up -d --build\`.
+                       --no-build skips the rebuild (use when only env/data changed,
+                       not for code changes — image must be rebuilt for new code).
+
+  logs [-f] [--tail N] Show app container logs. Default tail is 50.
+                       -f / --follow streams live output until Ctrl-C.
+
+  restart              \`docker compose restart app\` — no rebuild, no migrations.
+                       Use for picking up env changes or clearing stuck state.
+
+  open                 Open \$HQ_URL in the browser.
 
   shell                ssh -t into the HQ Django shell. Handy for poking the ORM.
 
@@ -102,6 +124,129 @@ sys.exit(1)
 PY
 }
 
+cmd_create() {
+    local kind="${1:-}"
+    local mgmt=""
+    case "$kind" in
+        project) shift; mgmt="create_project" ;;
+        asset)   shift; mgmt="create_asset" ;;
+        ""|-h|--help|help)
+            cat <<HELP
+Usage: hq create project <slug> --name "<name>" [flags]
+       hq create asset   <slug> --name "<name>" [flags]
+
+Common Project flags:
+  --name TEXT           (required) Display name
+  --category CHOICE     wordpress_security | cloudflare | dns_email_security |
+                        homelab | vps | tailscale | adguard | networking |
+                        tls_certificates | automation | cybersecurity_labs | other
+  --status CHOICE       idea | active | paused | completed | published | archived
+  --description TEXT
+  --technologies TEXT   Comma-separated
+  --repo URL
+  --url URL             Public-facing URL
+  --notes TEXT
+
+Common Asset flags:
+  --name TEXT           (required) Display name
+  --category CHOICE     networking | server_hardware | software | subscription |
+                        domain | hosting | camera_audio | office | tools |
+                        training | other
+  --status CHOICE       active | retired | sold | returned | replaced
+  --vendor TEXT
+  --purchase-date YYYY-MM-DD
+  --cost DECIMAL
+  --business-use INT    0-100 (default 100)
+  --payment CHOICE      cash | debit | credit | ach | paypal | other
+  --serial TEXT
+  --warranty-date YYYY-MM-DD
+  --notes TEXT
+
+Examples:
+  hq create project my-site --name "My Site" \\
+      --category cloudflare --status published \\
+      --repo https://github.com/you/your-repo \\
+      --url https://example.com
+
+  hq create asset example-com --name "example.com" --category domain
+HELP
+            return 0 ;;
+        *) die "unknown kind: $kind (use 'project' or 'asset')" ;;
+    esac
+
+    [ "$#" -ge 1 ] || die "missing <slug>; try \`hq create $kind --help\`"
+
+    local remote_cmd="cd '$HQ_REMOTE_PATH' && sudo docker compose exec -T app python manage.py $mgmt"
+    local arg
+    for arg in "$@"; do
+        remote_cmd+=" $(printf '%q' "$arg")"
+    done
+
+    msg "$DIM" "hq" "$mgmt $1"
+    ssh "$HQ_SSH_HOST" "$remote_cmd"
+}
+
+cmd_deploy() {
+    local build_flag="--build"
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --no-build) build_flag=""; shift ;;
+            -h|--help)
+                cat <<HELP
+Usage: hq deploy [--no-build]
+
+git pull on $HQ_SSH_HOST then \`docker compose up -d --build\`. The container
+entrypoint reruns migrate + collectstatic on every boot.
+
+  --no-build   Skip the image rebuild. Only safe when no source files
+               changed (e.g. you just edited the .env on the server).
+HELP
+                return 0 ;;
+            *) die "unknown flag: $1 (try \`hq deploy --help\`)" ;;
+        esac
+    done
+
+    msg "$DIM" "deploying" "$HQ_SSH_HOST:$HQ_REMOTE_PATH"
+    ssh "$HQ_SSH_HOST" "cd '$HQ_REMOTE_PATH' && git pull --ff-only && sudo docker compose up -d $build_flag"
+    msg "$GREEN" "deployed" "severino-hq"
+}
+
+cmd_logs() {
+    local tail="50"
+    local follow=""
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -f|--follow) follow="-f"; shift ;;
+            --tail) tail="${2:?--tail needs a number}"; shift 2 ;;
+            --tail=*) tail="${1#--tail=}"; shift ;;
+            -h|--help)
+                cat <<HELP
+Usage: hq logs [-f|--follow] [--tail N]
+
+Show the severino-hq app container logs.
+
+  -f, --follow   Stream live until Ctrl-C.
+  --tail N       Number of lines to show (default 50). Ignored with --follow
+                 — Docker's follow streams from "now" by design.
+HELP
+                return 0 ;;
+            *) die "unknown flag: $1 (try \`hq logs --help\`)" ;;
+        esac
+    done
+
+    if [ -n "$follow" ]; then
+        ssh -t "$HQ_SSH_HOST" "cd '$HQ_REMOTE_PATH' && sudo docker compose logs app -f"
+    else
+        ssh "$HQ_SSH_HOST" "cd '$HQ_REMOTE_PATH' && sudo docker compose logs app --tail $tail"
+    fi
+}
+
+cmd_restart() {
+    msg "$DIM" "restarting" "severino-hq"
+    ssh "$HQ_SSH_HOST" "cd '$HQ_REMOTE_PATH' && sudo docker compose restart app"
+    msg "$GREEN" "restarted" "severino-hq"
+}
+
 cmd_open() {
     if command -v open >/dev/null 2>&1; then
         open "$HQ_URL"
@@ -143,6 +288,10 @@ case "${1:-}" in
     manifest)   shift; cmd_manifest "$@" ;;
     sync)       shift; cmd_sync "$@" ;;
     doctor)     shift; cmd_doctor "$@" ;;
+    create)     shift; cmd_create "$@" ;;
+    deploy)     shift; cmd_deploy "$@" ;;
+    logs)       shift; cmd_logs "$@" ;;
+    restart)    shift; cmd_restart "$@" ;;
     open)       shift; cmd_open "$@" ;;
     shell)      shift; cmd_shell "$@" ;;
     superuser)  shift; cmd_superuser "$@" ;;
