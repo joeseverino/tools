@@ -5,6 +5,12 @@
 # Personal backup list — see config/backup.sh.example for the template.
 config/backup.sh
 
+# Per-site wp-static configs — see config/wp-static.sh.example for the template.
+config/wp-static.sh
+
+# Optional local site workflow overrides — see config/site.sh.example.
+config/site.sh
+
 # Automator .app bundles are user-specific and contain compiled stubs +
 # localization data. Adopters should build their own — see README.
 apps/

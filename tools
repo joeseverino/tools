@@ -17,7 +17,7 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" ""
 [[ -n "${KEYS_HOME-}"    ]] && source "$TOOLS_HOME/config/crypt.sh"
 source "$TOOLS_HOME/lib/key.sh"
 
-TOOL_NAMES=(encrypt decrypt inbox vault backup tools open-age dns-test)
+TOOL_NAMES=(encrypt decrypt inbox vault backup tools open-age dns-test site)
 INSTALL_DIR="${TOOLS_INSTALL_DIR:-$HOME/.local/bin}"
 
 usage() {
