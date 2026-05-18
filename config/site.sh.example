@@ -1,0 +1,10 @@
+# shellcheck shell=bash
+# site.sh — optional local overrides for the public Astro site workflow.
+#
+# Copy to config/site.sh and edit if your layout differs from the defaults.
+# The real config/site.sh is gitignored.
+
+CODE_HOME="${CODE_HOME:-$HOME/Documents/Code}"
+SITE_HOME="${SITE_HOME:-$CODE_HOME/Projects/jseverino-site}"
+SITE_DEV_HOST="${SITE_DEV_HOST:-127.0.0.1}"
+SITE_DEV_PORT="${SITE_DEV_PORT:-4321}"

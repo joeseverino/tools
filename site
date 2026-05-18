@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# site <command> — public jseverino.com Astro site workflow
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" ""
+
+CODE_HOME="${CODE_HOME:-$HOME/Documents/Code}"
+SITE_HOME="${SITE_HOME:-$CODE_HOME/Projects/jseverino-site}"
+SITE_DEV_HOST="${SITE_DEV_HOST:-127.0.0.1}"
+SITE_DEV_PORT="${SITE_DEV_PORT:-4321}"
+
+if [[ -f "$TOOLS_HOME/config/site.sh" ]]; then
+    # shellcheck source=config/site.sh
+    source "$TOOLS_HOME/config/site.sh"
+fi
+
+usage() {
+    cat <<EOF
+Usage: site <command>
+
+Commands:
+  status        Show repo location, git state, and build-output state
+  sync          Sync public pages/writeups from the vault into the site repo
+  check         Run Astro diagnostics
+  build         Run the full Astro build
+  publish       Clean, sync, check, build, and audit assets
+  dev           Start the local Astro dev server
+  open          Open the local dev URL in the browser
+  -h, --help    Show this help
+
+Environment:
+  CODE_HOME       Defaults to ~/Documents/Code
+  SITE_HOME       Defaults to \$CODE_HOME/Projects/jseverino-site
+  SITE_DEV_HOST   Defaults to 127.0.0.1
+  SITE_DEV_PORT   Defaults to 4321
+EOF
+}
+
+require_site() {
+    [[ -d "$SITE_HOME" ]] || die "error" "site repo not found: $SITE_HOME"
+    [[ -f "$SITE_HOME/package.json" ]] || die "error" "package.json not found in $SITE_HOME"
+}
+
+run_npm() {
+    require_site
+    msg "$DIM" "site" "$SITE_HOME"
+    (cd "$SITE_HOME" && npm run "$@")
+}
+
+cmd_status() {
+    require_site
+    echo
+    msg "$RESET" "site" "$SITE_HOME"
+
+    if [[ -d "$SITE_HOME/.git" ]]; then
+        local tree remote tree_color="$GREEN" remote_color="$GREEN"
+        tree=$(vault_tree "$SITE_HOME")
+        remote=$(vault_remote "$SITE_HOME")
+        [[ "$tree" != "clean" ]] && tree_color="$YELLOW"
+        [[ "$remote" != "in sync" ]] && remote_color="$YELLOW"
+        msg "$RESET" "git" "${tree_color}${tree}${RESET}, ${remote_color}${remote}${RESET}"
+    else
+        msg "$YELLOW" "git" "not initialized"
+    fi
+
+    if [[ -d "$SITE_HOME/dist" ]]; then
+        msg "$GREEN" "dist" "present"
+    else
+        msg "$DIM" "dist" "not built"
+    fi
+
+    if [[ -d "$SITE_HOME/src/content" ]]; then
+        msg "$GREEN" "content" "synced snapshot present"
+    else
+        msg "$YELLOW" "content" "missing"
+    fi
+    echo
+}
+
+cmd_dev() {
+    require_site
+    msg "$DIM" "site" "$SITE_HOME"
+    (cd "$SITE_HOME" && npm run dev -- --host "$SITE_DEV_HOST" --port "$SITE_DEV_PORT")
+}
+
+cmd_open() {
+    require_site
+    open "http://$SITE_DEV_HOST:$SITE_DEV_PORT/"
+}
+
+case "${1:-}" in
+    status)       shift; cmd_status "$@" ;;
+    sync)         shift; run_npm sync:content "$@" ;;
+    check)        shift; run_npm check "$@" ;;
+    build)        shift; run_npm build "$@" ;;
+    publish)      shift; run_npm publish:check "$@" ;;
+    dev)          shift; cmd_dev "$@" ;;
+    open)         shift; cmd_open "$@" ;;
+    -h|--help|"") usage; exit 0 ;;
+    *)            die "usage" "unknown command: $1 (try -h)" 2 ;;
+esac

@@ -1,4 +1,4 @@
-#compdef tools vault encrypt decrypt inbox backup open-age dns-test
+#compdef tools vault encrypt decrypt inbox backup open-age dns-test site
 # Completion for the personal CLI tools.
 #
 # Install by adding to ~/.zshrc, BEFORE `compinit`:
@@ -55,6 +55,25 @@ _vault() {
         'sync:git pull --rebase, then git push'
         'status:working tree, inbox count, remote sync state'
         'inbox:list pending notes in the inbox'
+    )
+    _arguments -C \
+        '(-h --help)'{-h,--help}'[show help]' \
+        '1: :->cmd'
+    case $state in
+        cmd) _describe 'subcommand' subs ;;
+    esac
+}
+
+_site() {
+    local -a subs
+    subs=(
+        'status:show site repo, git, dist, and content state'
+        'sync:sync public pages/writeups from the vault'
+        'check:run Astro diagnostics'
+        'build:run the Astro production build'
+        'publish:clean, sync, check, build, and audit assets'
+        'dev:start the local Astro dev server'
+        'open:open the local dev URL'
     )
     _arguments -C \
         '(-h --help)'{-h,--help}'[show help]' \
@@ -122,4 +141,5 @@ case "$service" in
     backup)   _backup   "$@" ;;
     open-age) _open_age "$@" ;;
     dns-test) _dns_test "$@" ;;
+    site)     _site     "$@" ;;
 esac
