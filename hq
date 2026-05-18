@@ -97,13 +97,17 @@ from pathlib import Path
 vault = Path(sys.argv[1])
 subdirs = [s for s in sys.argv[2].split(":") if s]
 problems = []
+skip_dirs = {".git", ".obsidian", "00 Templates", "Templates", "source"}
+
+def should_skip(path: Path) -> bool:
+    return any(part in skip_dirs for part in path.parts)
 
 for sub in subdirs:
     root = vault / sub
     if not root.is_dir():
         continue
     for path in sorted(root.rglob("*.md")):
-        if "00 Templates" in path.parts or "Templates" in path.parts:
+        if should_skip(path):
             continue
         if path.name.startswith("_"):
             continue

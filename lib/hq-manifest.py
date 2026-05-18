@@ -36,6 +36,18 @@ HQ_KEYS = {
     "published_at", "content_type", "tags",
 }
 
+SKIP_DIR_NAMES = {
+    ".git",
+    ".obsidian",
+    "00 Templates",
+    "Templates",
+    "source",
+}
+
+
+def should_skip_path(path: Path) -> bool:
+    return any(part in SKIP_DIR_NAMES for part in path.parts)
+
 
 def _parse_yaml_block(block: str) -> dict:
     """Parse a constrained YAML subset (key: value, lists)."""
@@ -154,8 +166,8 @@ def main(argv: list[str]) -> int:
             print(f"warn: {sub} not under vault, skipping", file=sys.stderr)
             continue
         for path in sorted(root.rglob("*.md")):
-            # Skip Obsidian template files and "_*" hidden files
-            if "00 Templates" in path.parts or "Templates" in path.parts:
+            # Skip templates, private working material, and "_*" hidden files.
+            if should_skip_path(path):
                 continue
             if path.name.startswith("_"):
                 continue
