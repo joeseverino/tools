@@ -8,6 +8,11 @@
 # Vault root we walk for frontmatter.
 : "${VAULT:=$NOTES_HOME}"
 
+# Local checkout of the HQ app. Used by `hq ship` to commit/push/deploy a
+# code correction from one command.
+: "${CODE_HOME:=$HOME/Documents/Code}"
+: "${HQ_LOCAL_PATH:=$CODE_HOME/Projects/severino-hq}"
+
 # Folders under $VAULT we recurse into for doc indexing. Anything outside is
 # ignored — we don't want to vacuum personal notes into HQ.
 : "${HQ_VAULT_DIRS:=01 Projects:02 Infrastructure:03 Runbooks:05 Writeups:06 Pages}"

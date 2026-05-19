@@ -41,6 +41,11 @@ Commands:
                        --no-build skips the rebuild (use when only env/data changed,
                        not for code changes — image must be rebuilt for new code).
 
+  ship -m MESSAGE [--no-sync]
+                       Commit + push local HQ changes, deploy, run remote
+                       Django checks, then hq sync. The common "small HQ fix"
+                       path in one command.
+
   logs [-f] [--tail N] Show app container logs. Default tail is 50.
                        -f / --follow streams live output until Ctrl-C.
 
@@ -62,6 +67,7 @@ Env (read from ~/.zshrc unless overridden per-invocation):
   HQ_VAULT_DIRS        Colon-separated subdirs to index (= $HQ_VAULT_DIRS)
   HQ_SSH_HOST          SSH alias of the HQ server (= $HQ_SSH_HOST)
   HQ_REMOTE_PATH       HQ checkout path on the server (= $HQ_REMOTE_PATH)
+  HQ_LOCAL_PATH        Local HQ checkout (= $HQ_LOCAL_PATH)
   HQ_URL               Public URL of HQ (= $HQ_URL)
 
 Examples:
@@ -242,6 +248,88 @@ HELP
     msg "$GREEN" "deployed" "severino-hq"
 }
 
+cmd_ship() {
+    local message=""
+    local no_sync=""
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -m|--message) message="${2:?--message needs text}"; shift 2 ;;
+            --message=*) message="${1#--message=}"; shift ;;
+            --no-sync) no_sync="1"; shift ;;
+            -h|--help)
+                cat <<HELP
+Usage: hq ship -m "commit message" [--no-sync]
+
+One-command path for small HQ corrections:
+
+  1. Run lightweight local Python syntax checks.
+  2. Commit tracked/known HQ repo changes.
+  3. Push the HQ repo.
+  4. Deploy HQ on $HQ_SSH_HOST.
+  5. Run remote \`manage.py check\`.
+  6. Run \`hq sync\` unless --no-sync is set.
+
+Only files already tracked by git plus new files under known app directories are
+staged. Local scratch like .claude/ is ignored.
+
+  -m, --message TEXT   Commit message for HQ repo changes.
+  --no-sync            Skip the final vault → HQ manifest sync.
+HELP
+                return 0 ;;
+            *) die "unknown flag: $1 (try \`hq ship --help\`)" ;;
+        esac
+    done
+
+    [[ -n "$message" ]] || die "usage" "missing -m \"commit message\""
+    [[ -d "$HQ_LOCAL_PATH/.git" ]] || die "error" "HQ_LOCAL_PATH is not a git repo: $HQ_LOCAL_PATH"
+
+    msg "$DIM" "checking" "$HQ_LOCAL_PATH"
+    (
+        cd "$HQ_LOCAL_PATH"
+        git ls-files '*.py' | xargs python3 -m py_compile
+    )
+
+    local before
+    before="$(git -C "$HQ_LOCAL_PATH" status --porcelain)"
+    if [[ -n "$before" ]]; then
+        msg "$DIM" "staging" "tracked changes + known HQ app files"
+        (
+            cd "$HQ_LOCAL_PATH"
+            git add -u
+            git add \
+                assets content core docs docs_index expenses projects receipts reports \
+                static templates \
+                2>/dev/null || true
+        )
+
+        if git -C "$HQ_LOCAL_PATH" diff --cached --quiet; then
+            msg "$YELLOW" "skipped" "no committable HQ changes staged"
+        else
+            git -C "$HQ_LOCAL_PATH" commit -m "$message"
+            git -C "$HQ_LOCAL_PATH" push
+        fi
+    else
+        msg "$GREEN" "clean" "no local HQ changes to commit"
+    fi
+
+    cmd_deploy
+
+    msg "$DIM" "checking" "remote Django system check"
+    ssh "$HQ_SSH_HOST" "cd '$HQ_REMOTE_PATH' && sudo docker compose exec -T app python manage.py check"
+
+    if [[ -z "$no_sync" ]]; then
+        cmd_sync
+    else
+        msg "$YELLOW" "sync" "skipped (--no-sync)"
+    fi
+
+    if [[ -n "$(git -C "$VAULT" status --porcelain 2>/dev/null || true)" ]]; then
+        msg "$YELLOW" "vault" "has uncommitted changes; run vault status/sync when ready"
+    fi
+
+    msg "$GREEN" "shipped" "HQ correction complete"
+}
+
 cmd_logs() {
     local tail="50"
     local follow=""
@@ -321,6 +409,7 @@ case "${1:-}" in
     doctor)     shift; cmd_doctor "$@" ;;
     create)     shift; cmd_create "$@" ;;
     deploy)     shift; cmd_deploy "$@" ;;
+    ship)       shift; cmd_ship "$@" ;;
     logs)       shift; cmd_logs "$@" ;;
     restart)    shift; cmd_restart "$@" ;;
     open)       shift; cmd_open "$@" ;;
