@@ -34,6 +34,8 @@ HQ_KEYS = {
     # Publishing pipeline fields (used by public_article_draft docs to
     # also upsert a ContentItem row in HQ).
     "published_at", "content_type", "tags",
+    # Slim writeup/page contract (05 Writeups, 06 Pages).
+    "published",
 }
 
 SKIP_DIR_NAMES = {
@@ -43,6 +45,54 @@ SKIP_DIR_NAMES = {
     "Templates",
     "source",
 }
+
+# Slug -> HQ field synthesis for slim writeup/page contracts. Used when a
+# vault file lives under 05 Writeups or 06 Pages and has no explicit
+# doc_id (those folders use the simplified site-CMS frontmatter, not the
+# full Severino HQ schema).
+SLIM_WRITEUP_DIR = "05 Writeups"
+SLIM_PAGE_DIR = "06 Pages"
+
+
+def _synthesize_slim_entry(
+    fm: dict, relative_path: Path, *, kind: str
+) -> dict:
+    """Build an HQ-shaped entry from a slim writeup/page frontmatter block."""
+    slug = relative_path.parts[1]  # "05 Writeups/<slug>/index.md" -> "<slug>"
+    published = bool(fm.get("published"))
+
+    if kind == "writeup":
+        doc_id = f"writeup-{slug}"
+        content_type = "portfolio_article"
+        external_url = f"https://jseverino.com/portfolio/{slug}/"
+    else:  # page
+        doc_id = f"page-{slug}"
+        content_type = "page"
+        page_path = fm.get("path") or f"/{slug}/"
+        external_url = f"https://jseverino.com{page_path}"
+
+    entry = {
+        "doc_id": doc_id,
+        "title": fm.get("title") or slug,
+        "doc_type": "public_article_draft",
+        "system": "jseverino.com",
+        "environment": "cloudflare",
+        "status": "active" if published else "draft",
+        "sensitivity": "public" if published else "internal",
+        "content_type": content_type,
+        "published": published,
+    }
+    if published:
+        entry["external_url"] = external_url
+    if fm.get("published_at"):
+        entry["published_at"] = fm["published_at"]
+    if fm.get("last_reviewed"):
+        entry["last_reviewed"] = fm["last_reviewed"]
+    if fm.get("related_projects"):
+        entry["related_projects"] = fm["related_projects"]
+    if fm.get("related_assets"):
+        entry["related_assets"] = fm["related_assets"]
+    return entry
 
 
 def should_skip_path(path: Path) -> bool:
@@ -175,13 +225,24 @@ def main(argv: list[str]) -> int:
             if fm is None:
                 missing_frontmatter.append(path)
                 continue
-            if not fm.get("doc_id"):
-                missing_frontmatter.append(path)
-                continue
 
-            # Pull only the fields HQ knows about; also surface `path` for context.
-            entry: dict = {k: fm[k] for k in fm if k in HQ_KEYS}
-            entry["path"] = str(path.relative_to(vault))
+            relative_path = path.relative_to(vault)
+            top = relative_path.parts[0] if relative_path.parts else ""
+
+            if not fm.get("doc_id"):
+                # Slim writeup/page contracts synthesize their HQ shape from path.
+                if top == SLIM_WRITEUP_DIR and path.name == "index.md":
+                    entry = _synthesize_slim_entry(fm, relative_path, kind="writeup")
+                elif top == SLIM_PAGE_DIR and path.name == "index.md":
+                    entry = _synthesize_slim_entry(fm, relative_path, kind="page")
+                else:
+                    missing_frontmatter.append(path)
+                    continue
+            else:
+                # Pull only the fields HQ knows about.
+                entry = {k: fm[k] for k in fm if k in HQ_KEYS}
+
+            entry["path"] = str(relative_path)
 
             dup = seen_ids.get(entry["doc_id"])
             if dup:

@@ -10,7 +10,7 @@
 
 # Folders under $VAULT we recurse into for doc indexing. Anything outside is
 # ignored — we don't want to vacuum personal notes into HQ.
-: "${HQ_VAULT_DIRS:=01 Projects:02 Infrastructure:03 Runbooks:05 Writeups}"
+: "${HQ_VAULT_DIRS:=01 Projects:02 Infrastructure:03 Runbooks:05 Writeups:06 Pages}"
 
 # SSH alias of the server where Severino HQ runs. Set in your ~/.zshrc to
 # match the entry in your ~/.ssh/config — e.g. `export HQ_SSH_HOST=hq-host`.
