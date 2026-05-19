@@ -5,7 +5,7 @@ set -euo pipefail
 source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" ""
 
 CODE_HOME="${CODE_HOME:-$HOME/Documents/Code}"
-SITE_HOME="${SITE_HOME:-$CODE_HOME/Projects/jseverino-site}"
+SITE_HOME="${SITE_HOME:-$CODE_HOME/Projects/jseverino.com}"
 NOTES_HOME="${NOTES_HOME:-$CODE_HOME/Severino Labs}"
 SITE_DEV_HOST="${SITE_DEV_HOST:-127.0.0.1}"
 SITE_DEV_PORT="${SITE_DEV_PORT:-4321}"
@@ -37,7 +37,7 @@ Commands:
 
 Environment:
   CODE_HOME       Defaults to ~/Documents/Code
-  SITE_HOME       Defaults to \$CODE_HOME/Projects/jseverino-site
+  SITE_HOME       Defaults to \$CODE_HOME/Projects/jseverino.com
   NOTES_HOME      Defaults to \$CODE_HOME/Severino Labs (vault root)
   SITE_DEV_HOST   Defaults to 127.0.0.1
   SITE_DEV_PORT   Defaults to 4321
