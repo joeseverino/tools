@@ -25,8 +25,9 @@ Commands:
   manifest             Print the manifest JSON (frontmatter from every doc)
                        to stdout. Useful for inspection or piping elsewhere.
 
-  sync                 Pipe the manifest into HQ's manage.py import_docs_manifest
+  sync [--prune]       Pipe the manifest into HQ's manage.py import_docs_manifest
                        on $HQ_SSH_HOST. Upserts by doc_id; safe to re-run.
+                       --prune deletes orphan rows (after a doc_id rename).
 
   doctor               Report vault docs that are missing or have invalid
                        frontmatter — the gap between vault state and HQ state.
@@ -76,6 +77,31 @@ cmd_manifest() {
 }
 
 cmd_sync() {
+    local extra_flags=""
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --prune) extra_flags="$extra_flags --prune"; shift ;;
+            --no-update) extra_flags="$extra_flags --no-update"; shift ;;
+            -h|--help)
+                cat <<HELP
+Usage: hq sync [--prune] [--no-update]
+
+Walk the vault, build a manifest, push it to HQ. Upserts DocumentationRecord
+rows by doc_id (and ContentItem rows for site CMS docs by slug). Re-runs
+are idempotent.
+
+  --prune       Delete orphan DocumentationRecord rows (doc_ids in HQ but
+                not in the current manifest). Use after a doc_id rename or
+                a doc retirement. ContentItems are not touched.
+  --no-update   Only create new records; never update existing ones.
+
+Without flags, sync reports orphans but doesn't delete them.
+HELP
+                return 0 ;;
+            *) die "unknown flag: $1 (try \`hq sync --help\`)" ;;
+        esac
+    done
+
     local tmp
     tmp="$(mktemp -t hq-manifest.XXXXXX.json)"
     trap 'rm -f "${tmp:-}"' EXIT
@@ -84,7 +110,7 @@ cmd_sync() {
     python3 "$LIB_DIR/hq-manifest.py" "$VAULT" "$HQ_VAULT_DIRS" > "$tmp"
 
     msg "$DIM" "pushing" "$HQ_SSH_HOST:$HQ_REMOTE_PATH"
-    ssh "$HQ_SSH_HOST" "cd '$HQ_REMOTE_PATH' && sudo docker compose exec -T app python manage.py import_docs_manifest --report-orphans -" < "$tmp"
+    ssh "$HQ_SSH_HOST" "cd '$HQ_REMOTE_PATH' && sudo docker compose exec -T app python manage.py import_docs_manifest --report-orphans$extra_flags -" < "$tmp"
 
     msg "$GREEN" "synced" "vault → HQ"
 }
