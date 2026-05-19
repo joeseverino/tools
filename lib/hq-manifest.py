@@ -35,7 +35,7 @@ HQ_KEYS = {
     # also upsert a ContentItem row in HQ).
     "published_at", "content_type", "tags",
     # Slim writeup/page contract (05 Writeups, 06 Pages).
-    "published",
+    "description", "excerpt", "published", "technologies", "topic",
 }
 
 SKIP_DIR_NAMES = {
@@ -82,6 +82,10 @@ def _synthesize_slim_entry(
         "content_type": content_type,
         "published": published,
     }
+    if fm.get("description") or fm.get("excerpt"):
+        entry["topic"] = fm.get("description") or fm.get("excerpt")
+    if fm.get("tags") or fm.get("technologies"):
+        entry["tags"] = fm.get("tags") or fm.get("technologies")
     if published:
         entry["external_url"] = external_url
     if fm.get("published_at"):
@@ -104,7 +108,12 @@ def _parse_yaml_block(block: str) -> dict:
     data: dict = {}
     current_list_key: str | None = None
 
-    for raw in block.splitlines():
+    lines = block.splitlines()
+    i = 0
+    while i < len(lines):
+        raw = lines[i]
+        i += 1
+
         if not raw.strip() or raw.lstrip().startswith("#"):
             current_list_key = None
             continue
@@ -122,6 +131,21 @@ def _parse_yaml_block(block: str) -> dict:
             continue
 
         key, value = m.group(1), m.group(2).strip()
+        if value in {">", ">-", ">+", "|", "|-", "|+"}:
+            block_lines: list[str] = []
+            while i < len(lines):
+                peek = lines[i]
+                if re.match(r"^[A-Za-z_][A-Za-z0-9_]*\s*:", peek):
+                    break
+                block_lines.append(peek.strip())
+                i += 1
+            if value.startswith("|"):
+                data[key] = "\n".join(block_lines).strip()
+            else:
+                data[key] = " ".join(line for line in block_lines if line).strip()
+            current_list_key = None
+            continue
+
         if value == "":
             current_list_key = key
             data[key] = []
