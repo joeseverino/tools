@@ -400,7 +400,7 @@ site build               # full Astro build
 site publish             # clean + sync + check + build + audit
 site publish-all         # hq sync + publish + auto-commit + push — one command
 site new-writeup <slug>  # scaffold a vault writeup from the template
-site dev                 # local Astro dev server
+site dev [--drafts]      # local Astro dev server (--drafts: include drafts)
 site open                # open the local dev URL
 site og                  # regenerate the Open Graph social card
 ```
