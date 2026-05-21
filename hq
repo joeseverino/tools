@@ -85,9 +85,10 @@ cmd_manifest() {
 
 cmd_sync() {
     local extra_flags=""
+    local prune="0"
     while [ "$#" -gt 0 ]; do
         case "$1" in
-            --prune) extra_flags="$extra_flags --prune"; shift ;;
+            --prune) extra_flags="$extra_flags --prune"; prune="1"; shift ;;
             --no-update) extra_flags="$extra_flags --no-update"; shift ;;
             -h|--help)
                 cat <<HELP
@@ -114,13 +115,73 @@ HELP
     tmp="$(mktemp -t hq-manifest.XXXXXX.json)"
     trap 'rm -f "${tmp:-}"' EXIT
 
-    # Generate locally so we can show counts before pushing.
-    python3 "$LIB_DIR/hq-manifest.py" "$VAULT" "$HQ_VAULT_DIRS" > "$tmp"
+    python3 "$LIB_DIR/hq-manifest.py" "$VAULT" "$HQ_VAULT_DIRS" > "$tmp" 2>/dev/null
 
-    msg "$DIM" "pushing" "$HQ_SSH_HOST:$HQ_REMOTE_PATH"
-    ssh "$HQ_SSH_HOST" "cd '$HQ_REMOTE_PATH' && sudo docker compose exec -T app python manage.py import_docs_manifest --report-orphans$extra_flags -" < "$tmp"
+    msg "$DIM" "sync" "vault → HQ"
+    local stats_json
+    stats_json="$(
+        ssh "$HQ_SSH_HOST" \
+            "cd '$HQ_REMOTE_PATH' && sudo docker compose exec -T app python manage.py import_docs_manifest --json --report-orphans$extra_flags -" \
+            < "$tmp"
+    )"
 
-    msg "$GREEN" "synced" "vault → HQ"
+    python3 - "$tmp" "$stats_json" "$prune" <<'PY'
+import json
+import sys
+
+manifest_path, raw_stats, prune_flag = sys.argv[1], sys.argv[2], sys.argv[3]
+manifest = json.load(open(manifest_path, encoding="utf-8"))
+stats = json.loads(raw_stats)
+prune = prune_flag == "1"
+
+created = stats.get("created", 0)
+updated = stats.get("updated", 0)
+doc_pruned = stats.get("orphans_pruned", 0)
+content_synced = stats.get("content_items_synced", 0)
+content_pruned = stats.get("content_items_pruned", 0)
+missing = stats.get("missing_relations", 0)
+orphans = stats.get("orphans") or []
+
+print(f"Docs      {len(manifest)} indexed")
+
+changes = []
+if created:
+    changes.append(f"{created} created")
+if updated:
+    changes.append(f"{updated} updated")
+if doc_pruned:
+    changes.append(f"{doc_pruned} removed")
+print(f"Changes   {', '.join(changes) if changes else 'none'}")
+
+if missing:
+    print(f"Relations {missing} missing")
+    for item in stats.get("missing_relations_detail", [])[:8]:
+        print(f"          {item['doc_id']} → missing {item['kind']} {item['slug']}")
+else:
+    print("Relations ok")
+
+content = []
+if content_synced:
+    content.append(f"{content_synced} mirrored")
+if content_pruned:
+    content.append(f"{content_pruned} stale removed")
+print(f"Content   {', '.join(content) if content else 'none'}")
+
+if orphans:
+    if prune:
+        print(f"Cleanup   pruned {len(orphans)} orphan doc row(s)")
+    else:
+        print(f"Cleanup   {len(orphans)} orphan doc row(s); run `hq sync --prune`")
+        for doc_id in orphans[:8]:
+            print(f"          {doc_id}")
+else:
+    print("Cleanup   no orphans")
+
+if missing or (orphans and not prune):
+    print("Done      synced with cleanup needed")
+else:
+    print("Done      HQ is in sync")
+PY
 }
 
 cmd_doctor() {
