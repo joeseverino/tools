@@ -53,7 +53,7 @@ require_site() {
 run_npm() {
     require_site
     msg "$DIM" "site" "$SITE_HOME"
-    (cd "$SITE_HOME" && npm run "$@")
+    (cd "$SITE_HOME" && npm run -s "$@")
 }
 
 cmd_status() {
@@ -208,14 +208,14 @@ HELP
     hq sync
 
     msg "$DIM" "step 2/3" "site publish"
-    (cd "$SITE_HOME" && npm run publish:check)
+    (cd "$SITE_HOME" && npm run -s publish:check)
 
     if [[ -n "$skip_push" ]]; then
         msg "$YELLOW" "step 3/3" "skipped (--no-push). Inspect with \`site status\` and push manually."
         return 0
     fi
 
-    msg "$DIM" "step 3/3" "commit + push (site repo)"
+    msg "$DIM" "step 3/3" "commit + push if content changed (site repo)"
     (
         cd "$SITE_HOME"
 
@@ -223,7 +223,11 @@ HELP
         git add src/content public/assets
 
         if git diff --cached --quiet; then
-            msg "$DIM" "commit" "no content changes — pushing current HEAD"
+            if ! git diff --quiet; then
+                msg "$YELLOW" "note" "site repo has uncommitted non-content changes (left for you)"
+            fi
+            msg "$DIM" "skip" "no content changes — no commit or push"
+            return 0
         else
             # Classify each staged content change by the git status of its
             # index file: Added → published (new), Modified → edited,
@@ -319,8 +323,8 @@ HELP
         fi
 
         git push
+        msg "$GREEN" "shipped" "Cloudflare Pages will rebuild from the new HEAD"
     )
-    msg "$GREEN" "shipped" "Cloudflare Pages will rebuild from the new HEAD"
 }
 
 case "${1:-}" in
