@@ -25,14 +25,15 @@ Commands:
   check               Run Astro diagnostics
   build               Run the full Astro build
   publish             Clean, sync, check, build, and audit assets
-  publish-all         hq sync + site publish + push site repo. The full
-                      vault-to-live-edge orchestrator.
+  publish-all         hq sync + site publish + auto-commit + push. The full
+                      vault-to-live-edge orchestrator, one command.
   new-writeup <slug>  Scaffold a new vault writeup folder from the template.
                       Creates 05 Writeups/<slug>/ with index.md and images/.
                       Starts as published: false so it stays out of the build
                       until you flip it.
   dev                 Start the local Astro dev server
   open                Open the local dev URL in the browser
+  og                  Regenerate the Open Graph social card (public/assets/og/)
   -h, --help          Show this help
 
 Environment:
@@ -153,13 +154,19 @@ The full vault-to-live-edge orchestrator. Runs:
 
   1. hq sync                 vault frontmatter → HQ
   2. site publish            clean + sync + astro check + build + audit
-  3. git push (site repo)    triggers the Cloudflare Pages build
+  3. commit + push           auto-commit the synced snapshot, then push to
+                             trigger the Cloudflare Pages build
 
-Cloudflare picks up the push and rebuilds within ~30s. Use this for the
-common case "I edited a writeup or page; ship it."
+Cloudflare picks up the push and rebuilds within ~30s. This is the whole
+vault-to-live flow in one command — the common case "I edited a writeup or
+page; ship it."
 
-  --no-push   Stop after the local build. Useful when you want to inspect
-              the diff before pushing.
+Only the generated snapshot (src/content, public/assets) is committed, as
+"content: publish <slug>". Code or config edits are left for you to commit
+deliberately.
+
+  --no-push   Stop after the local build — no commit, no push. Use it to
+              inspect the diff first.
 
 Drafts (published: false) are kept in the vault, surface in HQ as Draft,
 and are NOT pushed to the site repo.
@@ -183,13 +190,45 @@ HELP
         return 0
     fi
 
-    msg "$DIM" "step 3/3" "git push (site repo)"
-    if ! (cd "$SITE_HOME" && git diff --quiet && git diff --cached --quiet); then
-        msg "$YELLOW" "uncommitted" "site repo has local changes — commit them before publish-all completes"
-        (cd "$SITE_HOME" && git status --short)
-        die "error" "refusing to push with uncommitted changes; commit first or use --no-push"
-    fi
-    (cd "$SITE_HOME" && git push)
+    msg "$DIM" "step 3/3" "commit + push (site repo)"
+    (
+        cd "$SITE_HOME"
+
+        # Stage only the generated snapshot — never sweep up code/config edits.
+        git add src/content public/assets
+
+        if git diff --cached --quiet; then
+            msg "$DIM" "commit" "no content changes — pushing current HEAD"
+        else
+            slugs="$(git diff --cached --name-only \
+                | sed -n -E \
+                    -e 's#^src/content/writeups/([^/]+)/.*#\1#p' \
+                    -e 's#^src/content/pages/([^/]+)\.md$#\1#p' \
+                    -e 's#^public/assets/writeups/([^/]+)/.*#\1#p' \
+                    -e 's#^public/assets/pages/([^/]+)/.*#\1#p' \
+                | sort -u)"
+            slug_count="$(printf '%s\n' "$slugs" | grep -c . || true)"
+
+            if [[ "$slug_count" -eq 1 ]]; then
+                commit_msg="content: publish $slugs"
+            elif [[ "$slug_count" -gt 1 ]]; then
+                commit_msg="content: publish vault snapshot ($slug_count items)"
+            else
+                commit_msg="content: publish vault snapshot"
+            fi
+
+            git commit -q -m "$commit_msg" -- src/content public/assets
+            msg "$GREEN" "commit" "$commit_msg"
+        fi
+
+        # Code or config edits stay yours to commit deliberately — they are
+        # not folded into the content commit and do not block this push.
+        if ! git diff --quiet; then
+            msg "$YELLOW" "note" "site repo has uncommitted non-content changes (left for you)"
+        fi
+
+        git push
+    )
     msg "$GREEN" "shipped" "Cloudflare Pages will rebuild from the new HEAD"
 }
 
@@ -203,6 +242,7 @@ case "${1:-}" in
     new-writeup)    shift; cmd_new_writeup "$@" ;;
     dev)            shift; cmd_dev "$@" ;;
     open)           shift; cmd_open "$@" ;;
+    og)             shift; run_npm make:og "$@" ;;
     -h|--help|"")   usage; exit 0 ;;
     *)              die "usage" "unknown command: $1 (try -h)" 2 ;;
 esac

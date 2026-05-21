@@ -31,6 +31,7 @@ tools/
   backup               # backup: mirror tracked files into $BACKUPS_HOME
   dns-test             # diag: compare DNS resolver latency across paths
   hq                   # severino-hq: sync vault frontmatter → HQ docs index
+  site                 # jseverino.com: vault → Astro build → Cloudflare Pages
   lib/
     common.sh          # shared: colors, msg, die, header, footer, state
     init.sh            # bootstrap sourced by every tool
@@ -40,6 +41,7 @@ tools/
     crypt.sh           # default key paths from $KEYS_HOME
     vault.sh           # default vault + inbox paths from $NOTES_HOME
     hq.sh              # HQ_SSH_HOST + HQ_REMOTE_PATH + HQ_URL guards
+    site.sh.example    # template — copy to site.sh: site path + dev host
     backup.sh.example  # template — copy to backup.sh, edit, ignore
   completions/
     _tools-suite       # zsh completion for every tool
@@ -379,6 +381,46 @@ Every subcommand is idempotent (`sync`, `create`, `deploy`) or read-only
 
 Change its frontmatter (e.g. bump `last_reviewed`, flip `status` to `deprecated`),
 save, `hq sync`. The doc_id is the upsert key — no duplicates.
+
+---
+
+### site
+
+Publishing workflow for the public `jseverino.com` Astro site (sources at
+[`joeseverino/jseverino.com`](https://github.com/joeseverino/jseverino.com)).
+The Obsidian vault is the source of truth: `site` syncs the public pages and
+writeups out of the vault, builds the static output with Astro, and ships it
+to Cloudflare Pages.
+
+```
+site status              # repo location, git state, build-output state
+site sync                # vault → src/content + public assets
+site check               # Astro diagnostics
+site build               # full Astro build
+site publish             # clean + sync + check + build + audit
+site publish-all         # hq sync + publish + auto-commit + push — one command
+site new-writeup <slug>  # scaffold a vault writeup from the template
+site dev                 # local Astro dev server
+site open                # open the local dev URL
+site og                  # regenerate the Open Graph social card
+```
+
+`site publish-all` is the everyday path: edit a writeup in Obsidian, run it,
+and the synced snapshot is auto-committed (`content: publish <slug>`) and
+pushed — Cloudflare rebuilds within ~30s. `--no-push` stops after the local
+build when you want to review the diff first. `site <subcommand> --help` for
+flag details.
+
+Layout resolves from env vars, all with defaults:
+
+```bash
+export CODE_HOME="$HOME/Documents/Code"             # defaults shown
+export SITE_HOME="$CODE_HOME/Projects/jseverino.com"
+export NOTES_HOME="$CODE_HOME/Severino Labs"        # vault root
+```
+
+`config/site.sh` (copy from `site.sh.example`) is sourced last for further
+overrides — `SITE_DEV_HOST`, `SITE_DEV_PORT`.
 
 ---
 
