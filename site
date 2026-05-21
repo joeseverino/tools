@@ -31,7 +31,7 @@ Commands:
                       Creates 05 Writeups/<slug>/ with index.md and images/.
                       Starts as published: false so it stays out of the build
                       until you flip it.
-  dev                 Start the local Astro dev server
+  dev                 Start the local Astro dev server (--drafts previews drafts)
   open                Open the local dev URL in the browser
   og                  Regenerate the Open Graph social card (public/assets/og/)
   -h, --help          Show this help
@@ -87,9 +87,33 @@ cmd_status() {
 }
 
 cmd_dev() {
+    local drafts=""
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+            --drafts) drafts="1"; shift ;;
+            -h|--help)
+                cat <<HELP
+Usage: site dev [--drafts]
+
+Start the local Astro dev server at http://$SITE_DEV_HOST:$SITE_DEV_PORT/.
+
+  --drafts   Sync and render published: false writeups and pages too, for
+             local preview. Drafts render in dev only — never in a build.
+HELP
+                return 0 ;;
+            *) die "error" "unknown flag: $1 (try \`site dev --help\`)" ;;
+        esac
+    done
+
     require_site
     msg "$DIM" "site" "$SITE_HOME"
-    (cd "$SITE_HOME" && npm run dev -- --host "$SITE_DEV_HOST" --port "$SITE_DEV_PORT")
+
+    if [[ -n "$drafts" ]]; then
+        msg "$DIM" "drafts" "syncing published: false content for preview"
+        (cd "$SITE_HOME" && npm run sync:content -- --drafts && npm run dev -- --host "$SITE_DEV_HOST" --port "$SITE_DEV_PORT")
+    else
+        (cd "$SITE_HOME" && npm run dev -- --host "$SITE_DEV_HOST" --port "$SITE_DEV_PORT")
+    fi
 }
 
 cmd_open() {
