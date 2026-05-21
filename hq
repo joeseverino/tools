@@ -27,7 +27,8 @@ Commands:
 
   sync [--prune]       Pipe the manifest into HQ's manage.py import_docs_manifest
                        on $HQ_SSH_HOST. Upserts by doc_id; safe to re-run.
-                       --prune deletes orphan rows (after a doc_id rename).
+                       --prune deletes orphan rows (after a doc_id rename)
+                       and stale mirrored ContentItems tied only to those rows.
 
   doctor               Report vault docs that are missing or have invalid
                        frontmatter — the gap between vault state and HQ state.
@@ -98,7 +99,8 @@ are idempotent.
 
   --prune       Delete orphan DocumentationRecord rows (doc_ids in HQ but
                 not in the current manifest). Use after a doc_id rename or
-                a doc retirement. ContentItems are not touched.
+                a doc retirement. Mirrored ContentItems that are only linked
+                to pruned docs are removed with them.
   --no-update   Only create new records; never update existing ones.
 
 Without flags, sync reports orphans but doesn't delete them.
