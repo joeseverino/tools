@@ -33,7 +33,7 @@ HQ_KEYS = {
     "related_projects", "related_assets",
     # Publishing pipeline fields (used by public_article_draft docs to
     # also upsert a ContentItem row in HQ).
-    "published_at", "content_type", "tags",
+    "published_at", "content_type", "tags", "slug",
     # Slim writeup/page contract (05 Writeups, 06 Pages).
     "description", "excerpt", "published", "technologies", "topic",
 }
@@ -47,9 +47,10 @@ SKIP_DIR_NAMES = {
 }
 
 # Slug -> HQ field synthesis for slim writeup/page contracts. Used when a
-# vault file lives under 05 Writeups or 06 Pages and has no explicit
-# doc_id (those folders use the simplified site-CMS frontmatter, not the
-# full Severino HQ schema).
+# vault file lives under 05 Writeups or 06 Pages. Those folders use the
+# simplified site-CMS frontmatter, not the full Severino HQ schema. If they
+# define doc_id, it is treated as a stable HQ identity while the folder name
+# remains the public URL/content slug.
 SLIM_WRITEUP_DIR = "05 Writeups"
 SLIM_PAGE_DIR = "06 Pages"
 
@@ -62,11 +63,11 @@ def _synthesize_slim_entry(
     published = bool(fm.get("published"))
 
     if kind == "writeup":
-        doc_id = f"writeup-{slug}"
+        doc_id = fm.get("doc_id") or f"writeup-{slug}"
         content_type = "portfolio_article"
         external_url = f"https://jseverino.com/portfolio/{slug}/"
     else:  # page
-        doc_id = f"page-{slug}"
+        doc_id = fm.get("doc_id") or f"page-{slug}"
         content_type = "page"
         page_path = fm.get("path") or f"/{slug}/"
         external_url = f"https://jseverino.com{page_path}"
@@ -80,6 +81,7 @@ def _synthesize_slim_entry(
         "status": "active" if published else "draft",
         "sensitivity": "public" if published else "internal",
         "content_type": content_type,
+        "slug": slug,
         "published": published,
     }
     if fm.get("description") or fm.get("excerpt"):
@@ -253,15 +255,16 @@ def main(argv: list[str]) -> int:
             relative_path = path.relative_to(vault)
             top = relative_path.parts[0] if relative_path.parts else ""
 
-            if not fm.get("doc_id"):
-                # Slim writeup/page contracts synthesize their HQ shape from path.
-                if top == SLIM_WRITEUP_DIR and path.name == "index.md":
-                    entry = _synthesize_slim_entry(fm, relative_path, kind="writeup")
-                elif top == SLIM_PAGE_DIR and path.name == "index.md":
-                    entry = _synthesize_slim_entry(fm, relative_path, kind="page")
-                else:
-                    missing_frontmatter.append(path)
-                    continue
+            # Slim writeup/page contracts always synthesize their HQ shape from
+            # public site frontmatter. A doc_id in those files is only a stable
+            # HQ identity; it should not switch them to the full HQ schema path.
+            if top == SLIM_WRITEUP_DIR and path.name == "index.md":
+                entry = _synthesize_slim_entry(fm, relative_path, kind="writeup")
+            elif top == SLIM_PAGE_DIR and path.name == "index.md":
+                entry = _synthesize_slim_entry(fm, relative_path, kind="page")
+            elif not fm.get("doc_id"):
+                missing_frontmatter.append(path)
+                continue
             else:
                 # Pull only the fields HQ knows about.
                 entry = {k: fm[k] for k in fm if k in HQ_KEYS}
