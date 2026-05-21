@@ -406,10 +406,11 @@ site og                  # regenerate the Open Graph social card
 ```
 
 `site publish-all` is the everyday path: edit a writeup in Obsidian, run it,
-and the synced snapshot is auto-committed (`content: publish <slug>`) and
-pushed — Cloudflare rebuilds within ~30s. `--no-push` stops after the local
-build when you want to review the diff first. `site <subcommand> --help` for
-flag details.
+and the synced snapshot is auto-committed and pushed — Cloudflare rebuilds
+within ~30s. The commit message is built from the diff: it names each slug as
+published (new), edited, or removed. `--no-push` stops after the local build
+when you want to review the diff first. `site <subcommand> --help` for flag
+details.
 
 Layout resolves from env vars, all with defaults:
 

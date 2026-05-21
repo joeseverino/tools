@@ -185,8 +185,9 @@ Cloudflare picks up the push and rebuilds within ~30s. This is the whole
 vault-to-live flow in one command — the common case "I edited a writeup or
 page; ship it."
 
-Only the generated snapshot (src/content, public/assets) is committed, as
-"content: publish <slug>". Code or config edits are left for you to commit
+Only the generated snapshot (src/content, public/assets) is committed. The
+commit message is built from the diff — it names each slug as published
+(new), edited, or removed. Code or config edits are left for you to commit
 deliberately.
 
   --no-push   Stop after the local build — no commit, no push. Use it to
@@ -224,25 +225,91 @@ HELP
         if git diff --cached --quiet; then
             msg "$DIM" "commit" "no content changes — pushing current HEAD"
         else
-            slugs="$(git diff --cached --name-only \
-                | sed -n -E \
-                    -e 's#^src/content/writeups/([^/]+)/.*#\1#p' \
-                    -e 's#^src/content/pages/([^/]+)\.md$#\1#p' \
-                    -e 's#^public/assets/writeups/([^/]+)/.*#\1#p' \
-                    -e 's#^public/assets/pages/([^/]+)/.*#\1#p' \
-                | sort -u)"
-            slug_count="$(printf '%s\n' "$slugs" | grep -c . || true)"
+            # Classify each staged content change by the git status of its
+            # index file: Added → published (new), Modified → edited,
+            # Deleted → removed. An asset-only change counts as an edit.
+            classified="$(git diff --cached --name-status --no-renames \
+                -- src/content public/assets \
+                | awk -F'\t' '
+                    {
+                        c = substr($1, 1, 1)
+                        path = $2
+                        slug = ""
+                        isindex = 0
+                        if (path ~ /^src\/content\/writeups\/[^\/]+\/index\.md$/) {
+                            slug = path
+                            sub(/^src\/content\/writeups\//, "", slug)
+                            sub(/\/index\.md$/, "", slug)
+                            isindex = 1
+                        } else if (path ~ /^src\/content\/pages\/[^\/]+\.md$/) {
+                            slug = path
+                            sub(/^src\/content\/pages\//, "", slug)
+                            sub(/\.md$/, "", slug)
+                            isindex = 1
+                        } else if (path ~ /^src\/content\/[^\/]+\.md$/) {
+                            slug = path
+                            sub(/^src\/content\//, "", slug)
+                            sub(/\.md$/, "", slug)
+                            isindex = 1
+                        } else if (path ~ /^public\/assets\/writeups\/[^\/]+\//) {
+                            slug = path
+                            sub(/^public\/assets\/writeups\//, "", slug)
+                            sub(/\/.*/, "", slug)
+                        } else if (path ~ /^public\/assets\/pages\/[^\/]+\//) {
+                            slug = path
+                            sub(/^public\/assets\/pages\//, "", slug)
+                            sub(/\/.*/, "", slug)
+                        } else {
+                            next
+                        }
+                        seen[slug] = 1
+                        if (isindex) idx[slug] = c
+                    }
+                    END {
+                        for (s in seen) {
+                            st = (s in idx) ? idx[s] : "M"
+                            cat = (st == "A") ? "publish" : (st == "D") ? "remove" : "edit"
+                            print cat "\t" s
+                        }
+                    }
+                ')"
 
-            if [[ "$slug_count" -eq 1 ]]; then
-                commit_msg="content: publish $slugs"
-            elif [[ "$slug_count" -gt 1 ]]; then
-                commit_msg="content: publish vault snapshot ($slug_count items)"
+            published="$(printf '%s\n' "$classified" | awk -F'\t' '$1 == "publish" { print $2 }' | sort)"
+            edited="$(printf '%s\n'    "$classified" | awk -F'\t' '$1 == "edit"    { print $2 }' | sort)"
+            removed="$(printf '%s\n'   "$classified" | awk -F'\t' '$1 == "remove"  { print $2 }' | sort)"
+
+            n_pub="$(printf '%s' "$published" | grep -c . || true)"
+            n_edt="$(printf '%s' "$edited"    | grep -c . || true)"
+            n_rem="$(printf '%s' "$removed"   | grep -c . || true)"
+            n_total=$(( n_pub + n_edt + n_rem ))
+
+            # Subject: a lone slug names itself; multiples summarize by count.
+            if [[ "$n_total" -eq 1 ]]; then
+                if [[ "$n_pub" -eq 1 ]]; then
+                    commit_subject="content: publish $published"
+                elif [[ "$n_rem" -eq 1 ]]; then
+                    commit_subject="content: remove $removed"
+                else
+                    commit_subject="content: edit $edited"
+                fi
             else
-                commit_msg="content: publish vault snapshot"
+                summary=""
+                [[ "$n_pub" -gt 0 ]] && summary="publish $n_pub"
+                [[ "$n_edt" -gt 0 ]] && summary="${summary:+$summary, }edit $n_edt"
+                [[ "$n_rem" -gt 0 ]] && summary="${summary:+$summary, }remove $n_rem"
+                commit_subject="content: ${summary:-publish vault snapshot}"
             fi
 
-            git commit -q -m "$commit_msg" -- src/content public/assets
-            msg "$GREEN" "commit" "$commit_msg"
+            # Body (multiples only): the slugs grouped under each heading.
+            commit_msg="$commit_subject"
+            if [[ "$n_total" -gt 1 ]]; then
+                [[ "$n_pub" -gt 0 ]] && commit_msg="$commit_msg"$'\n\n'"Published:"$'\n'"$(printf '  - %s\n' $published)"
+                [[ "$n_edt" -gt 0 ]] && commit_msg="$commit_msg"$'\n\n'"Edited:"$'\n'"$(printf '  - %s\n' $edited)"
+                [[ "$n_rem" -gt 0 ]] && commit_msg="$commit_msg"$'\n\n'"Removed:"$'\n'"$(printf '  - %s\n' $removed)"
+            fi
+
+            git commit -q -F - -- src/content public/assets <<<"$commit_msg"
+            msg "$GREEN" "commit" "$commit_subject"
         fi
 
         # Code or config edits stay yours to commit deliberately — they are
