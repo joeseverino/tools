@@ -400,10 +400,13 @@ site build               # full Astro build
 site publish             # clean + sync + check + build + audit
 site publish-all         # hq sync + publish + auto-commit + push — one command
 site new-writeup <slug>  # scaffold a vault writeup from the template
+site seo <url|path|slug>  # preview Google-style title, URL, description, and SEO checks
 site dev [--drafts]      # local Astro dev server (--drafts: include drafts)
 site open                # open the local dev URL
 site og                  # regenerate the Open Graph social card
 ```
+
+`site seo <url|path|slug>` reads the built Astro HTML from `dist.nosync` and renders a Google-style search result preview with canonical, title, description, robots, and Open Graph checks. Pass a domain, page slug, writeup slug, or absolute path; run `site build` first if the page has not been built locally.
 
 `site publish-all` is the everyday path: edit a writeup in Obsidian, run it,
 and the synced snapshot is auto-committed and pushed when content changed —
