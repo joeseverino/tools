@@ -125,7 +125,7 @@ cmd_open() {
 cmd_seo() {
     if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "$#" -eq 0 ]]; then
         cat <<HELP
-Usage: site seo <url|path|slug>
+Usage: site seo [--result] <url|path|slug>
 
 Preview the Google-style search result snippet and key SEO metadata for a built page.
 Input may be a full URL, domain, absolute path, page slug, or writeup slug.
@@ -133,8 +133,12 @@ Input may be a full URL, domain, absolute path, page slug, or writeup slug.
 Examples:
   site seo jseverino.com
   site seo portfolio
+  site seo --result portfolio
   site seo /portfolio/architecting-a-custom-detection-engine/
   site seo architecting-a-custom-detection-engine
+
+Options:
+  -r, --result   Show only the Google-style result preview
 
 Reads dist.nosync. Run site build first if the page is missing.
 HELP
@@ -142,7 +146,7 @@ HELP
     fi
 
     require_site
-    (cd "$SITE_HOME" && npm run -s seo:preview -- "$1")
+    (cd "$SITE_HOME" && npm run -s seo:preview -- "$@")
 }
 
 cmd_new_writeup() {
