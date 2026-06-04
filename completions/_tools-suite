@@ -1,4 +1,4 @@
-#compdef tools vault encrypt decrypt inbox backup open-age dns-test site
+#compdef tools vault encrypt decrypt inbox backup open-age dns-test site hq
 # Completion for the personal CLI tools.
 #
 # Install by adding to ~/.zshrc, BEFORE `compinit`:
@@ -132,6 +132,41 @@ _dns_test() {
         '-b[baseline path label]:label:(System\ DNS AdGuard\ LAN Cloudflare\ 1.1.1.1 Cloudflare\ DoH)'
 }
 
+_hq() {
+    local -a subs create_subs
+    subs=(
+        'sync:walk vault → push manifest → HQ (upsert by doc_id)'
+        'doctor:report docs missing or with invalid frontmatter'
+        'validate:report registry Projects/Assets no doc references'
+        'manifest:print the manifest JSON to stdout'
+        'create:upsert a Project or Asset record'
+        'deploy:git pull + docker compose up -d --build'
+        'ship:commit + push + deploy + check + sync (small-fix path)'
+        'logs:show app container logs'
+        'restart:docker compose restart app (no rebuild)'
+        'open:open $HQ_URL in the browser'
+        'shell:ssh into the HQ Django shell'
+        'superuser:ssh in and run createsuperuser'
+        'export:download the year summary (.md/.json)'
+    )
+    create_subs=(
+        'project:create or update a Project record'
+        'asset:create or update an Asset record'
+    )
+    _arguments -C \
+        '(-h --help)'{-h,--help}'[show help]' \
+        '1: :->cmd' \
+        '2: :->subcmd'
+    case $state in
+        cmd) _describe 'subcommand' subs ;;
+        subcmd)
+            case $words[2] in
+                create) _describe 'create kind' create_subs ;;
+            esac
+            ;;
+    esac
+}
+
 case "$service" in
     tools)    _tools    "$@" ;;
     vault)    _vault    "$@" ;;
@@ -142,4 +177,5 @@ case "$service" in
     open-age) _open_age "$@" ;;
     dns-test) _dns_test "$@" ;;
     site)     _site     "$@" ;;
+    hq)       _hq       "$@" ;;
 esac

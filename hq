@@ -33,6 +33,11 @@ Commands:
   doctor               Report vault docs that are missing or have invalid
                        frontmatter — the gap between vault state and HQ state.
 
+  validate             Report HQ registry entries (Projects/Assets) that no
+                       vault doc references — the inverse of \`sync\`'s missing
+                       relations. Catches stale slugs left by a rename and
+                       duplicate registry rows. Read-only.
+
   create <kind> <slug> [flags]
                        Create or update a Project or Asset in HQ.
                        \`hq create project --help\` / \`hq create asset --help\`
@@ -221,6 +226,45 @@ print(f"{len(problems)} doc(s) need attention:")
 for p, why in problems:
     print(f"  - [{why}] {p.relative_to(vault)}")
 sys.exit(1)
+PY
+}
+
+cmd_validate() {
+    case "${1:-}" in
+        -h|--help)
+            cat <<HELP
+Usage: hq validate
+
+Read-only audit of the HQ Project/Asset registries against the docs that
+reference them. \`hq sync\` already reports vault relations that point at a
+missing registry slug; this reports the *inverse* — registry rows that no
+doc references (zero documentation_records).
+
+A zero-doc row is not always wrong (a freshly registered project may not have
+a doc yet), but it is the fingerprint of a rename that left a stale slug or a
+duplicate row (e.g. the 2026-06-04 jseverino-public-site dedup). Review each.
+HELP
+            return 0 ;;
+    esac
+
+    msg "$DIM" "validate" "HQ registry ↔ vault docs"
+    ssh "$HQ_SSH_HOST" "cd '$HQ_REMOTE_PATH' && sudo docker compose exec -T app python manage.py shell" <<'PY'
+from projects.models import Project
+from assets.models import Asset
+
+orphan_p = sorted(p.slug for p in Project.objects.all() if p.documentation_records.count() == 0)
+orphan_a = sorted(a.slug for a in Asset.objects.all() if a.documentation_records.count() == 0)
+
+print("Projects  %d total, %d with zero docs" % (Project.objects.count(), len(orphan_p)))
+for s in orphan_p:
+    print("          orphan: %s" % s)
+print("Assets    %d total, %d with zero docs" % (Asset.objects.count(), len(orphan_a)))
+for s in orphan_a:
+    print("          orphan: %s" % s)
+if orphan_p or orphan_a:
+    print("Registry  review orphans above — stale slug from a rename, or a duplicate row")
+else:
+    print("Registry  ok — every Project and Asset is referenced by at least one doc")
 PY
 }
 
@@ -470,6 +514,7 @@ case "${1:-}" in
     manifest)   shift; cmd_manifest "$@" ;;
     sync)       shift; cmd_sync "$@" ;;
     doctor)     shift; cmd_doctor "$@" ;;
+    validate)   shift; cmd_validate "$@" ;;
     create)     shift; cmd_create "$@" ;;
     deploy)     shift; cmd_deploy "$@" ;;
     ship)       shift; cmd_ship "$@" ;;
