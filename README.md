@@ -316,9 +316,11 @@ frontmatter from every `.md` under `01 Projects/`, `02 Infrastructure/`,
 ```
 hq sync          # walk vault → push manifest → HQ upserts by doc_id
 hq doctor        # report docs missing or with invalid frontmatter
+hq validate      # report registry Projects/Assets no doc references (orphans/dups)
 hq manifest      # print the manifest JSON to stdout (inspect / pipe)
 hq create <kind> <slug> [flags]   # upsert a Project or Asset record
 hq deploy        # git pull + docker compose up -d --build on $HQ_SSH_HOST
+hq ship -m MSG   # commit + push + deploy + remote check + sync (small-fix path)
 hq logs [-f]     # app container logs (default --tail 50)
 hq restart       # docker compose restart app (no rebuild)
 hq open          # open $HQ_URL in the browser
