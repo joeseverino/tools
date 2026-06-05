@@ -199,6 +199,10 @@ subdirs = [s for s in sys.argv[2].split(":") if s]
 problems = []
 skip_dirs = {".git", ".obsidian", "00 Templates", "Templates", "source"}
 
+# The manifest generator synthesizes stable fallback doc_ids for slim
+# site-CMS files under these directories: writeup-<slug> and page-<slug>.
+slim_contract_dirs = {"05 Writeups", "06 Pages"}
+
 def should_skip(path: Path) -> bool:
     return any(part in skip_dirs for part in path.parts)
 
@@ -216,10 +220,14 @@ for sub in subdirs:
             problems.append((path, "no frontmatter"))
             continue
         if "doc_id:" not in text.split("---", 2)[1]:
+            relative = path.relative_to(vault)
+            top = relative.parts[0] if relative.parts else ""
+            if top in slim_contract_dirs and path.name == "index.md":
+                continue
             problems.append((path, "missing doc_id"))
 
 if not problems:
-    print("ok: every indexed doc has frontmatter with a doc_id")
+    print("ok: every indexed doc has valid frontmatter")
     sys.exit(0)
 
 print(f"{len(problems)} doc(s) need attention:")
