@@ -32,6 +32,7 @@ tools/
   dns-test             # diag: compare DNS resolver latency across paths
   hq                   # severino-hq: sync vault frontmatter → HQ docs index
   site                 # jseverino.com: vault → Astro build → Cloudflare Pages
+  brand                # severino-brand: render brand kits via branding-engine
   lib/
     common.sh          # shared: colors, msg, die, header, footer, state
     init.sh            # bootstrap sourced by every tool
