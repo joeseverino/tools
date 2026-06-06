@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# brand <command> — render Joe's brand kits via the branding-engine
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" ""
+
+CODE_HOME="${CODE_HOME:-$HOME/Documents/Code}"
+BRAND_HOME="${BRAND_HOME:-$CODE_HOME/Assets/severino-brand}"
+ENGINE_HOME="${ENGINE_HOME:-$CODE_HOME/Projects/branding-engine}"
+
+usage() {
+    cat <<EOF
+Usage: brand <command>
+
+Commands:
+  build                       Rebuild every kit from brand/ + the social cards
+  kit <slug> <hex> <initials> ["Wordmark"] [--font f] [--only a,b] [--out d]
+                              Render a one-off kit into severino-brand/kits/<slug>
+  status                      Show engine + brand locations and git state
+  -h, --help                  Show this help
+
+Kits land in \$BRAND_HOME/kits. The engine lives in \$ENGINE_HOME and comes in as
+a dependency of the brand repo; see its README for all flags.
+
+Environment:
+  CODE_HOME     Defaults to ~/Documents/Code
+  BRAND_HOME    Defaults to \$CODE_HOME/Assets/severino-brand
+  ENGINE_HOME   Defaults to \$CODE_HOME/Projects/branding-engine
+EOF
+}
+
+require_brand() {
+    [[ -d "$BRAND_HOME" ]] || die "error" "brand repo not found: $BRAND_HOME"
+    [[ -f "$BRAND_HOME/package.json" ]] || die "error" "package.json not found in $BRAND_HOME"
+    [[ -d "$BRAND_HOME/node_modules/branding-engine" ]] \
+        || die "error" "engine not installed; run \`npm install\` in $BRAND_HOME"
+}
+
+cmd_build() {
+    require_brand
+    msg "$DIM" "brand" "$BRAND_HOME"
+    (cd "$BRAND_HOME" && npm run -s build -- "$@")
+}
+
+cmd_kit() {
+    if [[ "$#" -lt 3 || "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+        cat <<HELP
+Usage: brand kit <slug> <hex> <initials> ["Wordmark"] [--font f] [--only a,b] [--out d]
+
+Render a one-off kit (mark, wordmark, sheet, web) into \$BRAND_HOME/kits/<slug>.
+
+Examples:
+  brand kit chris-blake 6D28D9 CB "Chris Blake"
+  brand kit acme ff5733 AC "Acme Corp" --only mark,wordmark
+HELP
+        return 0
+    fi
+    require_brand
+    msg "$DIM" "brand" "$BRAND_HOME"
+    (cd "$BRAND_HOME" && npm run -s kit -- "$@")
+}
+
+cmd_status() {
+    require_brand
+    echo
+    msg "$RESET" "engine" "$ENGINE_HOME"
+    msg "$RESET" "brand" "$BRAND_HOME"
+    if [[ -d "$BRAND_HOME/.git" ]]; then
+        local tree; tree=$(vault_tree "$BRAND_HOME")
+        local color="$GREEN"; [[ "$tree" != "clean" ]] && color="$YELLOW"
+        msg "$RESET" "git" "${color}${tree}${RESET}"
+    fi
+    if [[ -d "$BRAND_HOME/kits" ]]; then
+        local n; n=$(find "$BRAND_HOME/kits" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+        msg "$GREEN" "kits" "$n present"
+    else
+        msg "$YELLOW" "kits" "none built"
+    fi
+    echo
+}
+
+case "${1:-}" in
+    build)          shift; cmd_build "$@" ;;
+    kit)            shift; cmd_kit "$@" ;;
+    status)         shift; cmd_status "$@" ;;
+    -h|--help|"")   usage; exit 0 ;;
+    *)              die "usage" "unknown command: $1 (try -h)" 2 ;;
+esac
