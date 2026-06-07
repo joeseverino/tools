@@ -23,10 +23,35 @@ Commands:
   status              Show repo location, git state, and build-output state
   sync                Sync public pages/writeups from the vault into the site repo
   check               Run Astro diagnostics
+  contrast            Compute WCAG ratios for every text/background pair in base.css
+  parity              Assert vault Frontmatter Schema, Zod, and MCP agree on writeup fields
   build               Run the full Astro build
-  publish             Clean, sync, check, build, and audit assets
+  publish             Clean, sync, check, build, and audit assets (also runs security/contrast/parity)
+  sign-security       Clear-sign public/.well-known/security.txt with the security@ key
+  check-security      Verify signature, required fields, Expires, and WKD file
+  scaffold-primer <title> [--tags a,b]
+                      Scaffold a new 04 Reference/ primer with slim frontmatter
+  scaffold-field --name X --description Y [--apply]
+                      Patch every layer needed for a new writeup field (dry-run by default)
+  draft-alt <slug>|--all [--apply]
+                      Use Claude API to draft cover_alt from the cover image
   publish-all         hq sync + site publish + auto-commit + push. The full
                       vault-to-live-edge orchestrator, one command.
+  release <version> [--ship]
+                      Bump package.json, run publish:check, commit + signed
+                      tag, push, and create the GitHub release. Dry-run by
+                      default; pass --ship to execute.
+  test [--visual|--ui|--update]
+                      Run the Playwright suite (full, visual-only, UI mode,
+                      or update visual baselines).
+  doctor              Pre-flight health check: security, contrast, parity,
+                      type check, npm audit, npm outdated. No build.
+  reinstall-mcp       Reinstall the severino-vault-mcp package from source.
+                      Use \`/mcp\` Reconnect afterward in Claude Code.
+  publish-writeup <slug>  Validate one writeup via the severino-vault-mcp
+                      pre-flight gate, then run publish-all. Refuses to ship
+                      if the MCP reports blockers, missing slugs/images, or
+                      unresolved related_projects / related_assets.
   new-writeup <slug>  Scaffold a new vault writeup folder from the template.
   seo <url|path|slug>  Preview the Google-style search result snippet for built HTML.
                       Creates 05 Writeups/<slug>/ with index.md and images/.
@@ -193,6 +218,52 @@ HELP
     msg "$DIM" "next" "edit title + description, drop cover.png in images/, flip published: true when ready"
 }
 
+cmd_publish_writeup() {
+    local slug="${1:-}"
+    if [[ -z "$slug" || "$slug" == "-h" || "$slug" == "--help" ]]; then
+        cat <<HELP
+Usage: site publish-writeup <slug>
+
+Gated full-publish for one writeup. Runs the severino-vault-mcp
+prepare-writeup-publish CLI as a pre-flight check, then chains into
+\`site publish-all\` if the writeup is ready.
+
+Exits before any commit/push if the MCP reports blockers, missing tech
+slugs, missing images, or unresolved related_projects / related_assets.
+Use this instead of running \`site publish-all\` blind when you've just
+finished editing a single writeup.
+
+Requires the \`severino-vault-mcp\` console script on PATH (installed via
+\`uv tool install ~/Documents/Code/Assets/severino-vault-mcp\`).
+HELP
+        return 0
+    fi
+
+    if [[ ! "$slug" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+        die "error" "slug must be lowercase-kebab-case: '$slug'"
+    fi
+
+    if ! command -v severino-vault-mcp >/dev/null 2>&1; then
+        die "error" "severino-vault-mcp not on PATH (uv tool install the MCP first)"
+    fi
+
+    local writeup_dir="$NOTES_HOME/05 Writeups/$slug"
+    [[ -d "$writeup_dir" ]] || die "error" "writeup folder not found: $writeup_dir"
+
+    msg "$DIM" "validate" "prepare-writeup-publish $slug"
+    local report
+    if ! report="$(SVMC_VAULT_PATH="$NOTES_HOME" severino-vault-mcp prepare-writeup-publish "$slug" 2>&1)"; then
+        echo
+        msg "$RED" "blocked" "writeup is not ready to publish"
+        printf '%s\n' "$report"
+        echo
+        die "error" "fix the issues above, then re-run \`site publish-writeup $slug\`" 1
+    fi
+    msg "$GREEN" "validate" "ok"
+
+    cmd_publish_all
+}
+
 cmd_publish_all() {
     local skip_push=""
     while [[ "$#" -gt 0 ]]; do
@@ -355,14 +426,138 @@ HELP
     )
 }
 
+cmd_release() {
+    require_site
+    local version="${1:-}"
+    [[ -n "$version" ]] || die "usage" "site release <version> [--ship]"
+    local ship=false
+    [[ "${2:-}" == "--ship" ]] && ship=true
+
+    cd "$SITE_HOME"
+
+    if ! git diff --quiet || ! git diff --quiet --cached; then
+        die "error" "working tree not clean; commit or stash first"
+    fi
+    local branch
+    branch=$(git symbolic-ref --short HEAD)
+    [[ "$branch" == "main" ]] || die "error" "not on main (currently: $branch)"
+
+    local prev
+    prev=$(git tag --sort=-v:refname | head -1)
+    [[ -n "$prev" ]] || die "error" "no previous tag found"
+
+    msg "$DIM" "prev" "$prev → v$version"
+    msg "$BOLD" "plan" "Release v$version"
+    echo "  - bump package.json to $version"
+    echo "  - npm run publish:check"
+    echo "  - commit 'Release v$version' with changelog from $prev..HEAD"
+    echo "  - signed annotated tag v$version"
+    echo "  - git push origin main + tag"
+    echo "  - gh release create v$version --verify-tag --notes-from-tag"
+
+    if ! $ship; then
+        echo
+        msg "$YELLOW" "dry-run" "re-run with --ship to execute"
+        return 0
+    fi
+
+    msg "$DIM" "step" "publish:check"
+    npm run -s publish:check
+
+    msg "$DIM" "step" "bump package.json"
+    node -e "const p=require('./package.json'); p.version='$version'; require('fs').writeFileSync('./package.json', JSON.stringify(p,null,2)+'\n');"
+
+    msg "$DIM" "step" "build changelog from $prev..HEAD"
+    local changelog
+    changelog=$(git log "$prev..HEAD" --reverse --pretty=format:'- %s')
+
+    msg "$DIM" "step" "commit"
+    git add -A
+    git commit -m "$(printf 'Release v%s\n\n%s\n' "$version" "$changelog")"
+
+    msg "$DIM" "step" "signed tag v$version"
+    git tag -s "v$version" -m "$(printf 'v%s\n\n%s\n' "$version" "$changelog")"
+
+    msg "$DIM" "step" "push main + tag"
+    git push origin main
+    git push origin "v$version"
+
+    msg "$DIM" "step" "gh release"
+    gh release create "v$version" --verify-tag --notes-from-tag --title "v$version"
+
+    msg "$GREEN" "released" "v$version live; Cloudflare Pages will rebuild"
+}
+
+cmd_test() {
+    require_site
+    local script="test:e2e"
+    case "${1:-}" in
+        --visual) script="test:e2e:visual" ;;
+        --ui) script="test:e2e:ui" ;;
+        --update) script="test:e2e:visual:update" ;;
+        '') ;;
+        *) die "usage" "unknown test mode: $1 (--visual | --ui | --update)" ;;
+    esac
+    run_npm "$script"
+}
+
+cmd_doctor() {
+    require_site
+    cd "$SITE_HOME"
+    local failed=0
+
+    msg "$DIM" "step" "security.txt"
+    npm run -s check:security || failed=1
+
+    msg "$DIM" "step" "contrast"
+    npm run -s check:contrast || failed=1
+
+    msg "$DIM" "step" "parity"
+    npm run -s check:parity || failed=1
+
+    msg "$DIM" "step" "astro check"
+    npm run -s check || failed=1
+
+    msg "$DIM" "step" "npm audit (production)"
+    npm audit --omit=dev || failed=1
+
+    msg "$DIM" "step" "npm outdated"
+    npm outdated || true
+
+    if (( failed )); then
+        die "error" "doctor: at least one check failed" 1
+    fi
+    msg "$GREEN" "doctor" "all checks green"
+}
+
+cmd_reinstall_mcp() {
+    local mcp_home="${MCP_HOME:-$CODE_HOME/Assets/severino-vault-mcp}"
+    [[ -d "$mcp_home" ]] || die "error" "MCP repo not found: $mcp_home"
+    msg "$DIM" "step" "uv tool install --reinstall ."
+    (cd "$mcp_home" && uv tool install --reinstall .)
+    msg "$GREEN" "reinstalled" "now run \`/mcp\` Reconnect in Claude Code to pick up tool schema changes"
+}
+
 case "${1:-}" in
     status)         shift; cmd_status "$@" ;;
     sync)           shift; run_npm sync:content "$@" ;;
     check)          shift; run_npm check "$@" ;;
+    contrast)       shift; run_npm check:contrast "$@" ;;
+    parity)         shift; run_npm check:parity "$@" ;;
     build)          shift; run_npm build "$@" ;;
     publish)        shift; run_npm publish:check "$@" ;;
-    publish-all)    shift; cmd_publish_all "$@" ;;
-    new-writeup)    shift; cmd_new_writeup "$@" ;;
+    sign-security)      shift; run_npm sign:security "$@" ;;
+    check-security)     shift; run_npm check:security "$@" ;;
+    scaffold-primer)    shift; run_npm scaffold:primer -- "$@" ;;
+    scaffold-field)     shift; run_npm scaffold:writeup-field -- "$@" ;;
+    draft-alt)          shift; run_npm draft:cover-alt -- "$@" ;;
+    publish-all)        shift; cmd_publish_all "$@" ;;
+    publish-writeup)    shift; cmd_publish_writeup "$@" ;;
+    release)            shift; cmd_release "$@" ;;
+    test)               shift; cmd_test "$@" ;;
+    doctor)             shift; cmd_doctor "$@" ;;
+    reinstall-mcp)      shift; cmd_reinstall_mcp "$@" ;;
+    new-writeup)        shift; cmd_new_writeup "$@" ;;
     seo)            shift; cmd_seo "$@" ;;
     dev)            shift; cmd_dev "$@" ;;
     open)           shift; cmd_open "$@" ;;
