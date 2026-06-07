@@ -1,0 +1,23 @@
+# shellcheck shell=bash
+# wp-static.sh — named-site configurations for the wp-static tool.
+#
+# Copy this file to wp-static.sh and edit. The real wp-static.sh is
+# gitignored so site-specific URLs and output paths stay out of the repo.
+#
+# Register a site with `wp_static_site <name> <url> <output> [<keep-csv>]`:
+#
+#   <name>       Short identifier passed to `wp-static <name>`
+#   <url>        Source URL, https://example.com/ (trailing slash recommended)
+#   <output>     Output directory; supports $HOME and other env vars
+#   <keep-csv>   Optional comma-separated files to preserve across re-runs
+#                (typically Cloudflare Pages config: _headers,_redirects)
+
+# wp_static_site myblog \
+#     "https://myblog.example/" \
+#     "$HOME/sites/myblog/public" \
+#     "_headers,_redirects"
+
+# wp_static_site client-marketing \
+#     "https://acme.example/" \
+#     "/var/www/acme" \
+#     "_headers,_redirects,robots.txt"

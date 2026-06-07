@@ -1,0 +1,202 @@
+#!/usr/bin/env bash
+# wp-static — mirror a WordPress site into a static directory suitable
+# for Cloudflare Pages / Netlify / any static host.
+#
+# Wraps `wget --mirror` with sensible defaults (page-requisites, link
+# conversion, polite rate limit, WP admin/json/feed excluded) and a
+# post-processor that fixes the rough edges wget leaves behind:
+#   - Rewrites WordPress ?p=N shortlink references to canonical URLs
+#   - Strips ?ver= cache-busters from CSS/JS filenames
+#
+# Repeatable: optionally preserves config files (e.g. _headers,
+# _redirects) across re-runs.
+#
+# Two ways to invoke:
+#   wp-static https://example.com/                     # direct URL
+#   wp-static <site-name>                              # named site from config
+#
+# Named sites live in config/wp-static.sh (gitignored). See
+# config/wp-static.sh.example for the format.
+
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" ""
+
+# Per-user site config (gitignored). Each entry is "name|url|output|keep".
+# Sites register themselves via `wp_static_site` (defined below) so the
+# config file is declarative and bash-3 safe (no associative arrays).
+WP_STATIC_SITES=()
+wp_static_site() {
+    local name="$1" url="$2" output="$3" keep="${4-}"
+    WP_STATIC_SITES+=("$name|$url|$output|$keep")
+}
+if [[ -f "$TOOLS_HOME/config/wp-static.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "$TOOLS_HOME/config/wp-static.sh"
+fi
+
+# wp_static_lookup <name> — echoes "url|output|keep" if a site matches.
+wp_static_lookup() {
+    local needle="$1" entry name rest
+    for entry in "${WP_STATIC_SITES[@]+"${WP_STATIC_SITES[@]}"}"; do
+        name="${entry%%|*}"
+        rest="${entry#*|}"
+        if [[ "$name" == "$needle" ]]; then
+            printf '%s\n' "$rest"
+            return 0
+        fi
+    done
+    return 1
+}
+
+OUTPUT_DIR="public"
+KEEP_FILES=()
+WAIT_SECS="0.4"
+
+usage() {
+    cat <<EOF
+Usage: wp-static [options] <source-url | site-name>
+
+Mirror a WordPress site into a static directory and clean up the
+WordPress-isms wget leaves behind. Output is suitable for direct deploy
+to Cloudflare Pages or any static host.
+
+Arguments:
+  <source-url>          A WordPress site URL (https://example.com/)
+  <site-name>           A short name defined in config/wp-static.sh
+
+Options:
+  -o, --output DIR      Output directory (default: ./$OUTPUT_DIR)
+  -k, --keep FILE       Preserve this file across re-runs. Repeatable.
+                        Common: -k _headers -k _redirects
+  -w, --wait SECS       Polite delay between requests (default: $WAIT_SECS)
+  -l, --list            List configured sites and exit
+  -h, --help            Show this help
+
+Per-site config:
+  Copy config/wp-static.sh.example to config/wp-static.sh and edit.
+  The real config file is gitignored.
+
+Requirements: wget, python3.
+EOF
+}
+
+list_sites() {
+    local count="${#WP_STATIC_SITES[@]}"
+    if (( count == 0 )); then
+        msg "$DIM" "(none)" "no sites configured — see config/wp-static.sh.example"
+        return
+    fi
+    header "configured sites" "$count"
+    local entry name url out
+    for entry in "${WP_STATIC_SITES[@]}"; do
+        name="${entry%%|*}"
+        IFS='|' read -r url out _keep <<< "${entry#*|}"
+        msg "$GREEN" "$name" "$url -> $out"
+    done
+    echo
+}
+
+POSITIONAL=()
+while (( $# > 0 )); do
+    case "$1" in
+        -o|--output)  OUTPUT_DIR="$2"; shift 2 ;;
+        -k|--keep)    KEEP_FILES+=("$2"); shift 2 ;;
+        -w|--wait)    WAIT_SECS="$2"; shift 2 ;;
+        -l|--list)    list_sites; exit 0 ;;
+        -h|--help)    usage; exit 0 ;;
+        --)           shift; POSITIONAL+=("$@"); break ;;
+        -*)           die "usage" "unknown option: $1 (try -h)" 2 ;;
+        *)            POSITIONAL+=("$1"); shift ;;
+    esac
+done
+
+(( ${#POSITIONAL[@]} == 1 )) || { usage; exit 2; }
+ARG="${POSITIONAL[0]}"
+
+# If ARG matches a configured site name, expand it; otherwise treat as URL.
+if site_cfg="$(wp_static_lookup "$ARG")"; then
+    IFS='|' read -r SOURCE_URL CFG_OUTPUT CFG_KEEP <<< "$site_cfg"
+    [[ -n "$CFG_OUTPUT" ]] && OUTPUT_DIR="$CFG_OUTPUT"
+    if [[ -n "$CFG_KEEP" ]] && (( ${#KEEP_FILES[@]} == 0 )); then
+        IFS=',' read -r -a KEEP_FILES <<< "$CFG_KEEP"
+    fi
+else
+    SOURCE_URL="$ARG"
+fi
+
+[[ "$SOURCE_URL" =~ ^https?:// ]] \
+    || die "usage" "expected URL or known site name, got: $ARG (try -l)" 2
+
+command -v wget    >/dev/null || die "missing" "wget not installed (brew install wget)" 127
+command -v python3 >/dev/null || die "missing" "python3 not installed" 127
+
+SOURCE_HOST="$(printf '%s' "$SOURCE_URL" | sed -E 's|https?://([^/]+).*|\1|')"
+[[ -n "$SOURCE_HOST" ]] || die "usage" "invalid URL: $SOURCE_URL" 2
+
+TMP_DIR="$(mktemp -d -t wp-static.XXXXXX)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+header "mirroring" 1
+msg "$GREEN" "source"     "$SOURCE_URL"
+msg "$GREEN" "output"     "$OUTPUT_DIR"
+if (( ${#KEEP_FILES[@]} > 0 )); then
+    msg "$GREEN" "preserve"   "${KEEP_FILES[*]}"
+fi
+echo
+
+# Back up files we want to preserve across the wipe.
+if (( ${#KEEP_FILES[@]} > 0 )) && [[ -d "$OUTPUT_DIR" ]]; then
+    mkdir -p "$TMP_DIR/keep"
+    for f in "${KEEP_FILES[@]}"; do
+        if [[ -f "$OUTPUT_DIR/$f" ]]; then
+            mkdir -p "$TMP_DIR/keep/$(dirname "$f")"
+            cp "$OUTPUT_DIR/$f" "$TMP_DIR/keep/$f"
+            msg "$DIM" "backup"     "$f"
+        fi
+    done
+fi
+
+rm -rf "$OUTPUT_DIR"
+mkdir -p "$OUTPUT_DIR"
+msg "$YELLOW" "wipe"      "$OUTPUT_DIR"
+
+wget \
+    --mirror \
+    --page-requisites \
+    --convert-links \
+    --adjust-extension \
+    --no-host-directories \
+    --no-parent \
+    --restrict-file-names=windows \
+    --span-hosts --domains="$SOURCE_HOST" \
+    --wait="$WAIT_SECS" --random-wait \
+    -e robots=off \
+    --user-agent="Mozilla/5.0 (compatible; wp-static-bot)" \
+    --reject-regex='/(wp-admin|wp-login|wp-json|xmlrpc|feed)(/|$|\?)' \
+    --directory-prefix="$OUTPUT_DIR" \
+    "$SOURCE_URL" 2> "$TMP_DIR/wget.log" \
+        || die "wget" "mirror failed; see $TMP_DIR/wget.log (kept for this run only)" 1
+
+msg "$GREEN" "wget"       "done"
+
+python3 "$TOOLS_HOME/lib/wp-static-postprocess.py" "$OUTPUT_DIR" \
+    || die "postprocess" "python helper failed" 1
+
+# Restore preserved files.
+if (( ${#KEEP_FILES[@]} > 0 )); then
+    for f in "${KEEP_FILES[@]}"; do
+        if [[ -f "$TMP_DIR/keep/$f" ]]; then
+            mkdir -p "$OUTPUT_DIR/$(dirname "$f")"
+            cp "$TMP_DIR/keep/$f" "$OUTPUT_DIR/$f"
+            msg "$GREEN" "restore"    "$f"
+        fi
+    done
+fi
+
+find "$OUTPUT_DIR" -name '.DS_Store' -delete
+msg "$DIM" "cleanup"    ".DS_Store removed"
+
+echo
+msg "$BOLD$GREEN" "done"  "preview: python3 -m http.server -d $OUTPUT_DIR 8000"
+echo

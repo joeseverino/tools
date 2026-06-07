@@ -1,0 +1,118 @@
+#!/bin/zsh
+# ts-acl — fetch the live Tailscale ACL and diff it against the vault mirror.
+#
+# Uses a read-only (acl:read) OAuth client whose credentials live age-encrypted
+# at $TS_ACL_CREDS. No plaintext secret ever touches disk (decrypt -p streams).
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "ts-acl"
+
+API="https://api.tailscale.com/api/v2"
+
+usage() {
+    cat <<EOF
+Usage: ts-acl <command>
+
+Commands:
+  show        Fetch and print the live ACL policy (sorted JSON).
+  diff        Diff the live ACL against the vault mirror ($TS_ACL_VAULT_DOC).
+  -h, help    Show this help.
+
+Config (config/ts-acl.sh, override via env):
+  TS_ACL_CREDS       age-encrypted env with either TS_API_TOKEN, or
+                     TS_OAUTH_CLIENT_ID + TS_OAUTH_CLIENT_SECRET
+  TS_TAILNET         tailnet to query (default "-": the credential's own)
+  TS_ACL_VAULT_DOC   vault doc whose \`\`\`json block is the stored mirror
+EOF
+}
+
+# Resolve a Bearer token from the encrypted env and echo it. Supports either a
+# read-only OAuth client (preferred) or a plain API access token. The secret
+# stays in memory for the life of the call.
+get_token() {
+    [[ -f $TS_ACL_CREDS ]] || die "error" "creds not found: $TS_ACL_CREDS (see -h)"
+
+    local id="" secret="" api_token="" k v
+    while IFS='=' read -r k v; do
+        case $k in
+            TS_OAUTH_CLIENT_ID)     id=$v ;;
+            TS_OAUTH_CLIENT_SECRET) secret=$v ;;
+            TS_API_TOKEN)           api_token=$v ;;
+        esac
+    done < <(decrypt -p "$TS_ACL_CREDS" 2>/dev/null) \
+        || die "error" "could not decrypt $TS_ACL_CREDS (try: tools key test)"
+
+    # Plain API access token: used directly as the Bearer, no exchange.
+    if [[ -n $api_token ]]; then
+        echo "$api_token"
+        return
+    fi
+
+    # OAuth client: exchange id+secret for a short-lived access token.
+    [[ -n $id && -n $secret ]] \
+        || die "error" "creds need TS_API_TOKEN, or TS_OAUTH_CLIENT_ID + TS_OAUTH_CLIENT_SECRET"
+
+    local resp token
+    resp=$(curl -fsS "$API/oauth/token" \
+                -d "client_id=$id" \
+                -d "client_secret=$secret" \
+                -d "grant_type=client_credentials" 2>/dev/null) \
+        || die "error" "OAuth token request failed (check client is valid / not revoked)"
+
+    token=$(jq -r '.access_token // empty' <<<"$resp")
+    [[ -n $token ]] || die "error" "no access_token in OAuth response"
+    echo "$token"
+}
+
+# Fetch the live policy as sorted JSON.
+fetch_live() {
+    local token; token=$(get_token)
+    curl -fsS "$API/tailnet/$TS_TAILNET/acl" \
+         -H "Authorization: Bearer $token" \
+         -H "Accept: application/json" 2>/dev/null \
+        | jq -S '.' \
+        || die "error" "ACL fetch failed"
+}
+
+# Pull the fenced ```json block under the "Access Controls" heading from the doc.
+vault_block() {
+    [[ -f $TS_ACL_VAULT_DOC ]] || die "error" "vault doc not found: $TS_ACL_VAULT_DOC"
+    awk '
+        /^## Access Controls/ { in_section = 1 }
+        in_section && /^```json/ { capture = 1; next }
+        capture && /^```/ { exit }
+        capture { print }
+    ' "$TS_ACL_VAULT_DOC" | jq -S '.' \
+        || die "error" "could not parse JSON block from $TS_ACL_VAULT_DOC"
+}
+
+cmd_show() {
+    fetch_live
+}
+
+cmd_diff() {
+    local live vault
+    live=$(fetch_live)
+    vault=$(vault_block)
+    if diff_out=$(diff <(echo "$vault") <(echo "$live")); then
+        msg "$GREEN" "in sync" "live ACL matches the vault mirror"
+        echo
+    else
+        msg "$YELLOW" "drift" "live ACL differs from the vault mirror (< vault, > live)"
+        echo
+        echo "$diff_out"
+        echo
+        exit 1
+    fi
+}
+
+for cmd in curl jq decrypt; do
+    command -v "$cmd" >/dev/null || die "error" "missing required command: $cmd"
+done
+
+case "${1:-help}" in
+    show)        cmd_show ;;
+    diff)        cmd_diff ;;
+    -h|help|'')  usage ;;
+    *)           die "usage" "unknown command: $1 (try -h)" 2 ;;
+esac
