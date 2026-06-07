@@ -556,11 +556,23 @@ project; pass `--dir` only to override.
 echo "rule body here" | remember feedback use-rg-and-fd "Use rg and fd"
 ```
 
-`bench/remember-token-bench.sh` quantifies why this is worth it: it measures the
-byte cost (a ~4:1 token proxy) of one `remember` call vs the manual Read-index →
-Write-file → Edit-index → verify loop an agent runs by hand. `remember` stays
-flat while the manual cost grows with `MEMORY.md`, ~4.5× cheaper at 10 entries,
-~16× at 100. The script asserts `remember` is cheaper and runs in CI.
+**Why it's worth it (measured).** One `remember` call vs the manual Read-index →
+Write-file → Edit-index → verify loop an agent runs by hand, in bytes (a ~4:1
+token proxy, cold-write model). `remember` stays flat because it never reads the
+index; the manual cost grows with `MEMORY.md`:
+
+```
+index   NEW(B)   OLD(B)   ratio
+   10      722     3302    4.5x
+   30      722     5162    7.1x
+  100      722    11675   16.1x
+  300      722    30875   42.7x
+```
+
+Reproduce with `bench/remember-token-bench.sh` (self-contained; asserts
+`remember` is cheaper and runs in CI). The floor is ~1.5× — if the index is
+already in the agent's context and it skips the verify read — so the win is real
+even in the best case for the manual flow, and compounds as memories accumulate.
 
 ---
 
