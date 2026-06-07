@@ -539,14 +539,18 @@ of the two-step "create the file, then hand-edit the index" loop.
 
 ```
 remember <type> <slug> "<title>" [options]   < body
+remember <type> <slug> "<title>" -F          < body   # update in place
 remember --list
 remember --forget <slug>
 ```
 
 `<type>` is one of `user | feedback | project | reference`. Body comes from
 stdin (or `--body` / `--body-file`); frontmatter is generated from the args.
-The memory dir defaults to `$CLAUDE_MEMORY_DIR` or one derived from the CWD,
-override with `--dir`.
+`-F`/`--force` overwrites an existing memory (and refreshes its index line
+instead of duplicating it). The memory dir is auto-resolved — `$CLAUDE_MEMORY_DIR`,
+else `$CLAUDE_PROJECT_DIR`, else `$PWD`, encoded to
+`~/.claude/projects/<enc>/memory` — so no `--dir` is needed inside a Claude
+project; pass `--dir` only to override.
 
 ```
 echo "rule body here" | remember feedback use-rg-and-fd "Use rg and fd"
