@@ -120,19 +120,14 @@ normalize_slug() {
     printf '%s' "$s"
 }
 
-slug_to_filename_glob() {
-    # Match either <type>_<slug>.md for any type.
-    local s
-    s="$(normalize_slug "$1")"
-    printf '%s' "*_${s}.md"
-}
-
 if [[ "$MODE" == "forget" ]]; then
-    glob="$(slug_to_filename_glob "$FORGET_SLUG")"
-    # shellcheck disable=SC2086
-    matches=( $(cd "$TARGET_DIR" && ls -1 $glob 2>/dev/null || true) )
+    base_forget="$(normalize_slug "$FORGET_SLUG")"
+    matches=()
+    for g in "$TARGET_DIR"/*_"$base_forget".md; do
+        [[ -e "$g" ]] && matches+=( "${g##*/}" )
+    done
     if (( ${#matches[@]} == 0 )); then
-        die "error" "no memory matched: $FORGET_SLUG (looked for $glob)"
+        die "error" "no memory matched: $FORGET_SLUG (looked for *_$base_forget.md)"
     fi
     if (( ${#matches[@]} > 1 )); then
         die "error" "ambiguous slug $FORGET_SLUG matched: ${matches[*]}"
