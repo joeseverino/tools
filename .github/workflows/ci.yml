@@ -16,16 +16,24 @@ jobs:
 
       - name: bash -n on bash scripts
         run: |
-          for f in tools encrypt decrypt vault backup inbox open-age hq; do
+          for f in tools encrypt decrypt vault backup inbox open-age hq remember \
+                   bench/remember-token-bench.sh; do
             bash -n "$f"
           done
 
-      - name: zsh -n on dns-test
-        run: zsh -n dns-test
+      - name: zsh -n on zsh scripts
+        run: |
+          for f in dns-test ts-acl; do
+            zsh -n "$f"
+          done
 
       - name: shellcheck
         run: |
           shellcheck -x \
-            tools encrypt decrypt vault backup inbox open-age hq \
+            tools encrypt decrypt vault backup inbox open-age hq remember \
+            bench/remember-token-bench.sh \
             lib/common.sh lib/init.sh lib/key.sh \
-            config/crypt.sh config/vault.sh config/backup.sh.example config/hq.sh
+            config/crypt.sh config/vault.sh config/backup.sh.example config/hq.sh config/ts-acl.sh
+
+      - name: benchmark — remember is cheaper than manual Write+Edit
+        run: ./bench/remember-token-bench.sh
