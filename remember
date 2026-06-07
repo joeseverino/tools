@@ -1,0 +1,221 @@
+#!/usr/bin/env bash
+# remember — write a Claude memory file + index entry in one shot.
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" ""
+
+usage() {
+    cat <<EOF
+Usage:
+  remember <type> <slug> "<title>" [options]   < body
+  remember <type> <slug> "<title>" -b "body" [options]
+  remember --list
+  remember --forget <slug>
+  remember -h|--help
+
+Compress the two-step "write file + edit MEMORY.md" loop into one command.
+Body content is read from stdin unless --body is given. Frontmatter is
+generated from the args.
+
+Args:
+  type    user | feedback | project | reference
+  slug    kebab- or snake-case identifier
+          (becomes 'name:' in frontmatter; underscored in filename)
+  title   text shown as the link in MEMORY.md
+
+Options:
+  -d, --description STR   Frontmatter description    (default: title)
+  -k, --hook STR          MEMORY.md one-liner hook   (default: title)
+  -b, --body STR          Body text in lieu of stdin
+  -f, --body-file FILE    Body text from file
+      --dir PATH          Memory dir (default: CLAUDE_MEMORY_DIR
+                          or derived from CWD)
+      --list              Show the MEMORY.md index
+      --forget <slug>     Delete the memory and its index entry
+  -h, --help              Show this help
+
+Examples:
+  echo "rule body here" | remember feedback use-rg-and-fd "Use rg and fd"
+  remember --list
+  remember --forget use-rg-and-fd
+EOF
+}
+
+# ---- arg parsing ------------------------------------------------------------
+
+MODE="write"
+TARGET_DIR=""
+DESCRIPTION=""
+HOOK=""
+BODY=""
+BODY_FILE=""
+FORGET_SLUG=""
+POSITIONAL=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)          usage; exit 0 ;;
+        --list)             MODE="list"; shift ;;
+        --forget)           MODE="forget"; FORGET_SLUG="${2:?--forget needs a slug}"; shift 2 ;;
+        -d|--description)   DESCRIPTION="${2:?--description needs a value}"; shift 2 ;;
+        -k|--hook)          HOOK="${2:?--hook needs a value}"; shift 2 ;;
+        -b|--body)          BODY="${2:?--body needs a value}"; shift 2 ;;
+        -f|--body-file)     BODY_FILE="${2:?--body-file needs a path}"; shift 2 ;;
+        --dir)              TARGET_DIR="${2:?--dir needs a path}"; shift 2 ;;
+        --)                 shift; break ;;
+        -*)                 die "usage" "unknown option: $1 (try -h)" 2 ;;
+        *)                  POSITIONAL+=("$1"); shift ;;
+    esac
+done
+
+# ---- resolve memory dir -----------------------------------------------------
+
+if [[ -z "$TARGET_DIR" ]]; then
+    TARGET_DIR="${CLAUDE_MEMORY_DIR:-}"
+fi
+if [[ -z "$TARGET_DIR" ]]; then
+    # Derive from $PWD using Claude's path encoding: /, ., and space → -.
+    # Verified against `ls ~/.claude/projects/` — non-alphanumeric chars in
+    # the project path are folded to `-`. Test fixtures in /tmp won't catch
+    # encoding bugs; test against a real Claude project dir.
+    encoded="${PWD//\//-}"
+    encoded="${encoded//./-}"
+    encoded="${encoded// /-}"
+    TARGET_DIR="$HOME/.claude/projects/${encoded}/memory"
+fi
+
+[[ -d "$TARGET_DIR" ]] || die "error" "memory dir not found: $TARGET_DIR"
+INDEX="$TARGET_DIR/MEMORY.md"
+
+# ---- list mode --------------------------------------------------------------
+
+if [[ "$MODE" == "list" ]]; then
+    [[ -f "$INDEX" ]] || die "error" "no MEMORY.md at $INDEX"
+    echo
+    msg "$GREEN" "index" "$INDEX"
+    echo
+    cat "$INDEX"
+    echo
+    exit 0
+fi
+
+# ---- forget mode ------------------------------------------------------------
+
+normalize_slug() {
+    # Strip leading "type_" if present; output base slug (with underscores).
+    local s="$1"
+    s="${s#user_}"; s="${s#feedback_}"; s="${s#project_}"; s="${s#reference_}"
+    s="${s//-/_}"
+    printf '%s' "$s"
+}
+
+slug_to_filename_glob() {
+    # Match either <type>_<slug>.md for any type.
+    local s
+    s="$(normalize_slug "$1")"
+    printf '%s' "*_${s}.md"
+}
+
+if [[ "$MODE" == "forget" ]]; then
+    glob="$(slug_to_filename_glob "$FORGET_SLUG")"
+    # shellcheck disable=SC2086
+    matches=( $(cd "$TARGET_DIR" && ls -1 $glob 2>/dev/null || true) )
+    if (( ${#matches[@]} == 0 )); then
+        die "error" "no memory matched: $FORGET_SLUG (looked for $glob)"
+    fi
+    if (( ${#matches[@]} > 1 )); then
+        die "error" "ambiguous slug $FORGET_SLUG matched: ${matches[*]}"
+    fi
+    target="${matches[0]}"
+    rm -f "$TARGET_DIR/$target"
+    if [[ -f "$INDEX" ]]; then
+        # Drop any line that links to that filename.
+        tmp="$(mktemp)"
+        grep -v "($target)" "$INDEX" > "$tmp" || true
+        mv "$tmp" "$INDEX"
+    fi
+    echo
+    msg "$GREEN" "forgot" "$target"
+    echo
+    exit 0
+fi
+
+# ---- write mode -------------------------------------------------------------
+
+if (( ${#POSITIONAL[@]} != 3 )); then
+    die "usage" "expected: remember <type> <slug> \"<title>\" (got ${#POSITIONAL[@]})" 2
+fi
+
+TYPE="${POSITIONAL[0]}"
+SLUG="${POSITIONAL[1]}"
+TITLE="${POSITIONAL[2]}"
+
+case "$TYPE" in
+    user|feedback|project|reference) ;;
+    *) die "usage" "type must be one of: user, feedback, project, reference" 2 ;;
+esac
+
+[[ -n "$SLUG"  ]] || die "usage" "slug cannot be empty" 2
+[[ -n "$TITLE" ]] || die "usage" "title cannot be empty" 2
+
+# Source body: --body > --body-file > stdin
+if [[ -n "$BODY" ]]; then
+    :
+elif [[ -n "$BODY_FILE" ]]; then
+    [[ -f "$BODY_FILE" ]] || die "error" "body file not found: $BODY_FILE"
+    BODY="$(cat "$BODY_FILE")"
+elif [[ ! -t 0 ]]; then
+    BODY="$(cat)"
+else
+    die "usage" "body required (pipe stdin, use --body, or --body-file)" 2
+fi
+
+[[ -n "$DESCRIPTION" ]] || DESCRIPTION="$TITLE"
+[[ -n "$HOOK"        ]] || HOOK="$TITLE"
+
+# Normalize slug for both contexts.
+base_slug="$(normalize_slug "$SLUG")"
+filename="${TYPE}_${base_slug}.md"
+filepath="$TARGET_DIR/$filename"
+# `name:` matches the filename basename with underscores → dashes,
+# e.g. "feedback_use_rg_and_fd.md" → "feedback-use-rg-and-fd".
+name_kebab="${TYPE}-${base_slug//_/-}"
+
+if [[ -e "$filepath" ]]; then
+    die "error" "memory file exists: $filename (use --forget first or pick a new slug)"
+fi
+
+# Refuse to add a duplicate index line for the same filename.
+if [[ -f "$INDEX" ]] && grep -q "($filename)" "$INDEX"; then
+    die "error" "MEMORY.md already has an entry for $filename"
+fi
+
+# Write the memory file. Description is always double-quoted to match
+# the format Claude Code emits when it writes memories itself.
+esc_description="${DESCRIPTION//\"/\\\"}"
+{
+    echo "---"
+    echo "name: $name_kebab"
+    echo "description: \"$esc_description\""
+    echo "metadata:"
+    echo "  type: $TYPE"
+    echo "---"
+    echo
+    echo "$BODY"
+} > "$filepath"
+
+# Append the index entry. Normalize trailing whitespace on the existing
+# file so we never leave an orphan blank line between entries — `$(<file)`
+# already strips trailing newlines on read.
+new_line="$(printf -- '- [%s](%s) — %s' "$TITLE" "$filename" "$HOOK")"
+if [[ -s "$INDEX" ]]; then
+    existing="$(<"$INDEX")"
+    printf '%s\n%s\n' "$existing" "$new_line" > "$INDEX"
+else
+    printf '%s\n' "$new_line" > "$INDEX"
+fi
+
+echo
+msg "$GREEN" "remembered" "$filename"
+msg "$GREEN" "indexed"    "$INDEX"
+echo

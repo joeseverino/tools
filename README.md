@@ -30,9 +30,12 @@ tools/
   vault                # vault: sync / status / inbox listing
   backup               # backup: mirror tracked files into $BACKUPS_HOME
   dns-test             # diag: compare DNS resolver latency across paths
+  ts-acl               # tailscale: fetch live ACL, diff against vault mirror
   hq                   # severino-hq: sync vault frontmatter → HQ docs index
   site                 # jseverino.com: vault → Astro build → Cloudflare Pages
   brand                # severino-brand: render brand kits via branding-engine
+  remember             # claude: write a memory file + MEMORY.md entry in one shot
+  archive/             # retired scripts, kept for reference (see Archived)
   lib/
     common.sh          # shared: colors, msg, die, header, footer, state
     init.sh            # bootstrap sourced by every tool
@@ -42,6 +45,7 @@ tools/
     crypt.sh           # default key paths from $KEYS_HOME
     vault.sh           # default vault + inbox paths from $NOTES_HOME
     hq.sh              # HQ_SSH_HOST + HQ_REMOTE_PATH + HQ_URL guards
+    ts-acl.sh          # creds path + tailnet + vault ACL doc for ts-acl
     site.sh.example    # template — copy to site.sh: site path + dev host
     backup.sh.example  # template — copy to backup.sh, edit, ignore
   completions/
@@ -188,7 +192,9 @@ label via `TOOLS_WATCH_LABEL` (default `com.tools.vault-sync`).
 ### encrypt / decrypt
 
 Wrappers around [age](https://github.com/FiloSottile/age) for locking
-and unlocking files with an SSH ed25519 key.
+and unlocking files with an SSH ed25519 key. See [`SECURITY.md`](SECURITY.md)
+for the threat model — in particular, what encryption-at-rest does and does
+*not* protect against.
 
 ```
 encrypt [options] <file>...
@@ -492,6 +498,75 @@ Adding a path is one line in the `paths=( ... )` table inside the
 script — `"Label|sampler|arg"` where the sampler is `sample_dig` or
 `sample_doh`. Adding DoT is a matter of writing a `sample_dot` that
 shells out to `kdig +tls`.
+
+### ts-acl
+
+Fetch the live Tailscale ACL policy and diff it against the copy stored in
+the vault, so policy drift gets caught instead of silently going stale.
+
+```
+ts-acl show     # print the live policy (sorted JSON)
+ts-acl diff     # diff live vs the vault mirror; exit 1 on drift
+```
+
+Auth credentials live age-encrypted at `$TS_ACL_CREDS`
+(default `$KEYS_HOME/tailscale/ts-oauth.env.age`) as an env file. Use either a
+plain API access token, or — preferred, read-only — an OAuth client:
+
+```
+# either
+TS_API_TOKEN=tskey-api-...
+# or
+TS_OAUTH_CLIENT_ID=k...
+TS_OAUTH_CLIENT_SECRET=tskey-client-...
+```
+
+An OAuth client scoped to `acl:read` is least-privilege and does not expire; an
+API access token is full-account and expires in 90 days (rotate before then).
+
+`ts-acl` streams it via `decrypt -p` (no plaintext on disk), exchanges it for a
+short-lived access token, then reads `GET /api/v2/tailnet/-/acl`. `diff` pulls
+the fenced ```json block from `$TS_ACL_VAULT_DOC`. Needs `curl` and `jq`.
+
+Setup: create either an API access token or (preferred) an OAuth client scoped
+to `acl:read` in the Tailscale admin console, then encrypt the env file to
+`$TS_ACL_CREDS`.
+
+### remember
+
+Write a Claude memory file and its `MEMORY.md` index entry in one shot, instead
+of the two-step "create the file, then hand-edit the index" loop.
+
+```
+remember <type> <slug> "<title>" [options]   < body
+remember --list
+remember --forget <slug>
+```
+
+`<type>` is one of `user | feedback | project | reference`. Body comes from
+stdin (or `--body` / `--body-file`); frontmatter is generated from the args.
+The memory dir defaults to `$CLAUDE_MEMORY_DIR` or one derived from the CWD,
+override with `--dir`.
+
+```
+echo "rule body here" | remember feedback use-rg-and-fd "Use rg and fd"
+```
+
+---
+
+## Archived
+
+Retired scripts live in `archive/`. They are not on `$PATH` (not in the install
+manifest) and are kept only for reference or occasional manual use.
+
+- **`wp-static`** — mirrors a WordPress site into a static directory for
+  Cloudflare Pages / Netlify (wraps `wget --mirror` with WP-aware defaults and a
+  post-processor that fixes shortlinks and strips `?ver=` cache-busters). Used
+  during the WordPress → static migration; kept for re-mirroring the legacy
+  site. Its `wp-static.sh.example` config and `wp-static-postprocess.py` live
+  alongside it in `archive/`.
+- **`grep-vs-rg.sh`** — one-off benchmark comparing `grep` vs `ripgrep` on a
+  directory tree (uses `hyperfine` if present).
 
 ---
 
