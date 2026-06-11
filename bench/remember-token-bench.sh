@@ -20,7 +20,7 @@ export TOOLS_HOME="${TOOLS_HOME:-$(cd "$HERE/.." && pwd)}"
 # shellcheck source=lib/init.sh
 source "$TOOLS_HOME/lib/init.sh" ""
 
-REMEMBER="$TOOLS_HOME/remember"
+REMEMBER="$TOOLS_HOME/bin/remember"
 INDEX_SIZES=(10 30 100 300)
 
 LAST_NEW=0

@@ -85,7 +85,7 @@ EOF
 }
 
 cmd_manifest() {
-    python3 "$LIB_DIR/hq-manifest.py" "$VAULT" "$HQ_VAULT_DIRS"
+    python3 "$LIB_DIR/hq/manifest.py" "$VAULT" "$HQ_VAULT_DIRS"
 }
 
 cmd_sync() {
@@ -120,7 +120,7 @@ HELP
     tmp="$(mktemp -t hq-manifest.XXXXXX.json)"
     trap 'rm -f "${tmp:-}"' EXIT
 
-    python3 "$LIB_DIR/hq-manifest.py" "$VAULT" "$HQ_VAULT_DIRS" > "$tmp" 2>/dev/null
+    python3 "$LIB_DIR/hq/manifest.py" "$VAULT" "$HQ_VAULT_DIRS" > "$tmp" 2>/dev/null
 
     msg "$DIM" "sync" "vault → HQ"
     local stats_json

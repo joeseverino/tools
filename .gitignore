@@ -14,3 +14,11 @@ config/site.sh
 # Automator .app bundles are user-specific and contain compiled stubs +
 # localization data. Adopters should build their own — see README.
 apps/
+
+# doc-to-pdf bundles mermaid + markdown-it locally (offline render); keep the
+# lockfile, not the tree.
+
+# Shared Node deps for toolchain node commands (doc-to-pdf, ...).
+# iCloud-skipped via .nosync; keep the lockfile, not the tree.
+/node_modules
+/node_modules.nosync/

@@ -1,0 +1,8 @@
+#!/usr/bin/env node
+// doc-to-pdf <input.md> [output.pdf] — Markdown (with Mermaid) to PDF, offline.
+// Thin launcher; implementation + pinned deps live in lib/doc-to-pdf/.
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+await import(path.join(here, '..', 'lib', 'doc-to-pdf', 'index.mjs'));

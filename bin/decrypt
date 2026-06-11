@@ -61,14 +61,14 @@ done
 [[ $# -ge 1 ]] || die "usage" "decrypt <file.age>... (try -h)" 2
 command -v age >/dev/null || die "error" "age not installed (brew install age)"
 [[ -f "$AGE_KEY" ]] || die "error" "no default private key at: $AGE_KEY"
-if (( ${#EXTRA_KEYS[@]} > 0 )); then
-    for k in "${EXTRA_KEYS[@]}"; do
-        [[ -f "$k" ]] || die "error" "additional key not found: $k"
-    done
-fi
+(( ${#EXTRA_KEYS[@]} == 0 )) || require_files "additional key" "${EXTRA_KEYS[@]}"
 
+# Plain if — `[[ ]] && rm` would fail as the trap's last command when no
+# temp copy exists (unpassphrased key), and set -e turns that into exit 1.
 cleanup_unlocked() {
-    [[ -n "$UNLOCKED_KEY" && -f "$UNLOCKED_KEY" ]] && rm -f "$UNLOCKED_KEY"
+    if [[ -n "$UNLOCKED_KEY" && -f "$UNLOCKED_KEY" ]]; then
+        rm -f "$UNLOCKED_KEY"
+    fi
 }
 trap cleanup_unlocked EXIT INT TERM
 

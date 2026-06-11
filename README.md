@@ -17,40 +17,64 @@ equivalents in-tree.
 - `zsh` ≥ 5 — for the completion file and `dns-test`.
 - `age`, `git`, `rsync` — `brew install age git rsync`.
 - An age-compatible identity (SSH ed25519 is fine).
+- `node` ≥ 20 — only for the Node-based tools (`doc-to-pdf`,
+  `site manage`, `site compare`). Run `npm ci` once to fetch their
+  pinned deps.
+- `shellcheck` + `bats-core` — only to run `tools check` (the CI suite)
+  locally.
 
 ## What's in the box
 
 ```
 tools/
-  tools                # umbrella: status / doctor / install / watch / key
-  encrypt              # crypt: lock files
-  decrypt              # crypt: unlock files (Keychain-cached passphrase)
-  open-age             # crypt: decrypt → open in default app → shred temp
-  inbox                # vault: capture a quick note
-  vault                # vault: sync / status / inbox listing
-  backup               # backup: mirror tracked files into $BACKUPS_HOME
-  dns-test             # diag: compare DNS resolver latency across paths
-  ts-acl               # tailscale: fetch live ACL, diff against vault mirror
-  hq                   # severino-hq: sync vault frontmatter → HQ docs index
-  site                 # jseverino.com: vault → Astro build → Cloudflare Pages
-  brand                # severino-brand: render brand kits via branding-engine
-  remember             # claude: write a memory file + MEMORY.md entry in one shot
-  archive/             # retired scripts, kept for reference (see Archived)
+  bin/                   # one executable per tool — `ls bin` is the tool list
+    tools                # umbrella: status / doctor / install / watch / key
+    encrypt              # crypt: lock files
+    decrypt              # crypt: unlock files (Keychain-cached passphrase)
+    open-age             # crypt: decrypt → open in default app → shred temp
+    inbox                # vault: capture a quick note
+    vault                # vault: sync / status / inbox listing
+    backup               # backup: mirror tracked files into $BACKUPS_HOME
+    dns-test             # diag: compare DNS resolver latency across paths
+    ts-acl               # tailscale: fetch live ACL, diff against vault mirror
+    hq                   # severino-hq: sync vault frontmatter → HQ docs index
+    site                 # jseverino.com: vault → Astro build → Cloudflare Pages
+    brand                # severino-brand: render brand kits via branding-engine
+    remember             # claude: write a memory file + MEMORY.md entry in one shot
+    doc-to-pdf           # docs: Markdown (with Mermaid) → PDF, fully offline
   lib/
-    common.sh          # shared: colors, msg, die, header, footer, state
-    init.sh            # bootstrap sourced by every tool
-    key.sh             # SSH passphrase + age-key unlock
-    hq-manifest.py     # severino-hq: extract YAML frontmatter, emit manifest JSON
+    common.sh            # shared: colors, msg, die, header, footer, state
+    init.sh              # shared: bootstrap sourced by every tool
+    key.sh               # shared: SSH passphrase + age-key unlock
+    hq/                  # hq implementation (frontmatter → manifest JSON)
+    site/                # site implementation (the `site manage` TUI)
+    doc-to-pdf/          # doc-to-pdf implementation (markdown-it + mermaid)
   config/
-    crypt.sh           # default key paths from $KEYS_HOME
-    vault.sh           # default vault + inbox paths from $NOTES_HOME
-    hq.sh              # HQ_SSH_HOST + HQ_REMOTE_PATH + HQ_URL guards
-    ts-acl.sh          # creds path + tailnet + vault ACL doc for ts-acl
-    site.sh.example    # template — copy to site.sh: site path + dev host
-    backup.sh.example  # template — copy to backup.sh, edit, ignore
+    crypt.sh             # default key paths from $KEYS_HOME
+    vault.sh             # default vault + inbox paths from $NOTES_HOME
+    hq.sh                # HQ_SSH_HOST + HQ_REMOTE_PATH + HQ_URL guards
+    ts-acl.sh            # creds path + tailnet + vault ACL doc for ts-acl
+    site.sh.example      # template — copy to site.sh: site path + dev host
+    backup.sh.example    # template — copy to backup.sh, edit, ignore
   completions/
-    _tools-suite       # zsh completion for every tool
+    _tools-suite         # zsh completion for every tool
+  tests/                 # bats suite — hermetic, throwaway keys, no Keychain
+  bench/                 # measured claims live here; asserted in CI
+  archive/               # retired scripts, kept for reference (see Archived)
 ```
+
+Layout rules, so the repo stays navigable as it grows:
+
+- **`bin/` is the public surface.** Exactly one executable per tool, no
+  support files. `tools install`, the zsh completions, and CI all discover
+  tools by iterating `bin/*`, so adding a tool means dropping one file there.
+- **`lib/` splits shared from tool-specific.** Helpers used by every tool
+  (`common.sh`, `init.sh`, `key.sh`) sit flat; anything that belongs to one
+  tool lives under `lib/<tool>/`, so a tool's footprint is obvious and
+  removable.
+- **Tools that outgrow a script become their own project.** `site compare`
+  launches the sitedrift viewer from its own checkout (override the entry
+  point with `SITEDRIFT_ENTRY`) rather than vendoring a copy here.
 
 ## Install
 
@@ -127,15 +151,26 @@ Umbrella command for managing the suite itself.
 
 ```
 tools status     # vault + inbox + backup + keys, one screen
-tools doctor     # verify env vars, deps, key paths, and symlinks
+tools doctor     # verify env vars, deps, key paths, symlinks, completions
+tools check      # run the full CI suite locally: lint, tests, bench
+tools new <name> # scaffold a new tool with the house conventions
 tools install    # idempotent: create/refresh symlinks
 tools key        # cache / forget / test the age key passphrase
 tools watch      # opt-in: launchd auto-sync (off by default)
 ```
 
 `tools status` is the daily health check; `tools doctor` is the
-new-machine smoke test. `TOOLS_INSTALL_DIR` overrides the install
+new-machine smoke test. Both take `--json` for machine-readable output
+(useful for agents and cron). `TOOLS_INSTALL_DIR` overrides the install
 target.
+
+`tools check` is the same command CI runs — the definition of "passing"
+lives in one place. It discovers scripts by shebang (`bash -n`, `zsh -n`,
+`node --check`), runs shellcheck over the tracked shell sources, the
+bats test suite in `tests/`, and the bench assertions in `bench/`.
+`tools new <name>` drops a canonical skeleton in `bin/` — init.sh
+sourcing, usage block, arg loop, correct exit codes — and prints the
+follow-ups.
 
 #### tools key — passphrase cache
 
@@ -406,23 +441,76 @@ site status              # repo location, git state, build-output state
 site sync                # vault → src/content + public assets
 site check               # Astro diagnostics
 site build               # full Astro build
-site publish             # clean + sync + check + build + audit
-site publish-all         # hq sync + publish + auto-commit + push — one command
+site publish [--no-push] # THE ship command, no slug: gate every published
+                         # writeup → hq sync → build + audits → auto-commit +
+                         # push → verify each affected writeup live
 site new-writeup <slug>  # scaffold a vault writeup from the template
+site validate <slug> [--draft]  # run the publish gate standalone — report only
+site tech [query]        # technology slug catalog from the vault, filterable
+site featured [<slug> <slot|up|down|top|bottom|off>]  # show or reorder the home-page featured list
+site manage              # full-screen TUI, two tabs: Writeups (featured order,
+                         # publish state, frontmatter editing — staged until
+                         # you hit save) and Site (servers, git, build, live
+                         # status + doctor/diagnose/build/test/publish inline)
+site verify <slug>       # re-run the live checks: page, og:image, tags, home
+site diagnose [--fast]   # collect-all gate: every audit in one pass
+site doctor              # pre-flight health: CLI→npm drift, security, contrast,
+                         # parity, types, npm audit/outdated — no build
+site test [--visual|--ui|--update]  # Playwright suite (full, visual, UI, re-baseline)
+site release <version> [--ship]     # version bump + gate + signed tag + GitHub release
 site seo [--result] <url|path|slug>  # preview Google-style title, URL, description, and SEO checks
 site dev [--drafts]      # local Astro dev server (--drafts: include drafts)
 site open                # open the local dev URL
+site compare [path]      # resizable dev-vs-live split view in the browser
 site og                  # regenerate the Open Graph social card
 ```
 
+The writeup lifecycle: `site new-writeup <slug>` → write in Obsidian →
+`site dev --drafts` to preview → flip `published: true` → `site publish`.
+The publish command needs no slug — it gates every published writeup,
+builds, ships, and verifies the affected pages on the live site itself.
+(`site publish-all` remains as an alias; `site publish-writeup <slug>`
+gates one slug explicitly.)
+
 `site seo <url|path|slug>` reads the built Astro HTML from `dist.nosync` and renders a Google-style search result preview with canonical, title, description, robots, and Open Graph checks. Pass a domain, page slug, writeup slug, or absolute path; add `--result` for only the search-result mockup; run `site build` first if the page has not been built locally.
 
-`site publish-all` is the everyday path: edit a writeup in Obsidian, run it,
-and the synced snapshot is auto-committed and pushed when content changed —
-Cloudflare rebuilds within ~30s. If the sync produces no content diff, the
-command skips both commit and push. The commit message is built from the diff:
-it names each slug as published (new), edited, or removed. `--no-push` stops
-after the local build when you want to review the diff first. `site <subcommand> --help` for flag
+`site compare [path]` opens local development and the live site in a labeled,
+resizable split view. It proxies both sides through localhost so the production
+site's frame protections remain intact. It includes stable linked scrolling,
+mirrored internal navigation, fixed mobile-width panes, collapsible chrome,
+reload-free swapping, a one-pane Solo mode, Google previews, and URL-backed
+review notes. Exact pixel-locked scrolling is the default; ratio mode remains
+available when page heights differ. Every UI state has a CLI flag:
+`--mobile`, `--compact`, `--link-scroll`, `--scroll-mode`, `--mirror-links`, `--split`,
+`--swap`, `--solo`, `--focus`, `--notes`, and repeatable `--note`. AI agents should run
+`site compare [path] --no-open`, then open the printed localhost URL with their
+browser tool.
+
+Example review launch:
+
+```bash
+site compare /portfolio/ --mobile --compact --mirror-links --link-scroll \
+  --notes --note "Check card spacing" --note "Confirm mobile menu parity"
+```
+
+The viewer serves trusted local HTTPS at `https://compare.homelab:4178` using
+the existing Local PKI certificate generated by `cert-gen compare.homelab`.
+Map `compare.homelab` to `127.0.0.1` locally. Safari is the default; set
+`SITE_COMPARE_BROWSER` to override it.
+
+The viewer itself is **sitedrift**, a separate project — `site compare` is
+just the launcher. It looks for the checkout at
+`~/Documents/Code/Projects/sitedrift/` and `SITEDRIFT_ENTRY` overrides the
+entry point.
+
+`site publish` is the everyday path: edit a writeup in Obsidian, run it, and
+the synced snapshot is auto-committed and pushed when content changed —
+Cloudflare rebuilds within ~30s and the command then verifies each affected
+writeup on the live site (page status, og:image, tag pages, home placement).
+If the sync produces no content diff, the command skips commit, push, and
+verify. The commit message is built from the diff: it names each slug as
+published (new), edited, or removed. `--no-push` stops after the local build
+when you want to review the diff first. `site <subcommand> --help` for flag
 details.
 
 Layout resolves from env vars, all with defaults:
@@ -576,6 +664,24 @@ even in the best case for the manual flow, and compounds as memories accumulate.
 
 ---
 
+### doc-to-pdf
+
+Render a Markdown file to PDF with fully-rendered Mermaid diagrams —
+entirely offline. Markdown via `markdown-it`, Mermaid from the
+locally-pinned bundle, and the system Chrome in headless mode as the
+print engine. No LaTeX toolchain, no Puppeteer download, no network.
+
+```
+doc-to-pdf <input.md> [output.pdf]
+```
+
+Output defaults to the input path with a `.pdf` extension. Falls back
+to Edge or Chromium if Chrome isn't installed; `CHROME_PATH` overrides
+the browser. Deps are pinned in the repo-root `package.json` — run
+`npm ci` once before first use.
+
+---
+
 ## Archived
 
 Retired scripts live in `archive/`. They are not on `$PATH` (not in the install
@@ -612,7 +718,7 @@ double-click a `.age` file:
    export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
    for f in "$@"; do
-       "$TOOLS_HOME/encrypt" "$f" >/dev/null 2>&1 || \
+       "$TOOLS_HOME/bin/encrypt" "$f" >/dev/null 2>&1 || \
            osascript -e "display notification \"failed: $f\" with title \"Encrypt\""
    done
    osascript -e 'display notification "done" with title "Encrypt"'

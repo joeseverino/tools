@@ -59,9 +59,9 @@ trap cleanup EXIT INT TERM
 
 # Decrypt via the regular `decrypt` tool so Keychain logic stays in one place.
 if (( ${#PASSTHRU[@]} > 0 )); then
-    "$TOOLS_HOME/decrypt" "${PASSTHRU[@]}" -p "$src" > "$tmp"
+    "$TOOLS_HOME/bin/decrypt" "${PASSTHRU[@]}" -p "$src" > "$tmp"
 else
-    "$TOOLS_HOME/decrypt" -p "$src" > "$tmp"
+    "$TOOLS_HOME/bin/decrypt" -p "$src" > "$tmp"
 fi
 chmod 600 "$tmp"
 

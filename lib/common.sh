@@ -45,6 +45,42 @@ footer() {
     echo
 }
 
+# shebang_has <word> <file> — true if the file's first line mentions <word>.
+# Routes files to the right checker (bash/zsh/node) by shebang.
+shebang_has() {
+    head -1 "$2" 2>/dev/null | grep -q "$1"
+}
+
+# require_files <label> <path>... — die unless every path is a regular file.
+require_files() {
+    local label="$1" f; shift
+    for f in "$@"; do
+        [[ -f "$f" ]] || die "error" "$label not found: $f"
+    done
+}
+
+# json_escape <string> — escape a string for use inside a JSON value.
+json_escape() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    s="${s//$'\n'/\\n}"
+    s="${s//$'\r'/\\r}"
+    s="${s//$'\t'/\\t}"
+    printf '%s' "$s"
+}
+
+# json_bool <0|1> — print a JSON boolean.
+json_bool() {
+    if (( $1 )); then printf 'true'; else printf 'false'; fi
+}
+
+# json_join <item>... — comma-join pre-rendered JSON fragments.
+json_join() {
+    local IFS=','
+    printf '%s' "$*"
+}
+
 # Trim age's noisy error to a single useful line.
 age_reason() {
     echo "$1" | head -1 | sed 's/^age: error: //'
