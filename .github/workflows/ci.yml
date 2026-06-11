@@ -6,34 +6,15 @@ on:
   pull_request:
 
 jobs:
-  lint:
+  check:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install bash 4+ and zsh
-        run: brew install bash zsh shellcheck
+      - name: Install toolchain
+        run: brew install bash zsh shellcheck bats-core age
 
-      - name: bash -n on bash scripts
-        run: |
-          for f in tools encrypt decrypt vault backup inbox open-age hq remember \
-                   bench/remember-token-bench.sh; do
-            bash -n "$f"
-          done
-
-      - name: zsh -n on zsh scripts
-        run: |
-          for f in dns-test ts-acl; do
-            zsh -n "$f"
-          done
-
-      - name: shellcheck
-        run: |
-          shellcheck -x \
-            tools encrypt decrypt vault backup inbox open-age hq remember \
-            bench/remember-token-bench.sh \
-            lib/common.sh lib/init.sh lib/key.sh \
-            config/crypt.sh config/vault.sh config/backup.sh.example config/hq.sh config/ts-acl.sh
-
-      - name: benchmark — remember is cheaper than manual Write+Edit
-        run: ./bench/remember-token-bench.sh
+      # The definition of "passing" lives in `tools check`, not here —
+      # run the same command locally before pushing.
+      - name: tools check
+        run: TOOLS_HOME="$PWD" ./bin/tools check

@@ -1,4 +1,4 @@
-#compdef tools vault encrypt decrypt inbox backup open-age dns-test site hq
+#compdef tools vault encrypt decrypt inbox backup open-age dns-test site hq remember brand ts-acl doc-to-pdf
 # Completion for the personal CLI tools.
 #
 # Install by adding to ~/.zshrc, BEFORE `compinit`:
@@ -18,6 +18,8 @@ _tools() {
     subs=(
         'status:vault + inbox + backup health check'
         'doctor:verify env, deps, and installed symlinks'
+        'check:run the full CI suite locally (lint, tests, bench)'
+        'new:scaffold a new tool in bin/'
         'install:create symlinks for every tool'
         'key:cache / forget / test the age key passphrase'
         'watch:manage the launchd auto-sync agent'
@@ -42,8 +44,10 @@ _tools() {
         cmd)    _describe 'subcommand' subs ;;
         subcmd)
             case $words[2] in
-                watch) _describe 'watch subcommand' watch_subs ;;
-                key)   _describe 'key subcommand'   key_subs ;;
+                watch)         _describe 'watch subcommand' watch_subs ;;
+                key)           _describe 'key subcommand'   key_subs ;;
+                status|doctor) _arguments '--json[machine-readable output]' ;;
+                check)         _arguments '--no-bench[skip the bench scripts]' ;;
             esac
             ;;
     esac
@@ -71,15 +75,62 @@ _site() {
         'sync:sync public pages/writeups from the vault'
         'check:run Astro diagnostics'
         'build:run the Astro production build'
-        'publish:clean, sync, check, build, and audit assets'
+        'publish:gate, build, ship, and verify — the one-command publish'
+        'publish-all:alias of publish'
+        'publish-writeup:gate one slug explicitly, then publish'
+        'new-writeup:scaffold a vault writeup from the template'
+        'validate:run the writeup publish gate, report only'
+        'tech:list technology slugs from the vault catalog'
+        'featured:show or reorder the home-page featured list'
+        'manage:interactive manager — feature, reorder, publish'
+        'verify:re-run the live checks for one writeup'
+        'diagnose:collect-all gate — every audit in one pass'
+        'doctor:pre-flight health check, no build'
+        'test:run the Playwright suite'
+        'release:bump, check, tag, push, GitHub release'
+        'seo:preview the Google-style search snippet'
+        'og:regenerate the Open Graph social card'
+        'contrast:WCAG ratios for text/background pairs'
+        'parity:assert schema, Zod, and MCP agree on writeup fields'
+        'sign-security:clear-sign security.txt'
+        'check-security:verify security.txt signature and fields'
+        'scaffold-primer:scaffold a 04 Reference primer'
+        'scaffold-field:patch every layer for a new writeup field'
+        'draft-alt:draft cover_alt from the cover image'
+        'reinstall-mcp:reinstall severino-vault-mcp from source'
         'dev:start the local Astro dev server'
         'open:open the local dev URL'
+        'compare:open a resizable dev-vs-live browser comparison'
     )
     _arguments -C \
         '(-h --help)'{-h,--help}'[show help]' \
-        '1: :->cmd'
+        '1: :->cmd' \
+        '*::compare option:->compare'
     case $state in
         cmd) _describe 'subcommand' subs ;;
+        compare)
+            if [[ $words[2] == compare ]]; then
+                _arguments \
+                    '--mobile[start with fixed phone-width panes]' \
+                    '--desktop[start with fluid desktop panes]' \
+                    '--compact[start with collapsed review chrome]' \
+                    '--expanded[start with expanded review chrome]' \
+                    '--link-scroll[synchronize proportional scrolling]' \
+                    '--no-link-scroll[keep scrolling independent]' \
+                    '--scroll-mode[scroll synchronization mode]:mode:(exact ratio)' \
+                    '--mirror-links[mirror internal link clicks]' \
+                    '--no-mirror-links[keep link navigation independent]' \
+                    '--notes[open the review-notes drawer]' \
+                    '*--note[add a review note]:note text:' \
+                    '--split[initial divider percent]:percent:' \
+                    '--swap[start with LIVE on the left]' \
+                    '--solo[show one pane and swap between DEV and LIVE]' \
+                    '--split-view[show both panes]' \
+                    '--focus[side initially visible in solo mode]:side:(dev live)' \
+                    '--no-open[print URL without opening Safari]' \
+                    '*:route:'
+            fi
+            ;;
     esac
 }
 
@@ -178,4 +229,5 @@ case "$service" in
     dns-test) _dns_test "$@" ;;
     site)     _site     "$@" ;;
     hq)       _hq       "$@" ;;
+    remember|brand|ts-acl|doc-to-pdf) _files ;;
 esac

@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Fake severino-vault-mcp for hermetic site-manage tests: canned JSON, no
+# vault, no real MCP install. Shadows the real binary via PATH in helpers.bash.
+# Mutating commands log their argv to $FAKE_MCP_LOG (when set) so tests can
+# assert what a save would have written.
+
+case "${1:-}" in
+    list-writeups)
+        cat <<'JSON'
+{"ok":true,"writeups":[
+ {"slug":"alpha","title":"Alpha Writeup","published":true,"featured":true,"featured_order":1,"published_at":"2026-01-01"},
+ {"slug":"beta","title":"Beta Writeup","published":true,"featured":true,"featured_order":2,"published_at":"2026-02-01"},
+ {"slug":"gamma","title":"Gamma Draft","published":false,"featured":false}
+]}
+JSON
+        ;;
+    validate-all-writeups)
+        cat <<'JSON'
+{"ok":true,"writeups":[
+ {"slug":"alpha","blockers":[],"nits":[]},
+ {"slug":"beta","blockers":[],"nits":["description ends without a period"]},
+ {"slug":"gamma","blockers":["published is false","missing image: cover.png"],"nits":[]}
+]}
+JSON
+        ;;
+    update-writeup|reorder-featured)
+        if [[ -n "${FAKE_MCP_LOG:-}" ]]; then
+            printf '%s\n' "$*" >> "$FAKE_MCP_LOG"
+        fi
+        echo '{"ok":true}'
+        ;;
+    *)
+        echo '{"ok":true}'
+        ;;
+esac

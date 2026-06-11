@@ -49,11 +49,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -f "$AGE_PUBKEY" ]] || die "error" "no default public key at: $AGE_PUBKEY"
-if (( ${#EXTRA_KEYS[@]} > 0 )); then
-    for k in "${EXTRA_KEYS[@]}"; do
-        [[ -f "$k" ]] || die "error" "additional key not found: $k"
-    done
-fi
+(( ${#EXTRA_KEYS[@]} == 0 )) || require_files "additional key" "${EXTRA_KEYS[@]}"
 [[ $# -ge 1 ]] || die "usage" "encrypt <file>... (try -h)" 2
 command -v age >/dev/null || die "error" "age not installed (brew install age)"
 

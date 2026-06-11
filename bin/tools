@@ -17,7 +17,12 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" ""
 [[ -n "${KEYS_HOME-}"    ]] && source "$TOOLS_HOME/config/crypt.sh"
 source "$TOOLS_HOME/lib/key.sh"
 
-TOOL_NAMES=(encrypt decrypt inbox vault backup tools open-age dns-test site ts-acl remember)
+TOOL_NAMES=()
+for file in "$TOOLS_HOME/bin"/*; do
+    if [[ -f "$file" && -x "$file" ]]; then
+        TOOL_NAMES+=("$(basename "$file")")
+    fi
+done
 INSTALL_DIR="${TOOLS_INSTALL_DIR:-$HOME/.local/bin}"
 
 usage() {
@@ -27,10 +32,14 @@ Usage: tools <command>
 Commands:
   status        One-screen health check across vault, inbox, backup, keys
   doctor        Verify environment, deps, and installed symlinks
+  check         Run the full CI suite locally: lint, tests, bench
+  new <name>    Scaffold a new tool in bin/ with the house conventions
   install       Create symlinks in $INSTALL_DIR for every tool
   key           Cache / forget / test the age key passphrase in Keychain
   watch         Manage the optional launchd auto-sync agent (off by default)
   -h, --help    Show this help
+
+status and doctor accept --json for machine-readable output.
 
 Environment:
   TOOLS_HOME            Read from ~/.zshrc; root of this repo
@@ -41,12 +50,54 @@ EOF
 # ---------- status ----------
 
 cmd_status() {
-    echo
+    local json=0
+    [[ "${1:-}" == "--json" ]] && json=1
 
+    # Gather every value first; render text or JSON from the same facts.
+    local vault_ok=0 tree="" remote=""
     if [[ -d "${VAULT:-}" && -d "${VAULT:-}/.git" ]]; then
-        local tree remote tree_color="$GREEN" remote_color="$GREEN"
+        vault_ok=1
         tree=$(vault_tree   "$VAULT")
         remote=$(vault_remote "$VAULT")
+    fi
+
+    local inbox_ok=0 pending=0
+    if [[ -d "${INBOX_DIR:-}" ]]; then
+        inbox_ok=1
+        pending=$(inbox_count "$INBOX_DIR")
+    fi
+
+    local backup_ok=0 backup_repo=0 last_msg="" last_when=""
+    if [[ -n "${BACKUPS_HOME:-}" ]]; then
+        backup_ok=1
+        if [[ -d "$BACKUPS_HOME/.git" ]]; then
+            backup_repo=1
+            last_msg=$(git -C "$BACKUPS_HOME" log -1 --pretty='%s' 2>/dev/null || echo "")
+            last_when=$(git -C "$BACKUPS_HOME" log -1 --pretty='%cr' 2>/dev/null || echo "")
+        fi
+    fi
+
+    local pub_ok=0 key_ok=0
+    [[ -f "${AGE_PUBKEY:-}" ]] && pub_ok=1
+    [[ -f "${AGE_KEY:-}"    ]] && key_ok=1
+
+    if (( json )); then
+        printf '{"vault":{"ok":%s,"tree":"%s","remote":"%s","path":"%s"},' \
+            "$(json_bool "$vault_ok")" "$(json_escape "$tree")" \
+            "$(json_escape "$remote")" "$(json_escape "${VAULT:-}")"
+        printf '"inbox":{"ok":%s,"pending":%d},' "$(json_bool "$inbox_ok")" "$pending"
+        printf '"backup":{"ok":%s,"git_repo":%s,"last_commit":"%s","last_commit_when":"%s"},' \
+            "$(json_bool "$((backup_ok && backup_repo))")" "$(json_bool "$backup_repo")" \
+            "$(json_escape "$last_msg")" "$(json_escape "$last_when")"
+        printf '"keys":{"ok":%s,"pub":%s,"private":%s}}\n' \
+            "$(json_bool "$((pub_ok && key_ok))")" "$(json_bool "$pub_ok")" "$(json_bool "$key_ok")"
+        return 0
+    fi
+
+    echo
+
+    if (( vault_ok )); then
+        local tree_color="$GREEN" remote_color="$GREEN"
         [[ "$tree"   != "clean"   ]] && tree_color="$YELLOW"
         [[ "$remote" != "in sync" ]] && remote_color="$YELLOW"
         msg "$RESET" "vault" "${tree_color}${tree}${RESET}, ${remote_color}${remote}${RESET} ${DIM}($VAULT)${RESET}"
@@ -54,10 +105,9 @@ cmd_status() {
         msg "$RED" "vault" "not a git repo or VAULT not set"
     fi
 
-    if [[ -d "${INBOX_DIR:-}" ]]; then
-        local n; n=$(inbox_count "$INBOX_DIR")
-        if (( n > 0 )); then
-            msg "$YELLOW" "inbox" "$n pending note$([[ $n -eq 1 ]] || echo s)"
+    if (( inbox_ok )); then
+        if (( pending > 0 )); then
+            msg "$YELLOW" "inbox" "$pending pending note$([[ $pending -eq 1 ]] || echo s)"
         else
             msg "$GREEN" "inbox" "empty"
         fi
@@ -65,24 +115,18 @@ cmd_status() {
         msg "$RED" "inbox" "INBOX_DIR not set or missing"
     fi
 
-    if [[ -n "${BACKUPS_HOME:-}" && -d "$BACKUPS_HOME/.git" ]]; then
-        local last_msg last_when
-        last_msg=$(git -C "$BACKUPS_HOME" log -1 --pretty='%s' 2>/dev/null || echo "")
-        last_when=$(git -C "$BACKUPS_HOME" log -1 --pretty='%cr' 2>/dev/null || echo "")
+    if (( backup_repo )); then
         if [[ -n "$last_msg" ]]; then
             msg "$GREEN" "backup" "last commit ${DIM}${last_when}${RESET} — $last_msg"
         else
             msg "$YELLOW" "backup" "no commits yet"
         fi
-    elif [[ -n "${BACKUPS_HOME:-}" ]]; then
+    elif (( backup_ok )); then
         msg "$YELLOW" "backup" "$BACKUPS_HOME ${DIM}(not a git repo)${RESET}"
     else
         msg "$RED" "backup" "BACKUPS_HOME not set"
     fi
 
-    local pub_ok=0 key_ok=0
-    [[ -f "${AGE_PUBKEY:-}" ]] && pub_ok=1
-    [[ -f "${AGE_KEY:-}"    ]] && key_ok=1
     if (( pub_ok && key_ok )); then
         msg "$GREEN" "keys" "pub + private present"
     else
@@ -97,8 +141,17 @@ cmd_status() {
 
 # ---------- doctor ----------
 
+# check / check_warn collect into DOCTOR_CHECKS when --json is active,
+# print colored lines otherwise. A warn never fails the run.
+DOCTOR_JSON=0
+DOCTOR_CHECKS=()
+
 check() {
     local label="$1" ok="$2" detail="${3:-}"
+    if (( DOCTOR_JSON )); then
+        DOCTOR_CHECKS+=("{\"label\":\"$(json_escape "$label")\",\"ok\":$(json_bool "$ok"),\"detail\":\"$(json_escape "$detail")\"}")
+        (( ok )) && return 0 || return 1
+    fi
     if (( ok )); then
         msg "$GREEN" "ok" "$label${detail:+ ${DIM}($detail)${RESET}}"
         return 0
@@ -108,9 +161,21 @@ check() {
     fi
 }
 
+check_warn() {
+    local label="$1" detail="${2:-}"
+    if (( DOCTOR_JSON )); then
+        DOCTOR_CHECKS+=("{\"label\":\"$(json_escape "$label")\",\"ok\":true,\"warning\":true,\"detail\":\"$(json_escape "$detail")\"}")
+        return 0
+    fi
+    msg "$YELLOW" "warn" "$label${detail:+ ${DIM}($detail)${RESET}}"
+}
+
 cmd_doctor() {
     local fail=0
-    echo
+    DOCTOR_JSON=0
+    DOCTOR_CHECKS=()
+    [[ "${1:-}" == "--json" ]] && DOCTOR_JSON=1
+    (( DOCTOR_JSON )) || echo
 
     # Layout env vars
     for var in TOOLS_HOME KEYS_HOME NOTES_HOME BACKUPS_HOME; do
@@ -151,16 +216,39 @@ cmd_doctor() {
         fi
     done
 
+    # Node toolchain — optional: only doc-to-pdf / site manage / site compare
+    # need it, so a missing node warns instead of failing.
+    if command -v node >/dev/null; then
+        check "node" 1 "$(command -v node)"
+        if [[ -f "$TOOLS_HOME/package.json" && ! -d "$TOOLS_HOME/node_modules" ]]; then
+            check_warn "node_modules" "missing — run: npm ci (needed by doc-to-pdf)"
+        fi
+    else
+        check_warn "node" "not installed — doc-to-pdf and site manage/compare need it"
+    fi
+
+    # Completions drift — every tool in bin/ should be on the #compdef line.
+    local compdef missing_comp=""
+    compdef="$(head -1 "$TOOLS_HOME/completions/_tools-suite" 2>/dev/null || echo "")"
+    for name in "${TOOL_NAMES[@]}"; do
+        [[ " ${compdef#\#compdef } " == *" $name "* ]] || missing_comp+="$name "
+    done
+    if [[ -z "$missing_comp" ]]; then
+        check "completions cover bin/" 1 "${#TOOL_NAMES[@]} tools"
+    else
+        check "completions cover bin/" 0 "missing from #compdef: ${missing_comp% }" || fail=1
+    fi
+
     # Symlinks in install dir (top-level tools + lib helpers)
     for name in "${TOOL_NAMES[@]}"; do
         local link="$INSTALL_DIR/$name"
         if [[ -L "$link" ]]; then
             local target
             target="$(readlink "$link")"
-            if [[ "$target" == "$TOOLS_HOME/$name" ]]; then
+            if [[ "$target" == "$TOOLS_HOME/bin/$name" ]]; then
                 check "$name symlink" 1 "$link"
             else
-                check "$name symlink" 0 "points to $target, expected $TOOLS_HOME/$name"
+                check "$name symlink" 0 "points to $target, expected $TOOLS_HOME/bin/$name"
                 fail=1
             fi
         else
@@ -168,6 +256,12 @@ cmd_doctor() {
             fail=1
         fi
     done
+
+    if (( DOCTOR_JSON )); then
+        local ok=1; (( fail )) && ok=0
+        printf '{"ok":%s,"checks":[%s]}\n' "$(json_bool "$ok")" "$(json_join "${DOCTOR_CHECKS[@]}")"
+        return "$fail"
+    fi
 
     echo
     if (( fail )); then
@@ -185,7 +279,7 @@ cmd_install() {
     echo
     local created=0 updated=0 skipped=0
     for name in "${TOOL_NAMES[@]}"; do
-        local src="$TOOLS_HOME/$name" dst="$INSTALL_DIR/$name"
+        local src="$TOOLS_HOME/bin/$name" dst="$INSTALL_DIR/$name"
         [[ -x "$src" ]] || { msg "$RED" "skipped" "$name ${DIM}(not executable at $src)${RESET}"; skipped=$((skipped+1)); continue; }
         if [[ -L "$dst" ]]; then
             local current
@@ -215,6 +309,203 @@ cmd_install() {
         *) printf "  %snote%s       %s is not on \$PATH — add it in ~/.zshrc\n\n" \
             "$BOLD$YELLOW" "$RESET" "$INSTALL_DIR" ;;
     esac
+}
+
+# ---------- check (the CI suite, runnable locally) ----------
+# CI calls `tools check` so the definition of "passing" lives in exactly
+# one place. Tools are discovered by shebang — adding a file to bin/ adds
+# it to every check automatically.
+
+cmd_check() {
+    local run_bench=1 fail=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --no-bench) run_bench=0; shift ;;
+            -h|--help)
+                cat <<EOF
+Usage: tools check [--no-bench]
+
+Run everything CI runs, locally: bash -n / zsh -n / node --check by
+shebang over bin/, shellcheck over the tracked shell sources, the bats
+test suite, and the bench assertions. Exit 1 if anything fails.
+
+  --no-bench    Skip the bench scripts (the slowest step)
+EOF
+                return 0 ;;
+            *) die "usage" "unknown option: $1 (try -h)" 2 ;;
+        esac
+    done
+
+    cd "$TOOLS_HOME"
+    echo
+    local f n err step_ok
+
+    # bash -n
+    step_ok=1; n=0
+    for f in bin/* bench/*.sh; do
+        shebang_has bash "$f" || continue
+        n=$((n+1))
+        if ! err=$(bash -n "$f" 2>&1); then
+            msg "$RED" "fail" "bash -n $f"
+            printf '%s\n' "$err" | sed 's/^/    /'
+            step_ok=0
+        fi
+    done
+    check "bash -n" "$step_ok" "$n scripts" || fail=1
+
+    # zsh -n
+    step_ok=1; n=0
+    for f in bin/*; do
+        shebang_has zsh "$f" || continue
+        n=$((n+1))
+        if ! err=$(zsh -n "$f" 2>&1); then
+            msg "$RED" "fail" "zsh -n $f"
+            printf '%s\n' "$err" | sed 's/^/    /'
+            step_ok=0
+        fi
+    done
+    check "zsh -n" "$step_ok" "$n scripts" || fail=1
+
+    # node --check (lib modules by extension, bin launchers by shebang —
+    # stdin keeps the parse mode independent of node's syntax detection)
+    if command -v node >/dev/null; then
+        step_ok=1; n=0
+        for f in lib/*/*.mjs; do
+            [[ -e "$f" ]] || continue
+            n=$((n+1))
+            if ! err=$(node --check "$f" 2>&1); then
+                msg "$RED" "fail" "node --check $f"
+                printf '%s\n' "$err" | sed 's/^/    /'
+                step_ok=0
+            fi
+        done
+        for f in bin/*; do
+            shebang_has node "$f" || continue
+            n=$((n+1))
+            if ! err=$(node --input-type=module --check < "$f" 2>&1); then
+                msg "$RED" "fail" "node --check $f"
+                printf '%s\n' "$err" | sed 's/^/    /'
+                step_ok=0
+            fi
+        done
+        check "node --check" "$step_ok" "$n scripts" || fail=1
+    else
+        check "node --check" 0 "node not installed" || fail=1
+    fi
+
+    # Lint tracked shell sources only; local config/*.sh copies are
+    # user-specific and would make the check non-reproducible.
+    if command -v shellcheck >/dev/null; then
+        local sc_targets=()
+        for f in bin/* bench/*.sh; do
+            shebang_has bash "$f" && sc_targets+=("$f")
+        done
+        sc_targets+=(lib/common.sh lib/init.sh lib/key.sh
+                     config/crypt.sh config/vault.sh config/backup.sh.example
+                     config/hq.sh config/ts-acl.sh config/site.sh.example)
+        if err=$(shellcheck -x "${sc_targets[@]}" 2>&1); then
+            check "shellcheck" 1 "${#sc_targets[@]} files"
+        else
+            printf '%s\n' "$err" | sed 's/^/    /'
+            check "shellcheck" 0 "findings above" || fail=1
+        fi
+    else
+        check "shellcheck" 0 "not installed (brew install shellcheck)" || fail=1
+    fi
+
+    # bats tests
+    if [[ -d tests ]]; then
+        if command -v bats >/dev/null; then
+            if err=$(bats tests 2>&1); then
+                check "bats tests" 1 "$(printf '%s\n' "$err" | grep -c '^ok') passed"
+            else
+                printf '%s\n' "$err" | sed 's/^/    /'
+                check "bats tests" 0 "failures above" || fail=1
+            fi
+        else
+            check "bats tests" 0 "bats not installed (brew install bats-core)" || fail=1
+        fi
+    fi
+
+    # bench — each script asserts its own claim and exits nonzero on regression
+    if (( run_bench )); then
+        for f in bench/*.sh; do
+            if err=$("./$f" 2>&1); then
+                check "bench ${f##*/}" 1
+            else
+                printf '%s\n' "$err" | tail -20 | sed 's/^/    /'
+                check "bench ${f##*/}" 0 "output above" || fail=1
+            fi
+        done
+    fi
+
+    echo
+    if (( fail )); then
+        printf '  %scheck%s     one or more checks failed\n\n' "$BOLD$RED" "$RESET"
+        return 1
+    fi
+    printf '  %scheck%s     all checks passed\n\n' "$BOLD$GREEN" "$RESET"
+}
+
+# ---------- new (scaffold a tool with the house conventions) ----------
+
+cmd_new() {
+    local name="${1:-}"
+    if [[ "$name" == "-h" || "$name" == "--help" ]]; then
+        cat <<EOF
+Usage: tools new <name>
+
+Scaffold bin/<name>: bash + set -euo pipefail, the lib/init.sh sourcing
+line, a usage() block, and arg parsing wired to die/msg. Prints the
+follow-ups (completions, install) when done.
+EOF
+        return 0
+    fi
+    [[ -n "$name" ]] || die "usage" "tools new <name> (try -h)" 2
+    [[ "$name" =~ ^[a-z][a-z0-9-]*$ ]] || die "usage" "name must be lowercase letters, digits, dashes" 2
+    local target="$TOOLS_HOME/bin/$name"
+    [[ -e "$target" ]] && die "error" "bin/$name already exists"
+
+    cat > "$target" <<'EOF'
+#!/usr/bin/env bash
+# __NAME__ <args> — one-line description
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" ""
+
+usage() {
+    cat <<HELP
+Usage: __NAME__ [options] <args>
+
+Describe what __NAME__ does.
+
+Options:
+  -h, --help    Show this help
+HELP
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)  usage; exit 0 ;;
+        --)         shift; break ;;
+        -*)         die "usage" "unknown option: $1 (try -h)" 2 ;;
+        *)          break ;;
+    esac
+done
+
+echo
+msg "$GREEN" "todo" "implement __NAME__"
+echo
+EOF
+    sed -i '' "s/__NAME__/$name/g" "$target"
+    chmod +x "$target"
+
+    echo
+    msg "$GREEN" "created" "bin/$name"
+    msg "$DIM"   "next"    "1. implement it (tool-specific files go in lib/$name/)"
+    msg "$DIM"   "next"    "2. add $name to the #compdef line in completions/_tools-suite"
+    msg "$DIM"   "next"    "3. tools install && tools check"
+    echo
 }
 
 # ---------- watch (opt-in launchd auto-sync) ----------
@@ -253,7 +544,7 @@ watch_enable() {
     <array>
         <string>/bin/zsh</string>
         <string>-lc</string>
-        <string>$TOOLS_HOME/vault sync 2>&amp;1 | sed "s/^/[\$(date +%Y-%m-%dT%H:%M:%S)] /" &gt;&gt; $WATCH_LOG; exit 0</string>
+        <string>$TOOLS_HOME/bin/vault sync 2>&amp;1 | sed "s/^/[\$(date +%Y-%m-%dT%H:%M:%S)] /" &gt;&gt; $WATCH_LOG; exit 0</string>
     </array>
     <key>StartInterval</key>
     <integer>$WATCH_INTERVAL</integer>
@@ -330,7 +621,7 @@ cmd_watch() {
         enable)      watch_enable ;;
         disable)     watch_disable ;;
         status)      watch_status ;;
-        run-now)     "$TOOLS_HOME/vault" sync ;;
+        run-now)     "$TOOLS_HOME/bin/vault" sync ;;
         -h|--help|"") watch_usage ;;
         *)           die "usage" "unknown watch command: $1 (try -h)" 2 ;;
     esac
@@ -418,6 +709,8 @@ cmd_key() {
 case "${1:-}" in
     status)        shift; cmd_status  "$@" ;;
     doctor)        shift; cmd_doctor  "$@" ;;
+    check)         shift; cmd_check   "$@" ;;
+    new)           shift; cmd_new     "$@" ;;
     install)       shift; cmd_install "$@" ;;
     watch)         shift; cmd_watch   "$@" ;;
     key)           shift; cmd_key     "$@" ;;

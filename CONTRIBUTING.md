@@ -4,22 +4,26 @@ Bug reports and PRs welcome. A few ground rules:
 
 ## Before opening a PR
 
-- Run `bash -n` on bash scripts and `zsh -n` on `dns-test`. CI does
-  this on every push but it's faster to catch locally.
-- Run `shellcheck` on anything you touch. Existing scripts pass
-  shellcheck with default settings; please don't regress that.
+- Run `tools check` — it's exactly what CI runs: `bash -n`/`zsh -n`/
+  `node --check` by shebang, shellcheck, the bats suite, and the bench
+  assertions. Green locally means green on the PR.
 - Match the existing style:
   - 4-space indent
   - `#!/usr/bin/env bash` + `set -euo pipefail`, except `dns-test`
-    (`#!/bin/zsh`) which uses zsh-specific idioms.
+    and `ts-acl` (`#!/bin/zsh`) which use zsh-specific idioms.
   - `lib/init.sh` sourcing pattern for any new tool.
   - Status output via `msg` / `header` / `footer` / `die` — don't
     invent new colors or layouts unless the tool genuinely needs
     something different.
 - Add `-h` / `--help` output for any new tool.
-- If you add a new tool, add it to `TOOL_NAMES` in `tools` (so
-  `tools install` / `tools doctor` pick it up) and to the
-  completion file in `completions/_tools-suite`.
+- New tools start with `tools new <name>` — it scaffolds the canonical
+  skeleton in `bin/`, and `tools install`, `tools doctor`, and CI
+  discover it automatically. Tool-specific support files go in
+  `lib/<tool>/`; only code shared by two or more tools belongs flat in
+  `lib/`. Add the tool to the `#compdef` line in
+  `completions/_tools-suite` (`tools doctor` flags drift).
+- Behavior that matters gets a bats test in `tests/`. Tests must stay
+  hermetic — throwaway keys, tmpdirs, no Keychain, no network.
 
 ## Scope
 

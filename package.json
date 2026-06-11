@@ -1,0 +1,11 @@
+{
+  "name": "severino-tools",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared Node dependencies for the Severino toolchain's node-based commands (doc-to-pdf, etc.). Tool implementations live under lib/<tool>/ and resolve these via Node's upward node_modules lookup.",
+  "dependencies": {
+    "markdown-it": "14.2.0",
+    "mermaid": "11.15.0"
+  }
+}

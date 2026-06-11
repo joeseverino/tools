@@ -5,7 +5,7 @@ configured doc folders, and emit a JSON array suitable for
 `manage.py import_docs_manifest -` on Severino HQ.
 
 Usage:
-    hq-manifest.py <vault-root> <colon-separated-subdirs>
+    manifest.py <vault-root> <colon-separated-subdirs>
 
 Stdin/stderr conventions:
   - JSON array on stdout (the manifest)
@@ -223,7 +223,7 @@ def extract_frontmatter(path: Path) -> dict | None:
 
 def main(argv: list[str]) -> int:
     if len(argv) != 3:
-        print("usage: hq-manifest.py <vault-root> <a:b:c>", file=sys.stderr)
+        print("usage: manifest.py <vault-root> <a:b:c>", file=sys.stderr)
         return 2
 
     vault = Path(argv[1])

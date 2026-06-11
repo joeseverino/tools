@@ -1,0 +1,1390 @@
+#!/usr/bin/env bash
+# site <command> — public jseverino.com Astro site workflow
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" ""
+
+CODE_HOME="${CODE_HOME:-$HOME/Documents/Code}"
+SITE_HOME="${SITE_HOME:-$CODE_HOME/Projects/jseverino.com}"
+NOTES_HOME="${NOTES_HOME:-$CODE_HOME/Severino Labs}"
+SITE_DEV_HOST="${SITE_DEV_HOST:-127.0.0.1}"
+SITE_DEV_PORT="${SITE_DEV_PORT:-4321}"
+
+if [[ -f "$TOOLS_HOME/config/site.sh" ]]; then
+    # shellcheck source=config/site.sh.example
+    source "$TOOLS_HOME/config/site.sh"
+fi
+
+usage() {
+    cat <<EOF
+Usage: site <command>
+
+Commands:
+  status              Show repo location, git state, and build-output state
+  sync                Sync public pages/writeups from the vault into the site repo
+  check               Run Astro diagnostics
+  contrast            Compute WCAG ratios for every text/background pair in base.css
+  parity              Assert vault Frontmatter Schema, Zod, and MCP agree on writeup fields
+  build               Run the full Astro build
+  publish [--no-push] THE ship command, no slug needed: gate every published
+                      writeup, hq sync, build + audits, auto-commit, push,
+                      then verify each affected writeup live. --no-push stops
+                      after the local build.
+  sign-security       Clear-sign public/.well-known/security.txt with the security@ key
+  check-security      Verify signature, required fields, Expires, and WKD file
+  scaffold-primer <title> [--tags a,b]
+                      Scaffold a new 04 Reference/ primer with slim frontmatter
+  scaffold-field --name X --description Y [--apply]
+                      Patch every layer needed for a new writeup field (dry-run by default)
+  draft-alt <slug>|--all [--apply]
+                      Use Claude API to draft cover_alt from the cover image
+  publish-all         Alias of publish.
+  release <version> [--ship]
+                      Bump package.json, run publish:check, commit + signed
+                      tag, push, and create the GitHub release. Dry-run by
+                      default; pass --ship to execute.
+  test [--visual|--ui|--update]
+                      Run the Playwright suite (full, visual-only, UI mode,
+                      or update visual baselines).
+  diagnose [--fast|--json]
+                      The collect-all gate: run every audit and report all
+                      failures in one pass (.validation-report.md on failure).
+  doctor              Pre-flight health check: CLI→npm script drift, security,
+                      contrast, parity, type check, npm audit, npm outdated.
+                      No build.
+  reinstall-mcp       Reinstall the severino-vault-mcp package from source.
+                      Use \`/mcp\` Reconnect afterward in Claude Code.
+  publish-writeup <slug>  Validate one writeup via the severino-vault-mcp
+                      pre-flight gate, then run publish-all. Refuses to ship
+                      if the MCP reports blockers, missing slugs/images, or
+                      unresolved related_projects / related_assets.
+  new-writeup <slug>  Scaffold a new vault writeup folder from the template.
+                      Creates 05 Writeups/<slug>/ with index.md and images/.
+                      Starts as published: false so it stays out of the build
+                      until you flip it.
+  validate <slug> [--draft]
+                      Run the writeup publish gate standalone — report only,
+                      no build, no commit. --draft tolerates the published /
+                      published_at blockers while still drafting.
+  tech [query]        List technology slugs from the vault catalog, filtered
+                      by slug, label, or group when a query is given.
+  featured [<slug> <slot|up|down|top|bottom|off>]
+                      Show the home-page featured order — or move one writeup
+                      and renumber the list automatically.
+  manage              Interactive manager: every writeup on one screen — move
+                      the featured order, feature/unfeature across the line,
+                      publish/unpublish. Nothing written until you save.
+  verify <slug>       Post-publish live check: page status, OG image, tag
+                      pages, and home placement on the live site.
+  seo <url|path|slug>  Preview the Google-style search result snippet for built HTML.
+  dev                 Start the local Astro dev server (--drafts previews drafts)
+  open                Open the local dev URL in the browser
+  compare [path]       Open a resizable dev-vs-live browser comparison
+  og                  Regenerate the Open Graph social card (public/assets/og/)
+  -h, --help          Show this help
+
+Environment:
+  CODE_HOME       Defaults to ~/Documents/Code
+  SITE_HOME       Defaults to \$CODE_HOME/Projects/jseverino.com
+  NOTES_HOME      Defaults to \$CODE_HOME/Severino Labs (vault root)
+  SITE_DEV_HOST   Defaults to 127.0.0.1
+  SITE_DEV_PORT   Defaults to 4321
+  SITE_LIVE_URL   Defaults to https://jseverino.com
+  SITE_COMPARE_PORT  Defaults to 4178
+  SITE_COMPARE_BROWSER  Defaults to Safari on macOS
+EOF
+}
+
+require_site() {
+    [[ -d "$SITE_HOME" ]] || die "error" "site repo not found: $SITE_HOME"
+    [[ -f "$SITE_HOME/package.json" ]] || die "error" "package.json not found in $SITE_HOME"
+}
+
+run_npm() {
+    require_site
+    msg "$DIM" "site" "$SITE_HOME"
+    (cd "$SITE_HOME" && npm run -s "$@")
+}
+
+cmd_status() {
+    require_site
+    echo
+    msg "$RESET" "site" "$SITE_HOME"
+
+    if [[ -d "$SITE_HOME/.git" ]]; then
+        local tree remote tree_color="$GREEN" remote_color="$GREEN"
+        tree=$(vault_tree "$SITE_HOME")
+        remote=$(vault_remote "$SITE_HOME")
+        [[ "$tree" != "clean" ]] && tree_color="$YELLOW"
+        [[ "$remote" != "in sync" ]] && remote_color="$YELLOW"
+        msg "$RESET" "git" "${tree_color}${tree}${RESET}, ${remote_color}${remote}${RESET}"
+    else
+        msg "$YELLOW" "git" "not initialized"
+    fi
+
+    if [[ -d "$SITE_HOME/dist.nosync" || -d "$SITE_HOME/dist" ]]; then
+        msg "$GREEN" "dist" "present"
+    else
+        msg "$DIM" "dist" "not built"
+    fi
+
+    if [[ -d "$SITE_HOME/src/content" ]]; then
+        msg "$GREEN" "content" "synced snapshot present"
+    else
+        msg "$YELLOW" "content" "missing"
+    fi
+    echo
+}
+
+cmd_dev() {
+    local drafts=""
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+            --drafts) drafts="1"; shift ;;
+            -h|--help)
+                cat <<HELP
+Usage: site dev [--drafts]
+
+Start the local Astro dev server at http://$SITE_DEV_HOST:$SITE_DEV_PORT/.
+
+  --drafts   Sync and render published: false writeups and pages too, for
+             local preview. Drafts render in dev only — never in a build.
+HELP
+                return 0 ;;
+            *) die "error" "unknown flag: $1 (try \`site dev --help\`)" ;;
+        esac
+    done
+
+    require_site
+    msg "$DIM" "site" "$SITE_HOME"
+
+    if [[ -n "$drafts" ]]; then
+        msg "$DIM" "drafts" "syncing published: false content for preview"
+        (cd "$SITE_HOME" && npm run sync:content -- --drafts && npm run dev -- --host "$SITE_DEV_HOST" --port "$SITE_DEV_PORT")
+    else
+        (cd "$SITE_HOME" && npm run dev -- --host "$SITE_DEV_HOST" --port "$SITE_DEV_PORT")
+    fi
+}
+
+cmd_open() {
+    require_site
+    open "http://$SITE_DEV_HOST:$SITE_DEV_PORT/"
+}
+
+cmd_compare() {
+    local path="/" should_open="1" use_http="" notes_out="" clear_notes=""
+    local mode="" compact="" link_scroll="" scroll_mode="" mirror_links="" notes_open="" split="" swap="" solo="" focus="" overlay="" overlay_blend=""
+    local -a review_notes=()
+    local dev_url="http://$SITE_DEV_HOST:$SITE_DEV_PORT"
+    local live_url="${SITE_LIVE_URL:-https://jseverino.com}"
+    local compare_host="${SITE_COMPARE_HOST:-127.0.0.1}"
+    local compare_port="${SITE_COMPARE_PORT:-4178}"
+    local compare_brand="${SITE_COMPARE_BRAND:-Joe Severino}"
+    local notes_file="${SITE_COMPARE_NOTES:-${TMPDIR:-/tmp}/sitedrift-notes.json}"
+    local vault_dir="${SITE_COMPARE_VAULT:-}"
+    if [[ -z "$vault_dir" ]]; then
+        if [[ -d "$NOTES_HOME/00 Inbox" ]]; then vault_dir="$NOTES_HOME/00 Inbox"
+        elif [[ -d "$NOTES_HOME" ]]; then vault_dir="$NOTES_HOME"; fi
+    fi
+    local compare_url health_url log_file pid_file launch_label node_path session_file
+    local cert_dir cert_file key_file compare_name
+    compare_name="${SITE_COMPARE_NAME:-compare.homelab}"
+    cert_dir="${SITE_COMPARE_CERT_DIR:-$HOME/Documents/Code/Assets/PKI/Issued Certificates/$compare_name}"
+    cert_file="$cert_dir/fullchain.pem"
+    key_file="$cert_dir/$compare_name.key"
+    compare_url="https://$compare_name:$compare_port"
+    health_url="https://$compare_name:$compare_port"
+    log_file="${TMPDIR:-/tmp}/site-compare.log"
+    pid_file="${TMPDIR:-/tmp}/site-compare.pid"
+    session_file="$HOME/.sitedrift/sessions/$compare_port.json"
+    launch_label="com.severino.site-compare.$compare_port"
+    node_path="$(command -v node)"
+    # The viewer is its own project (sitedrift), not vendored here.
+    local sitedrift_entry
+    sitedrift_entry="${SITEDRIFT_ENTRY:-$HOME/Documents/Code/Projects/sitedrift/sitedrift.mjs}"
+    [[ -f "$sitedrift_entry" ]] \
+        || die "error" "sitedrift not found at $sitedrift_entry — clone it there or set SITEDRIFT_ENTRY"
+
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+            --dev) [[ "$#" -ge 2 ]] || die "usage" "--dev requires a URL"; dev_url="$2"; shift 2 ;;
+            --live) [[ "$#" -ge 2 ]] || die "usage" "--live requires a URL"; live_url="$2"; shift 2 ;;
+            --mobile) mode="mobile"; shift ;;
+            --desktop) mode="desktop"; shift ;;
+            --compact) compact="1"; shift ;;
+            --expanded) compact="0"; shift ;;
+            --link-scroll) link_scroll="1"; shift ;;
+            --no-link-scroll) link_scroll="0"; shift ;;
+            --scroll-mode)
+                [[ "$#" -ge 2 && ( "$2" == "exact" || "$2" == "ratio" ) ]] \
+                    || die "usage" "--scroll-mode requires exact or ratio"
+                scroll_mode="$2"
+                shift 2
+                ;;
+            --mirror-links) mirror_links="1"; shift ;;
+            --no-mirror-links) mirror_links="0"; shift ;;
+            --notes) notes_open="1"; shift ;;
+            --note) [[ "$#" -ge 2 ]] || die "usage" "--note requires text"; review_notes+=("$2"); shift 2 ;;
+            --split)
+                [[ "$#" -ge 2 && "$2" =~ ^[0-9]+([.][0-9]+)?$ ]] || die "usage" "--split requires a number from 15 to 85"
+                split="$2"
+                awk -v value="$split" 'BEGIN { exit !(value >= 15 && value <= 85) }' \
+                    || die "usage" "--split requires a number from 15 to 85"
+                shift 2
+                ;;
+            --swap) swap="1"; shift ;;
+            --solo) solo="1"; shift ;;
+            --split-view) solo="0"; shift ;;
+            --overlay) overlay="1"; shift ;;
+            --overlay-diff) overlay="1"; overlay_blend="difference"; shift ;;
+            --http) use_http="1"; shift ;;
+            --brand) [[ "$#" -ge 2 ]] || die "usage" "--brand requires text"; compare_brand="$2"; shift 2 ;;
+            --notes-out) [[ "$#" -ge 2 ]] || die "usage" "--notes-out requires a file path"; notes_out="$2"; shift 2 ;;
+            --clear-notes) clear_notes="1"; shift ;;
+            --focus)
+                [[ "$#" -ge 2 && ( "$2" == "dev" || "$2" == "live" ) ]] \
+                    || die "usage" "--focus requires dev or live"
+                focus="$2"
+                shift 2
+                ;;
+            --no-open) should_open=""; shift ;;
+            -h|--help)
+                cat <<HELP
+Usage: site compare [path] [options]
+
+Open a polished split-screen comparison of local development and the live site.
+Both panes stay on the same route and share a draggable center divider.
+
+  path                 Route to compare (default: /)
+  --dev URL            Development origin (default: $dev_url)
+  --live URL           Production origin (default: $live_url)
+  --mobile|--desktop   Start with phone-width or fluid panes
+  --compact|--expanded Collapse or expand the review chrome
+  --link-scroll        Synchronize proportional scrolling
+  --no-link-scroll     Start with independent scrolling
+  --scroll-mode MODE   exact single-controller lock (default) or ratio
+  --mirror-links       Open internal link clicks on both sides
+  --no-mirror-links    Keep link navigation independent
+  --split PERCENT      Initial desktop divider position (15-85)
+  --swap               Start with LIVE on the left
+  --solo               Show one pane and use Swap to flip DEV/LIVE
+  --split-view         Show both panes
+  --overlay            Stack panes and blend the top one (onion-skin)
+  --overlay-diff       Overlay in difference mode (changed pixels light up)
+  --focus dev|live     Side initially visible in Solo mode
+  --notes              Open the review-notes drawer
+  --note TEXT          Add a review note; repeat for a change list
+  --notes-out FILE     Write the current notes to FILE as Markdown
+  --clear-notes        Empty the shared notes file before starting
+  --brand NAME         Strip "| NAME" from titles in pane headers
+  --http               Serve over http without the homelab certificate
+  --no-open            Print the URL without opening Safari
+
+Review notes are stored in a shared file ($notes_file) that the viewer polls,
+so a teammate or an AI session can leave notes that show up live in the drawer.
+Set SITE_COMPARE_VAULT (defaults to the vault 00 Inbox) to enable the drawer's
+"Send to vault" button.
+
+Viewer controls:
+  Split / Solo / Overlay  One view switch; in Overlay, Diff lights up changed pixels
+  SEO                  Snippet preview + ~13-point SEO checklist per pane
+  Notes                Author-tagged, clickable (jumps to the route), per-note
+                       copy link; dock or float; Send to vault / Export .md
+  Mirror links         Apply internal link clicks to both sides
+  Status / ≠ meta      Per-pane HTTP status and metadata-diff badges
+  Caret                Collapse to a compact row (keeps the view switch)
+  O / D / S / R / 0 / / Overlay / Diff / swap / reload / reset split / focus route
+HELP
+                return 0 ;;
+            --*) die "error" "unknown flag: $1 (try \`site compare --help\`)" ;;
+            *) path="$1"; shift ;;
+        esac
+    done
+
+    [[ "$path" == /* ]] || path="/$path"
+    [[ -x "$node_path" ]] || die "error" "node is required for site compare"
+
+    local -a curl_ca=()
+    if [[ -n "$use_http" ]]; then
+        compare_url="http://$compare_host:$compare_port"
+        health_url="http://$compare_host:$compare_port"
+        cert_file=""
+        key_file=""
+    else
+        [[ -f "$cert_file" ]] || die "error" "certificate missing: run \`cert-gen $compare_name\` first (or use --http)"
+        [[ -f "$key_file" ]] || die "error" "private key missing: $key_file"
+        curl_ca=(--cacert "$cert_file")
+    fi
+
+    local expected_health current_health="" viewer_version="28" viewer_module
+    viewer_module="$(dirname "$sitedrift_entry")/src/viewer.mjs"
+    if [[ -f "$viewer_module" ]]; then
+        viewer_version="$(node -e 'const {pathToFileURL}=require("url"); import(pathToFileURL(process.argv[1])).then(({VIEWER_VERSION}) => process.stdout.write(String(VIEWER_VERSION)))' "$viewer_module")"
+    fi
+    expected_health="$(node -e 'process.stdout.write(JSON.stringify({dev:process.argv[1].replace(/\/$/, ""),live:process.argv[2].replace(/\/$/, ""),version:Number(process.argv[3])}))' "$dev_url" "$live_url" "$viewer_version")"
+    current_health="$(curl --noproxy '*' -fsS ${curl_ca[@]+"${curl_ca[@]}"} "$health_url/health" 2>/dev/null || true)"
+
+    if [[ -n "$current_health" && "$current_health" != "$expected_health" ]]; then
+        if command -v launchctl >/dev/null 2>&1; then
+            launchctl remove "$launch_label" 2>/dev/null || true
+        fi
+        if [[ -f "$pid_file" ]]; then
+            local old_pid
+            old_pid="$(cat "$pid_file")"
+            if [[ "$old_pid" =~ ^[0-9]+$ ]] && kill -0 "$old_pid" 2>/dev/null; then
+                kill "$old_pid"
+                for _ in {1..20}; do
+                    kill -0 "$old_pid" 2>/dev/null || break
+                    sleep 0.05
+                done
+            fi
+        fi
+        current_health=""
+    fi
+
+    if [[ -z "$current_health" ]]; then
+        if [[ "$(uname -s)" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; then
+            launchctl remove "$launch_label" 2>/dev/null || true
+            launchctl submit -l "$launch_label" -- \
+                /usr/bin/env \
+                SITE_COMPARE_HOST="$compare_host" \
+                SITE_COMPARE_HOSTNAME="$compare_name" \
+                SITE_COMPARE_PORT="$compare_port" \
+                SITE_COMPARE_DEV="$dev_url" \
+                SITE_COMPARE_LIVE="$live_url" \
+                SITE_COMPARE_CERT="$cert_file" \
+                SITE_COMPARE_KEY="$key_file" \
+                SITE_COMPARE_BRAND="$compare_brand" \
+                SITE_COMPARE_NOTES="$notes_file" \
+                SITE_COMPARE_VAULT="$vault_dir" \
+                "$node_path" "$sitedrift_entry"
+        else
+            SITE_COMPARE_HOST="$compare_host" \
+            SITE_COMPARE_HOSTNAME="$compare_name" \
+            SITE_COMPARE_PORT="$compare_port" \
+            SITE_COMPARE_DEV="$dev_url" \
+            SITE_COMPARE_LIVE="$live_url" \
+            SITE_COMPARE_CERT="$cert_file" \
+            SITE_COMPARE_KEY="$key_file" \
+            SITE_COMPARE_BRAND="$compare_brand" \
+            SITE_COMPARE_NOTES="$notes_file" \
+            SITE_COMPARE_VAULT="$vault_dir" \
+                nohup "$node_path" "$sitedrift_entry" >"$log_file" 2>&1 &
+            echo "$!" > "$pid_file"
+        fi
+
+        local ready=""
+        # launchctl may defer a submitted job for a few seconds under load.
+        for _ in {1..100}; do
+            if curl --noproxy '*' -fsS ${curl_ca[@]+"${curl_ca[@]}"} "$health_url/health" >/dev/null 2>&1; then
+                ready="1"
+                break
+            fi
+            sleep 0.1
+        done
+        [[ -n "$ready" ]] || die "error" "compare viewer failed to start (see $log_file)"
+    fi
+
+    local api_token=""
+    if [[ -f "$session_file" ]]; then
+        api_token="$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).token || "")' "$session_file" 2>/dev/null || true)"
+    fi
+    [[ -n "$api_token" ]] || die "error" "compare session token missing: $session_file"
+
+    # Review notes live in a shared file the viewer polls, so Joe and an AI
+    # session can leave each other notes; seed/clear through the same endpoint.
+    if [[ -n "$clear_notes" ]]; then
+        curl --noproxy '*' -fsS ${curl_ca[@]+"${curl_ca[@]}"} -X POST \
+            -H "authorization: Bearer $api_token" -H 'content-type: application/json' \
+            --data '{"op":"clear"}' "$health_url/api/v1/notes" >/dev/null 2>&1 || true
+    fi
+    for note in "${review_notes[@]+"${review_notes[@]}"}"; do
+        local payload
+        payload="$(node -e 'process.stdout.write(JSON.stringify({op:"add",text:process.argv[1],author:"joe",route:process.argv[2]}))' "$note" "$path")"
+        curl --noproxy '*' -fsS ${curl_ca[@]+"${curl_ca[@]}"} -X POST \
+            -H "authorization: Bearer $api_token" -H 'content-type: application/json' \
+            --data "$payload" "$health_url/api/v1/notes" >/dev/null 2>&1 || true
+    done
+    if [[ -n "$notes_out" ]]; then
+        if curl --noproxy '*' -fsS ${curl_ca[@]+"${curl_ca[@]}"} "$health_url/notes.md" -o "$notes_out" 2>/dev/null; then
+            msg "$GREEN" "notes" "$notes_out"
+        else
+            die "error" "could not write notes to $notes_out"
+        fi
+    fi
+
+    local encoded_path query key value
+    encoded_path="$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$path")"
+    query="path=$encoded_path&v=$viewer_version"
+    for key in mode compact scroll scrollMode mirror notes split swap solo focus overlay overlayBlend; do
+        case "$key" in
+            mode) value="$mode" ;;
+            compact) value="$compact" ;;
+            scroll) value="$link_scroll" ;;
+            scrollMode) value="$scroll_mode" ;;
+            mirror) value="$mirror_links" ;;
+            notes) value="$notes_open" ;;
+            split) value="$split" ;;
+            swap) value="$swap" ;;
+            solo) value="$solo" ;;
+            focus) value="$focus" ;;
+            overlay) value="$overlay" ;;
+            overlayBlend) value="$overlay_blend" ;;
+        esac
+        if [[ -n "$value" ]]; then
+            value="$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$value")"
+            query="$query&$key=$value"
+        fi
+    done
+    compare_url="$compare_url/?$query"
+    msg "$GREEN" "compare" "$compare_url"
+    msg "$DIM" "dev" "$dev_url$path"
+    msg "$DIM" "live" "$live_url$path"
+    msg "$DIM" "notes" "$notes_file"
+
+    if [[ -n "$should_open" ]]; then
+        local compare_browser="${SITE_COMPARE_BROWSER:-Safari}"
+
+        if [[ "$compare_browser" == "Safari" ]] && command -v osascript >/dev/null 2>&1; then
+            osascript \
+                -e 'on run argv' \
+                -e 'tell application "Safari"' \
+                -e 'activate' \
+                -e 'make new document with properties {URL:item 1 of argv}' \
+                -e 'delay 0.5' \
+                -e 'set targetID to missing value' \
+                -e 'repeat with w in windows' \
+                -e 'if URL of current tab of w is item 1 of argv then set targetID to id of w' \
+                -e 'end repeat' \
+                -e 'if targetID is not missing value then set index of window id targetID to 1' \
+                -e 'end tell' \
+                -e 'end run' \
+                "$compare_url" >/dev/null
+            msg "$DIM" "browser" "Safari"
+        elif [[ -n "$compare_browser" ]]; then
+            open -a "$compare_browser" "$compare_url"
+            msg "$DIM" "browser" "$compare_browser"
+        else
+            open "$compare_url"
+        fi
+    else
+        printf '%s\n' "$compare_url"
+    fi
+}
+
+cmd_seo() {
+    if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "$#" -eq 0 ]]; then
+        cat <<HELP
+Usage: site seo [--result] <url|path|slug>
+
+Preview the Google-style search result snippet and key SEO metadata for a built page.
+Input may be a full URL, domain, absolute path, page slug, or writeup slug.
+
+Examples:
+  site seo jseverino.com
+  site seo portfolio
+  site seo --result portfolio
+  site seo /portfolio/architecting-a-custom-detection-engine/
+  site seo architecting-a-custom-detection-engine
+
+Options:
+  -r, --result   Show only the Google-style result preview
+
+Reads dist.nosync. Run site build first if the page is missing.
+HELP
+        return 0
+    fi
+
+    require_site
+    (cd "$SITE_HOME" && npm run -s seo:preview -- "$@")
+}
+
+cmd_new_writeup() {
+    local slug="${1:-}"
+    if [[ -z "$slug" || "$slug" == "-h" || "$slug" == "--help" ]]; then
+        cat <<HELP
+Usage: site new-writeup <slug>
+
+Scaffold a new vault writeup at 05 Writeups/<slug>/ from the Writeup template.
+The slug becomes the public URL path: jseverino.com/portfolio/<slug>/
+
+Created files:
+  05 Writeups/<slug>/index.md     # frontmatter pre-filled; published: false
+  05 Writeups/<slug>/images/      # empty; drop cover.png + screenshots here
+
+The writeup stays out of the site build until you flip published: true.
+HELP
+        return 0
+    fi
+
+    # Slug hygiene: lowercase, alphanum + hyphens only.
+    if [[ ! "$slug" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+        die "error" "slug must be lowercase-kebab-case: '$slug' is not (use a-z, 0-9, hyphens)"
+    fi
+
+    local writeups_root="$NOTES_HOME/05 Writeups"
+    local target="$writeups_root/$slug"
+    local template="$NOTES_HOME/00 Templates/Writeup.md"
+
+    [[ -d "$writeups_root" ]] || die "error" "05 Writeups not found at $writeups_root"
+    [[ -f "$template" ]] || die "error" "Writeup template not found at $template"
+    [[ ! -e "$target" ]] || die "error" "writeup already exists: $target"
+
+    mkdir -p "$target/images"
+
+    local today; today="$(date +%Y-%m-%d)"
+    # {{date:YYYY-MM-DD}} → today; {{title}} → the slug (user edits both).
+    sed \
+        -e "s/{{date:YYYY-MM-DD}}/$today/g" \
+        -e "s/{{title}}/$slug/g" \
+        "$template" > "$target/index.md"
+
+    msg "$GREEN" "created" "$target/index.md"
+    msg "$DIM" "next" "edit title + description, drop cover.png in images/, flip published: true when ready"
+}
+
+require_mcp() {
+    command -v severino-vault-mcp >/dev/null 2>&1 \
+        || die "error" "severino-vault-mcp not on PATH (uv tool install the MCP first)"
+}
+
+cmd_validate() {
+    local slug="" draft=""
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+            --draft) draft="1"; shift ;;
+            -h|--help)
+                cat <<HELP
+Usage: site validate <slug> [--draft]
+
+Run the severino-vault-mcp publish gate for one writeup and print the
+report — no build, no commit, no push. The same gate \`site publish-writeup\`
+enforces, available standalone while writing.
+
+  --draft   Tolerate the published / published_at blockers so a draft can
+            be gate-checked mid-authoring. Tech slugs, images, and
+            related_* refs are still enforced.
+HELP
+                return 0 ;;
+            -*) die "error" "unknown flag: $1 (try \`site validate --help\`)" ;;
+            *) slug="$1"; shift ;;
+        esac
+    done
+    [[ -n "$slug" ]] || die "usage" "site validate <slug> [--draft]"
+    if [[ ! "$slug" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+        die "error" "slug must be lowercase-kebab-case: '$slug'"
+    fi
+    require_mcp
+    [[ -d "$NOTES_HOME/05 Writeups/$slug" ]] \
+        || die "error" "writeup folder not found: $NOTES_HOME/05 Writeups/$slug"
+
+    local report
+    report="$(SVMC_VAULT_PATH="$NOTES_HOME" severino-vault-mcp prepare-writeup-publish "$slug" 2>/dev/null || true)"
+    [[ -n "$report" ]] || die "error" "prepare-writeup-publish returned no report"
+
+    if printf '%s' "$report" | node -e '
+        let raw = "";
+        process.stdin.on("data", (d) => (raw += d));
+        process.stdin.on("end", () => {
+            const draft = process.argv[1] === "1";
+            const r = JSON.parse(raw);
+            const v = r.validation || {};
+            let blockers = v.blockers || [];
+            if (draft) blockers = blockers.filter((b) => !/^published is false|^published_at empty/.test(b));
+            const sections = [
+                ["blockers", blockers],
+                ["missing tech slugs", v.missing_tech_slugs || []],
+                ["missing images", v.missing_images || []],
+                ["unresolved refs", v.unresolved_refs || []],
+                ["nits (non-blocking)", v.nits || []],
+            ];
+            for (const [label, items] of sections) {
+                if (!items.length) continue;
+                console.log(label + ":");
+                for (const item of items) console.log("  - " + item);
+            }
+            const featured = r.featured_set || {};
+            if (featured.this_writeup_position != null) {
+                console.log("featured slot: " + featured.this_writeup_position + " of " + (featured.order || []).length);
+            }
+            const ok =
+                !blockers.length &&
+                !(v.missing_tech_slugs || []).length &&
+                !(v.missing_images || []).length &&
+                !(v.unresolved_refs || []).length;
+            process.exit(ok ? 0 : 1);
+        });
+    ' "$draft"; then
+        msg "$GREEN" "validate" "ok${draft:+ (draft mode)} — $slug"
+    else
+        die "error" "gate reports issues for $slug${draft:+ (draft mode)}" 1
+    fi
+}
+
+cmd_tech() {
+    local query="${1:-}"
+    if [[ "$query" == "-h" || "$query" == "--help" ]]; then
+        cat <<HELP
+Usage: site tech [query]
+
+List the technology slug catalog from 06 Pages/_technology-groups.md —
+the slugs a writeup's technologies: list may use. A query filters by
+slug, label, or group (case-insensitive). Featured slugs surface in the
+home-page technology cloud.
+HELP
+        return 0
+    fi
+    require_mcp
+    local report
+    report="$(SVMC_VAULT_PATH="$NOTES_HOME" severino-vault-mcp technology-catalog)" \
+        || die "error" "technology-catalog failed"
+    printf '%s' "$report" | node -e '
+        let raw = "";
+        process.stdin.on("data", (d) => (raw += d));
+        process.stdin.on("end", () => {
+            const r = JSON.parse(raw);
+            const q = (process.argv[1] || "").toLowerCase();
+            let total = 0;
+            for (const [group, entries] of Object.entries(r.by_group || {})) {
+                const rows = entries.filter(
+                    (e) =>
+                        !q ||
+                        e.slug.toLowerCase().includes(q) ||
+                        e.label.toLowerCase().includes(q) ||
+                        group.toLowerCase().includes(q)
+                );
+                if (!rows.length) continue;
+                console.log(group);
+                for (const e of rows) {
+                    console.log("  " + e.slug.padEnd(36) + e.label + (e.featured ? "  [featured]" : ""));
+                }
+                total += rows.length;
+            }
+            if (!total) {
+                console.error("no catalog match for: " + q);
+                process.exit(1);
+            }
+        });
+    ' "$query"
+}
+
+featured_render() {
+    SVMC_VAULT_PATH="$NOTES_HOME" severino-vault-mcp list-writeups --filter featured | node -e '
+        let raw = "";
+        process.stdin.on("data", (d) => (raw += d));
+        process.stdin.on("end", () => {
+            const r = JSON.parse(raw);
+            const home = r.featured_order || [];
+            const drafts = (r.order || []).filter((e) => !e.published);
+            const width = Math.max(0, ...home.map((e) => e.slug.length), ...drafts.map((e) => e.slug.length)) + 2;
+            for (const e of home) {
+                console.log("  " + String(e.slot).padStart(2) + "  " + e.slug.padEnd(width) + e.title);
+            }
+            for (const e of drafts) {
+                console.log("   -  " + e.slug.padEnd(width) + "(draft — flagged featured, not rendered)");
+            }
+            if (!home.length && !drafts.length) console.log("  no featured writeups");
+        });
+    '
+}
+
+cmd_manage() {
+    if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+        cat <<HELP
+Usage: site manage
+
+Interactive writeup manager — every writeup on one screen:
+
+  - the FEATURED list in the exact order the home page renders
+  - everything else below the line, then a "new writeup…" row
+  - ● published · ◌ draft · red ! = the publish gate would reject it
+    (open the writeup to see exactly why)
+
+Keys:
+
+  ↑/↓          select a writeup
+  enter        open it — view and edit its frontmatter fields in place,
+               with its gate issues listed; on the + row, create new
+  space        pick it up; ↑/↓ moves it, crossing the line features or
+               unfeatures it; space drops it
+  f            feature ↔ unfeature where it stands
+  p            publish ↔ unpublish (publishing sets published_at if empty)
+  n            scaffold a new writeup (site new-writeup) and open it
+  o            open the writeup in Obsidian to write the body
+  s            save — nothing is written until you do
+  q / esc      quit (asks first if changes are staged)
+  ←/→ or tab   switch between the Writeups and Site tabs; the Site tab
+               shows server/git/build status and runs dev, compare,
+               doctor, diagnose, build, test, and publish in place
+
+Saving applies everything through severino-vault-mcp (update-writeup,
+reorder-featured), so the featured list is always sequential 1..N and the
+YAML edits are format-preserving. Ship the result with \`site publish\`.
+HELP
+        return 0
+    fi
+    require_mcp
+    SVMC_VAULT_PATH="$NOTES_HOME" node "$TOOLS_HOME/lib/site/manage-tui.mjs"
+}
+
+cmd_featured() {
+    local slug="${1:-}" target="${2:-}"
+    if [[ "$slug" == "-h" || "$slug" == "--help" ]]; then
+        cat <<HELP
+Usage: site featured [<slug> <slot|up|down|top|bottom|off>]
+
+With no arguments: show the featured writeup order — the exact order the
+home page renders (featured: true, published, featured_order ascending).
+
+With a slug and a target: move that writeup and renumber the whole list
+sequentially 1..N — no hand-editing featured_order across files.
+
+  site featured my-writeup 2       put it in slot 2
+  site featured my-writeup up      one slot toward the top
+  site featured my-writeup down    one slot toward the bottom
+  site featured my-writeup top     slot 1
+  site featured my-writeup bottom  last slot
+  site featured my-writeup off     unfeature it (others close the gap)
+
+A writeup not currently featured can be inserted by number, top, or
+bottom — featured: true is set on it automatically. The new order goes
+live on the next \`site publish\`.
+HELP
+        return 0
+    fi
+    require_mcp
+
+    if [[ -z "$slug" ]]; then
+        featured_render
+        return 0
+    fi
+
+    [[ -n "$target" ]] || die "usage" "site featured <slug> <slot|up|down|top|bottom|off>"
+    if [[ ! "$slug" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+        die "error" "slug must be lowercase-kebab-case: '$slug'"
+    fi
+
+    local position
+    position="$(SVMC_VAULT_PATH="$NOTES_HOME" severino-vault-mcp list-writeups --filter featured | node -e '
+        let raw = "";
+        process.stdin.on("data", (d) => (raw += d));
+        process.stdin.on("end", () => {
+            const slug = process.argv[1];
+            const target = process.argv[2];
+            const home = (JSON.parse(raw).featured_order) || [];
+            const n = home.length;
+            const entry = home.find((e) => e.slug === slug);
+            const cur = entry ? entry.slot : null;
+            const fail = (m) => { console.error(m); process.exit(1); };
+            let pos;
+            switch (target) {
+                case "top": pos = 1; break;
+                case "bottom": pos = cur == null ? n + 1 : n; break;
+                case "up":
+                    if (cur == null) fail(slug + " is not featured — insert it with a slot number, top, or bottom");
+                    pos = Math.max(1, cur - 1);
+                    break;
+                case "down":
+                    if (cur == null) fail(slug + " is not featured — insert it with a slot number, top, or bottom");
+                    pos = Math.min(n, cur + 1);
+                    break;
+                case "off": pos = 0; break;
+                default:
+                    if (!/^[0-9]+$/.test(target)) fail("target must be a slot number, up, down, top, bottom, or off");
+                    pos = parseInt(target, 10);
+            }
+            process.stdout.write(String(pos));
+        });
+    ' "$slug" "$target")" || die "error" "could not resolve target for $slug" 1
+
+    local result
+    if ! result="$(SVMC_VAULT_PATH="$NOTES_HOME" severino-vault-mcp reorder-featured "$slug" "$position" 2>&1)"; then
+        printf '%s\n' "$result"
+        die "error" "reorder failed" 1
+    fi
+
+    if [[ "$position" == "0" ]]; then
+        msg "$GREEN" "moved" "$slug → unfeatured"
+    else
+        msg "$GREEN" "moved" "$slug → slot $position"
+    fi
+    featured_render
+    msg "$DIM" "next" "run \`site publish\` to ship the new order"
+}
+
+cmd_verify() {
+    local slug="${1:-}"
+    if [[ -z "$slug" || "$slug" == "-h" || "$slug" == "--help" ]]; then
+        cat <<HELP
+Usage: site verify <slug>
+
+Post-publish live check for one writeup. Confirms on the live site:
+
+  - /portfolio/<slug>/ returns 200
+  - the page og:image resolves
+  - every tag page (/tag/<tech>/) lists the writeup
+  - the home page shows it when featured
+
+Run after \`site publish-writeup <slug>\` once Cloudflare rebuilds (~30s).
+For metadata details use \`site seo <slug>\`; for a visual pass use
+\`site compare /portfolio/<slug>/\`.
+HELP
+        return 0
+    fi
+    if [[ ! "$slug" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+        die "error" "slug must be lowercase-kebab-case: '$slug'"
+    fi
+
+    if ! verify_writeup_live "$slug"; then
+        die "error" "verify: at least one live check failed" 1
+    fi
+    msg "$GREEN" "verify" "all live checks green — $slug"
+    msg "$DIM" "next" "site seo $slug · site compare /portfolio/$slug/"
+}
+
+verify_writeup_live() {
+    local slug="$1"
+    local live="${SITE_LIVE_URL:-https://jseverino.com}"
+    local url="$live/portfolio/$slug/"
+    local tmp failed=0 code
+    tmp="$(mktemp)"
+    code="$(curl -sS -o "$tmp" -w '%{http_code}' "$url" 2>/dev/null || true)"
+    if [[ "$code" == "200" ]]; then
+        msg "$GREEN" "page" "200 $url"
+    else
+        msg "$RED" "page" "${code:-no response} $url"
+        failed=1
+    fi
+
+    if [[ "$code" == "200" ]]; then
+        local og_image
+        og_image="$(node -e '
+            const html = require("fs").readFileSync(process.argv[1], "utf8");
+            const m =
+                html.match(/property="og:image"[^>]*content="([^"]+)"/) ||
+                html.match(/content="([^"]+)"[^>]*property="og:image"/);
+            process.stdout.write(m ? m[1] : "");
+        ' "$tmp")"
+        if [[ -n "$og_image" ]]; then
+            [[ "$og_image" == /* ]] && og_image="$live$og_image"
+            local og_code
+            og_code="$(curl -sS -o /dev/null -w '%{http_code}' "$og_image" 2>/dev/null || true)"
+            if [[ "$og_code" == "200" ]]; then
+                msg "$GREEN" "og:image" "200 $og_image"
+            else
+                msg "$RED" "og:image" "${og_code:-no response} $og_image"
+                failed=1
+            fi
+        else
+            msg "$YELLOW" "og:image" "none found on the page"
+        fi
+    fi
+    rm -f "$tmp"
+
+    # Tag and featured expectations come from the vault via the gate, so the
+    # live checks assert what the frontmatter says should be there.
+    if command -v severino-vault-mcp >/dev/null 2>&1; then
+        local meta
+        meta="$(SVMC_VAULT_PATH="$NOTES_HOME" severino-vault-mcp prepare-writeup-publish "$slug" 2>/dev/null || true)"
+        if [[ -n "$meta" ]]; then
+            local tech_list featured_slot tag tag_url
+            tech_list="$(printf '%s' "$meta" | node -e '
+                let raw = "";
+                process.stdin.on("data", (d) => (raw += d));
+                process.stdin.on("end", () => {
+                    const r = JSON.parse(raw);
+                    const fm = (r.validation || {}).frontmatter || {};
+                    process.stdout.write((fm.technologies || []).join("\n"));
+                });
+            ')"
+            featured_slot="$(printf '%s' "$meta" | node -e '
+                let raw = "";
+                process.stdin.on("data", (d) => (raw += d));
+                process.stdin.on("end", () => {
+                    const pos = (JSON.parse(raw).featured_set || {}).this_writeup_position;
+                    process.stdout.write(pos == null ? "" : String(pos));
+                });
+            ')"
+            local body
+            for tag in $tech_list; do
+                tag_url="$live/tag/$tag/"
+                body="$(curl -sS "$tag_url" 2>/dev/null || true)"
+                if [[ "$body" == *"/portfolio/$slug/"* ]]; then
+                    msg "$GREEN" "tag" "$tag_url lists it"
+                else
+                    msg "$RED" "tag" "$tag_url missing it"
+                    failed=1
+                fi
+            done
+            if [[ -n "$featured_slot" ]]; then
+                body="$(curl -sS "$live/" 2>/dev/null || true)"
+                if [[ "$body" == *"/portfolio/$slug/"* ]]; then
+                    msg "$GREEN" "featured" "home page shows it (slot $featured_slot)"
+                else
+                    msg "$RED" "featured" "home page does not show it (expected slot $featured_slot)"
+                    failed=1
+                fi
+            fi
+        fi
+    else
+        msg "$YELLOW" "skip" "severino-vault-mcp not on PATH — tag/featured checks skipped"
+    fi
+
+    return "$failed"
+}
+
+cmd_publish_writeup() {
+    local slug="${1:-}"
+    if [[ -z "$slug" || "$slug" == "-h" || "$slug" == "--help" ]]; then
+        cat <<HELP
+Usage: site publish-writeup <slug>
+
+Gated full-publish for one writeup. Runs the severino-vault-mcp
+prepare-writeup-publish CLI as a pre-flight check, then chains into
+\`site publish-all\` if the writeup is ready.
+
+Exits before any commit/push if the MCP reports blockers, missing tech
+slugs, missing images, or unresolved related_projects / related_assets.
+Use this instead of running \`site publish-all\` blind when you've just
+finished editing a single writeup.
+
+Requires the \`severino-vault-mcp\` console script on PATH (installed via
+\`uv tool install ~/Documents/Code/Assets/severino-vault-mcp\`).
+HELP
+        return 0
+    fi
+
+    if [[ ! "$slug" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+        die "error" "slug must be lowercase-kebab-case: '$slug'"
+    fi
+
+    if ! command -v severino-vault-mcp >/dev/null 2>&1; then
+        die "error" "severino-vault-mcp not on PATH (uv tool install the MCP first)"
+    fi
+
+    local writeup_dir="$NOTES_HOME/05 Writeups/$slug"
+    [[ -d "$writeup_dir" ]] || die "error" "writeup folder not found: $writeup_dir"
+
+    msg "$DIM" "validate" "prepare-writeup-publish $slug"
+    local report
+    if ! report="$(SVMC_VAULT_PATH="$NOTES_HOME" severino-vault-mcp prepare-writeup-publish "$slug" 2>&1)"; then
+        echo
+        msg "$RED" "blocked" "writeup is not ready to publish"
+        printf '%s\n' "$report"
+        echo
+        die "error" "fix the issues above, then re-run \`site publish-writeup $slug\`" 1
+    fi
+    msg "$GREEN" "validate" "ok"
+
+    cmd_publish_all
+}
+
+cmd_publish_all() {
+    local skip_push=""
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+            --no-push) skip_push="1"; shift ;;
+            -h|--help)
+                cat <<HELP
+Usage: site publish [--no-push]        (alias: site publish-all)
+
+The full vault-to-live-edge orchestrator. No slug needed — the system
+figures out what changed. Runs:
+
+  1. writeup gate            validate EVERY published writeup (severino-vault-mcp)
+  2. hq sync                 vault frontmatter → HQ
+  3. build + audits          clean + sync + astro check + build + audit
+  4. commit + push           auto-commit the synced snapshot, then push to
+                             trigger the Cloudflare Pages build
+  5. verify live             confirm each affected writeup on the live site
+                             (page, og:image, tag pages, home placement)
+
+This is the whole vault-to-live flow in one command — the common case
+"I edited a writeup or page; ship it."
+
+Only the generated snapshot (src/content, public/assets) is committed. The
+commit message is built from the diff — it names each slug as published
+(new), edited, or removed. Code or config edits are left for you to commit
+deliberately.
+
+  --no-push   Stop after the local build — no commit, no push. Use it to
+              inspect the diff first.
+
+Drafts (published: false) are kept in the vault, surface in HQ as Draft,
+and are NOT pushed to the site repo.
+HELP
+                return 0 ;;
+            *) die "error" "unknown flag: $1 (try \`site publish --help\`)" ;;
+        esac
+    done
+
+    require_site
+    command -v hq >/dev/null 2>&1 || die "error" "hq CLI not on PATH"
+
+    msg "$DIM" "step 1/5" "writeup gate (every published writeup)"
+    if command -v severino-vault-mcp >/dev/null 2>&1; then
+        local gate
+        if ! gate="$(SVMC_VAULT_PATH="$NOTES_HOME" severino-vault-mcp validate-all-writeups 2>/dev/null)"; then
+            printf '%s' "$gate" | node -e '
+                let raw = "";
+                process.stdin.on("data", (d) => (raw += d));
+                process.stdin.on("end", () => {
+                    const r = JSON.parse(raw);
+                    for (const w of r.writeups || []) {
+                        if (w.ok) continue;
+                        console.log(w.slug + ":");
+                        let listed = 0;
+                        for (const b of w.blockers || []) { console.log("  - " + b); listed++; }
+                        for (const m of w.missing_tech_slugs || []) { console.log("  - missing tech slug: " + m); listed++; }
+                        for (const m of w.missing_images || []) { console.log("  - missing image: " + m); listed++; }
+                        if (!listed) console.log("  - unresolved related refs (run: site validate " + w.slug + ")");
+                    }
+                });
+            ' || true
+            die "error" "fix the writeups above, then re-run \`site publish\`" 1
+        fi
+        msg "$GREEN" "gate" "all published writeups pass"
+    else
+        msg "$YELLOW" "gate" "severino-vault-mcp not on PATH — writeup gate skipped"
+    fi
+
+    msg "$DIM" "step 2/5" "hq sync"
+    hq sync
+
+    msg "$DIM" "step 3/5" "build + audits"
+    (cd "$SITE_HOME" && npm run -s publish:check)
+
+    if [[ -n "$skip_push" ]]; then
+        msg "$YELLOW" "steps 4-5/5" "skipped (--no-push). Inspect with \`site status\` and push manually."
+        return 0
+    fi
+
+    msg "$DIM" "step 4/5" "commit + push if content changed (site repo)"
+    local head_before
+    head_before="$(git -C "$SITE_HOME" rev-parse HEAD)"
+    (
+        cd "$SITE_HOME"
+
+        # Stage only the generated snapshot — never sweep up code/config edits.
+        git add src/content public/assets
+
+        if git diff --cached --quiet; then
+            if ! git diff --quiet; then
+                msg "$YELLOW" "note" "site repo has uncommitted non-content changes (left for you)"
+            fi
+            msg "$DIM" "skip" "no content changes — no commit or push"
+            return 0
+        else
+            # Classify each staged content change by the git status of its
+            # index file: Added → published (new), Modified → edited,
+            # Deleted → removed. An asset-only change counts as an edit.
+            classified="$(git diff --cached --name-status --no-renames \
+                -- src/content public/assets \
+                | awk -F'\t' '
+                    {
+                        c = substr($1, 1, 1)
+                        path = $2
+                        slug = ""
+                        isindex = 0
+                        if (path ~ /^src\/content\/writeups\/[^\/]+\/index\.md$/) {
+                            slug = path
+                            sub(/^src\/content\/writeups\//, "", slug)
+                            sub(/\/index\.md$/, "", slug)
+                            isindex = 1
+                        } else if (path ~ /^src\/content\/pages\/[^\/]+\.md$/) {
+                            slug = path
+                            sub(/^src\/content\/pages\//, "", slug)
+                            sub(/\.md$/, "", slug)
+                            isindex = 1
+                        } else if (path ~ /^src\/content\/[^\/]+\.md$/) {
+                            slug = path
+                            sub(/^src\/content\//, "", slug)
+                            sub(/\.md$/, "", slug)
+                            isindex = 1
+                        } else if (path ~ /^public\/assets\/writeups\/[^\/]+\//) {
+                            slug = path
+                            sub(/^public\/assets\/writeups\//, "", slug)
+                            sub(/\/.*/, "", slug)
+                        } else if (path ~ /^public\/assets\/pages\/[^\/]+\//) {
+                            slug = path
+                            sub(/^public\/assets\/pages\//, "", slug)
+                            sub(/\/.*/, "", slug)
+                        } else {
+                            next
+                        }
+                        seen[slug] = 1
+                        if (isindex) idx[slug] = c
+                    }
+                    END {
+                        for (s in seen) {
+                            st = (s in idx) ? idx[s] : "M"
+                            cat = (st == "A") ? "publish" : (st == "D") ? "remove" : "edit"
+                            print cat "\t" s
+                        }
+                    }
+                ')"
+
+            published="$(printf '%s\n' "$classified" | awk -F'\t' '$1 == "publish" { print $2 }' | sort)"
+            edited="$(printf '%s\n'    "$classified" | awk -F'\t' '$1 == "edit"    { print $2 }' | sort)"
+            removed="$(printf '%s\n'   "$classified" | awk -F'\t' '$1 == "remove"  { print $2 }' | sort)"
+
+            n_pub="$(printf '%s' "$published" | grep -c . || true)"
+            n_edt="$(printf '%s' "$edited"    | grep -c . || true)"
+            n_rem="$(printf '%s' "$removed"   | grep -c . || true)"
+            n_total=$(( n_pub + n_edt + n_rem ))
+
+            # Subject: a lone slug names itself; multiples summarize by count.
+            if [[ "$n_total" -eq 1 ]]; then
+                if [[ "$n_pub" -eq 1 ]]; then
+                    commit_subject="content: publish $published"
+                elif [[ "$n_rem" -eq 1 ]]; then
+                    commit_subject="content: remove $removed"
+                else
+                    commit_subject="content: edit $edited"
+                fi
+            else
+                summary=""
+                [[ "$n_pub" -gt 0 ]] && summary="publish $n_pub"
+                [[ "$n_edt" -gt 0 ]] && summary="${summary:+$summary, }edit $n_edt"
+                [[ "$n_rem" -gt 0 ]] && summary="${summary:+$summary, }remove $n_rem"
+                commit_subject="content: ${summary:-publish vault snapshot}"
+            fi
+
+            # Body (multiples only): the slugs grouped under each heading.
+            commit_msg="$commit_subject"
+            if [[ "$n_total" -gt 1 ]]; then
+                # Intentional splitting: each newline-delimited slug becomes
+                # one printf argument and therefore one bullet.
+                # shellcheck disable=SC2086
+                [[ "$n_pub" -gt 0 ]] && commit_msg="$commit_msg"$'\n\n'"Published:"$'\n'"$(printf '  - %s\n' $published)"
+                # shellcheck disable=SC2086
+                [[ "$n_edt" -gt 0 ]] && commit_msg="$commit_msg"$'\n\n'"Edited:"$'\n'"$(printf '  - %s\n' $edited)"
+                # shellcheck disable=SC2086
+                [[ "$n_rem" -gt 0 ]] && commit_msg="$commit_msg"$'\n\n'"Removed:"$'\n'"$(printf '  - %s\n' $removed)"
+            fi
+
+            git commit -q -F - -- src/content public/assets <<<"$commit_msg"
+            msg "$GREEN" "commit" "$commit_subject"
+        fi
+
+        # Code or config edits stay yours to commit deliberately — they are
+        # not folded into the content commit and do not block this push.
+        if ! git diff --quiet; then
+            msg "$YELLOW" "note" "site repo has uncommitted non-content changes (left for you)"
+        fi
+
+        git push
+        msg "$GREEN" "shipped" "Cloudflare Pages will rebuild from the new HEAD"
+    )
+
+    # Verify only what this publish actually shipped: writeup slugs whose
+    # synced content or assets are in the new commit. Pages and removals
+    # have no live writeup URL to assert.
+    local head_after
+    head_after="$(git -C "$SITE_HOME" rev-parse HEAD)"
+    [[ "$head_after" != "$head_before" ]] || return 0
+
+    local verify_slugs
+    verify_slugs="$(git -C "$SITE_HOME" show --name-status --no-renames --format= "$head_after" \
+        -- src/content/writeups public/assets/writeups \
+        | awk -F'\t' '
+            $1 == "D" { next }
+            $2 ~ /^src\/content\/writeups\/[^\/]+\// {
+                slug = $2
+                sub(/^src\/content\/writeups\//, "", slug); sub(/\/.*/, "", slug)
+                print slug
+            }
+            $2 ~ /^public\/assets\/writeups\/[^\/]+\// {
+                slug = $2
+                sub(/^public\/assets\/writeups\//, "", slug); sub(/\/.*/, "", slug)
+                print slug
+            }
+        ' | sort -u)"
+    [[ -n "$verify_slugs" ]] || return 0
+
+    msg "$DIM" "step 5/5" "verify live (waiting ~30s for the Cloudflare rebuild)"
+    sleep 30
+    local verify_slug all_ok=1
+    for verify_slug in $verify_slugs; do
+        if ! verify_writeup_live "$verify_slug"; then
+            msg "$YELLOW" "retry" "$verify_slug not fully live yet — waiting 30s more"
+            sleep 30
+            verify_writeup_live "$verify_slug" || all_ok=0
+        fi
+    done
+    if (( ! all_ok )); then
+        die "error" "verify failed after publish — check the Cloudflare Pages build for jseverino.com" 1
+    fi
+    # Intentional splitting: one argument per slug.
+    # shellcheck disable=SC2086
+    msg "$GREEN" "published" "live and verified:$(printf ' %s' $verify_slugs)"
+}
+
+cmd_release() {
+    require_site
+    local version="${1:-}"
+    [[ -n "$version" ]] || die "usage" "site release <version> [--ship]"
+    local ship=false
+    [[ "${2:-}" == "--ship" ]] && ship=true
+
+    cd "$SITE_HOME"
+
+    if ! git diff --quiet || ! git diff --quiet --cached; then
+        die "error" "working tree not clean; commit or stash first"
+    fi
+    local branch
+    branch=$(git symbolic-ref --short HEAD)
+    [[ "$branch" == "main" ]] || die "error" "not on main (currently: $branch)"
+
+    local prev
+    prev=$(git tag --sort=-v:refname | head -1)
+    [[ -n "$prev" ]] || die "error" "no previous tag found"
+
+    msg "$DIM" "prev" "$prev → v$version"
+    msg "$BOLD" "plan" "Release v$version"
+    echo "  - bump package.json to $version"
+    echo "  - npm run publish:check"
+    echo "  - commit 'Release v$version' with changelog from $prev..HEAD"
+    echo "  - signed annotated tag v$version"
+    echo "  - git push origin main + tag"
+    echo "  - gh release create v$version --verify-tag --notes-from-tag"
+
+    if ! $ship; then
+        echo
+        msg "$YELLOW" "dry-run" "re-run with --ship to execute"
+        return 0
+    fi
+
+    msg "$DIM" "step" "publish:check"
+    npm run -s publish:check
+
+    msg "$DIM" "step" "bump package.json"
+    node -e "const p=require('./package.json'); p.version='$version'; require('fs').writeFileSync('./package.json', JSON.stringify(p,null,2)+'\n');"
+
+    msg "$DIM" "step" "build changelog from $prev..HEAD"
+    local changelog
+    changelog=$(git log "$prev..HEAD" --reverse --pretty=format:'- %s')
+
+    msg "$DIM" "step" "commit"
+    git add -A
+    git commit -m "$(printf 'Release v%s\n\n%s\n' "$version" "$changelog")"
+
+    msg "$DIM" "step" "signed tag v$version"
+    git tag -s "v$version" -m "$(printf 'v%s\n\n%s\n' "$version" "$changelog")"
+
+    msg "$DIM" "step" "push main + tag"
+    git push origin main
+    git push origin "v$version"
+
+    msg "$DIM" "step" "gh release"
+    gh release create "v$version" --verify-tag --notes-from-tag --title "v$version"
+
+    msg "$GREEN" "released" "v$version live; Cloudflare Pages will rebuild"
+}
+
+cmd_test() {
+    require_site
+    local script="test:e2e"
+    case "${1:-}" in
+        --visual) script="test:e2e:visual" ;;
+        --ui) script="test:e2e:ui" ;;
+        --update) script="test:e2e:visual:update" ;;
+        '') ;;
+        *) die "usage" "unknown test mode: $1 (--visual | --ui | --update)" ;;
+    esac
+    run_npm "$script"
+}
+
+cmd_doctor() {
+    require_site
+    cd "$SITE_HOME"
+    local failed=0
+
+    # The CLI→npm seam has no other guard: a renamed npm script breaks the
+    # wrapping subcommand silently until someone runs it.
+    msg "$DIM" "step" "CLI → npm script targets"
+    local -a npm_targets=()
+    local t missing
+    while IFS= read -r t; do npm_targets+=("$t"); done < <(
+        {
+            grep -oE 'run_npm [a-z0-9:_.-]+' "$TOOLS_HOME/bin/site" | awk '{print $2}'
+            grep -oE 'script="[a-z0-9:_.-]+"' "$TOOLS_HOME/bin/site" | cut -d'"' -f2
+        } | sort -u
+    )
+    if ! missing="$(SITE_PKG="$SITE_HOME/package.json" node -e '
+        const scripts = require(process.env.SITE_PKG).scripts || {};
+        const missing = process.argv.slice(1).filter((t) => !scripts[t]);
+        if (missing.length) { console.log(missing.join(", ")); process.exit(1); }
+    ' "${npm_targets[@]}")"; then
+        msg "$RED" "drift" "bin/site wraps npm scripts that do not exist: $missing"
+        failed=1
+    else
+        msg "$GREEN" "ok" "${#npm_targets[@]} npm script targets resolve in package.json"
+    fi
+
+    msg "$DIM" "step" "security.txt"
+    npm run -s check:security || failed=1
+
+    msg "$DIM" "step" "contrast"
+    npm run -s check:contrast || failed=1
+
+    msg "$DIM" "step" "parity"
+    npm run -s check:parity || failed=1
+
+    msg "$DIM" "step" "astro check"
+    npm run -s check || failed=1
+
+    msg "$DIM" "step" "npm audit (production)"
+    npm audit --omit=dev || failed=1
+
+    msg "$DIM" "step" "npm outdated"
+    npm outdated || true
+
+    if (( failed )); then
+        die "error" "doctor: at least one check failed" 1
+    fi
+    msg "$GREEN" "doctor" "all checks green"
+}
+
+cmd_reinstall_mcp() {
+    local mcp_home="${MCP_HOME:-$CODE_HOME/Assets/severino-vault-mcp}"
+    [[ -d "$mcp_home" ]] || die "error" "MCP repo not found: $mcp_home"
+    msg "$DIM" "step" "uv tool install --reinstall ."
+    (cd "$mcp_home" && uv tool install --reinstall .)
+    msg "$GREEN" "reinstalled" "now run \`/mcp\` Reconnect in Claude Code to pick up tool schema changes"
+}
+
+case "${1:-}" in
+    status)         shift; cmd_status "$@" ;;
+    sync)           shift; run_npm sync:content "$@" ;;
+    check)          shift; run_npm check "$@" ;;
+    contrast)       shift; run_npm check:contrast "$@" ;;
+    parity)         shift; run_npm check:parity "$@" ;;
+    build)          shift; run_npm build "$@" ;;
+    publish)        shift; cmd_publish_all "$@" ;;
+    sign-security)      shift; run_npm sign:security "$@" ;;
+    check-security)     shift; run_npm check:security "$@" ;;
+    scaffold-primer)    shift; run_npm scaffold:primer -- "$@" ;;
+    scaffold-field)     shift; run_npm scaffold:writeup-field -- "$@" ;;
+    draft-alt)          shift; run_npm draft:cover-alt -- "$@" ;;
+    publish-all)        shift; cmd_publish_all "$@" ;;
+    publish-writeup)    shift; cmd_publish_writeup "$@" ;;
+    validate)           shift; cmd_validate "$@" ;;
+    tech)               shift; cmd_tech "$@" ;;
+    featured)           shift; cmd_featured "$@" ;;
+    manage)             shift; cmd_manage "$@" ;;
+    verify)             shift; cmd_verify "$@" ;;
+    diagnose)           shift; run_npm diagnose -- "$@" ;;
+    release)            shift; cmd_release "$@" ;;
+    test)               shift; cmd_test "$@" ;;
+    doctor)             shift; cmd_doctor "$@" ;;
+    reinstall-mcp)      shift; cmd_reinstall_mcp "$@" ;;
+    new-writeup)        shift; cmd_new_writeup "$@" ;;
+    seo)            shift; cmd_seo "$@" ;;
+    dev)            shift; cmd_dev "$@" ;;
+    open)           shift; cmd_open "$@" ;;
+    compare)        shift; cmd_compare "$@" ;;
+    og)             shift; run_npm make:og "$@" ;;
+    -h|--help|"")   usage; exit 0 ;;
+    *)              die "usage" "unknown command: $1 (try -h)" 2 ;;
+esac
