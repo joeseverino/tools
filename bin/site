@@ -49,9 +49,9 @@ Commands:
   diagnose [--fast|--json]
                       The collect-all gate: run every audit and report all
                       failures in one pass (.validation-report.md on failure).
-  doctor              Pre-flight health check: CLI→npm script drift, security,
-                      contrast, parity, type check, npm audit, npm outdated.
-                      No build.
+  doctor              Pre-flight health check: CLI→npm script drift, vault-mcp
+                      install drift, security, contrast, parity, type check,
+                      npm audit, npm outdated. No build.
   reinstall-mcp       Reinstall the severino-vault-mcp package from source.
                       Use \`/mcp\` Reconnect afterward in Claude Code.
   publish-writeup <slug>  Validate one writeup via the severino-vault-mcp
@@ -1320,6 +1320,40 @@ cmd_doctor() {
         failed=1
     else
         msg "$GREEN" "ok" "${#npm_targets[@]} npm script targets resolve in package.json"
+    fi
+
+    # site runs the *installed* severino-vault-mcp, but parity reads its
+    # *source* — compare fingerprints so a stale `uv tool` install can't
+    # pass doctor. Hashing scheme mirrors _fingerprint in the MCP repo.
+    msg "$DIM" "step" "vault-mcp install drift"
+    local mcp_home="${MCP_HOME:-$CODE_HOME/Assets/severino-vault-mcp}"
+    local installed_fp source_fp
+    if ! command -v severino-vault-mcp >/dev/null 2>&1; then
+        msg "$YELLOW" "skip" "severino-vault-mcp not on PATH — install drift not checked"
+    elif [[ ! -d "$mcp_home/src/severino_vault_mcp" ]]; then
+        msg "$YELLOW" "skip" "MCP source not found at $mcp_home — install drift not checked"
+    elif ! installed_fp="$(severino-vault-mcp --fingerprint 2>/dev/null)"; then
+        msg "$RED" "drift" "installed severino-vault-mcp predates --fingerprint — run \`site reinstall-mcp\`"
+        failed=1
+    else
+        source_fp="$(MCP_SRC="$mcp_home/src/severino_vault_mcp" node -e '
+            const crypto = require("node:crypto");
+            const fs = require("node:fs");
+            const path = require("node:path");
+            const dir = process.env.MCP_SRC;
+            const hash = crypto.createHash("sha256");
+            for (const name of fs.readdirSync(dir).filter((n) => n.endsWith(".py")).sort()) {
+                hash.update(name); hash.update(Buffer.from([0]));
+                hash.update(fs.readFileSync(path.join(dir, name))); hash.update(Buffer.from([0]));
+            }
+            console.log(hash.digest("hex").slice(0, 16));
+        ')"
+        if [[ "$installed_fp" == "$source_fp" ]]; then
+            msg "$GREEN" "ok" "installed severino-vault-mcp matches source ($installed_fp)"
+        else
+            msg "$RED" "drift" "installed severino-vault-mcp ($installed_fp) != source ($source_fp) — run \`site reinstall-mcp\`"
+            failed=1
+        fi
     fi
 
     msg "$DIM" "step" "security.txt"
