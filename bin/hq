@@ -31,6 +31,11 @@ Commands:
   doctor               Report vault docs that are missing or have invalid
                        frontmatter — the gap between vault state and HQ state.
 
+  schema [--check]     Regenerate HQ's docs_index/schema.json from the installed
+                       MCP — the one canonical frontmatter contract both share.
+                       --check verifies it's current (exit 1 on drift) without
+                       writing, for CI / pre-deploy.
+
   validate             Report HQ registry entries (Projects/Assets) that no
                        vault doc references — the inverse of \`sync\`'s missing
                        relations. Catches stale slugs left by a rename and
@@ -99,6 +104,49 @@ build_manifest() {
 
 cmd_manifest() {
     build_manifest
+}
+
+cmd_schema() {
+    local check=0
+    case "${1:-}" in
+        --check) check=1 ;;
+        -h|--help)
+            cat <<HELP
+Usage: hq schema [--check]
+
+Regenerate HQ's docs_index/schema.json from the installed severino-vault-mcp,
+which is the single canonical frontmatter contract. The MCP validates vault
+writes against it; HQ's importer validates the manifest against the committed
+copy. This command keeps that copy current.
+
+  --check   Verify the committed copy matches the MCP and exit 1 on drift,
+            without writing. For CI or a pre-deploy gate.
+HELP
+            return 0 ;;
+        "") : ;;
+        *) die "error" "unknown flag: $1 (try \`hq schema --help\`)" ;;
+    esac
+
+    require_manifest_mcp
+    if ! severino-vault-mcp schema --json >/dev/null 2>&1; then
+        die "error" "installed severino-vault-mcp lacks \`schema\`; run \`site reinstall-mcp\`"
+    fi
+
+    local dest="$HQ_LOCAL_PATH/docs_index/schema.json"
+    [[ -d "$HQ_LOCAL_PATH/docs_index" ]] \
+        || die "error" "HQ docs_index not found at $HQ_LOCAL_PATH/docs_index"
+
+    if [[ "$check" == "1" ]]; then
+        if diff -q <(severino-vault-mcp schema --json) "$dest" >/dev/null 2>&1; then
+            msg "$GREEN" "ok" "docs_index/schema.json matches the MCP"
+        else
+            die "error" "docs_index/schema.json is stale — run \`hq schema\`" 1
+        fi
+    else
+        severino-vault-mcp schema --json > "$dest"
+        msg "$GREEN" "wrote" "docs_index/schema.json (from the MCP)"
+        msg "$DIM" "next" "commit it and deploy HQ so the contract ships"
+    fi
 }
 
 cmd_sync() {
@@ -535,6 +583,7 @@ case "${1:-}" in
     manifest)   shift; cmd_manifest "$@" ;;
     sync)       shift; cmd_sync "$@" ;;
     doctor)     shift; cmd_doctor "$@" ;;
+    schema)     shift; cmd_schema "$@" ;;
     validate)   shift; cmd_validate "$@" ;;
     create)     shift; cmd_create "$@" ;;
     deploy)     shift; cmd_deploy "$@" ;;
