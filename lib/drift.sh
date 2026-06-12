@@ -51,6 +51,28 @@ drift_diff() {
     fi
 }
 
+# Stamp `last_reviewed: <today>` in the doc's frontmatter — through the vault
+# MCP, the canonical frontmatter writer (schema-validated, reloads the vault
+# cache), not a raw YAML edit. A pull is a review, so the date should move.
+#
+# Best-effort: skips silently if the MCP CLI isn't on PATH or the doc isn't
+# under $NOTES_HOME (the MCP only writes inside the indexed vault). $NOTES_HOME
+# is the vault root; the MCP wants a vault-relative path. The binary is
+# overridable via $DRIFT_REVIEW_BIN so the bats suite can stub it.
+DRIFT_REVIEW_BIN="${DRIFT_REVIEW_BIN:-severino-vault-mcp}"
+
+drift_touch_reviewed() {
+    local doc="$1" rel
+    command -v "$DRIFT_REVIEW_BIN" >/dev/null 2>&1 || return 0
+    [[ -n ${NOTES_HOME:-} && $doc == "$NOTES_HOME"/* ]] || return 0
+    rel="${doc#"$NOTES_HOME"/}"
+    if SVMC_VAULT_PATH="$NOTES_HOME" "$DRIFT_REVIEW_BIN" touch-reviewed "$rel" >/dev/null 2>&1; then
+        msg "$DIM" "reviewed" "last_reviewed → today (vault-mcp)"
+    else
+        msg "$YELLOW" "note" "could not stamp last_reviewed via vault-mcp"
+    fi
+}
+
 # Regenerate the mirror block from live. Replaces the block in place; appends a
 # fresh section if the heading is not present yet.
 drift_pull() {
@@ -88,6 +110,7 @@ drift_pull() {
     fi
 
     rm -f "$jsonf"
+    drift_touch_reviewed "$DRIFT_VAULT_DOC"
 
     local n; n=$(jq 'length' <<<"$live")
     echo

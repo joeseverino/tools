@@ -18,5 +18,5 @@
 
 # Vault doc holding the machine-readable mirror, and the heading whose fenced
 # ```json block `diff`/`pull` read and rewrite. Prose tables stay for humans.
-: "${ADGUARD_VAULT_DOC:=$NOTES_HOME/02 Infrastructure/AdGuard/AdGuard Home Setup.md}"
+: "${ADGUARD_VAULT_DOC:=$NOTES_HOME/02 Infrastructure/AdGuard/DNS Rewrites — homelab.md}"
 : "${ADGUARD_VAULT_HEADING:=## Canonical Rewrites (adguard)}"
