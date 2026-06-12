@@ -8,6 +8,20 @@ load helpers
 setup() {
     DRIFT_DIR="$BATS_TEST_TMPDIR/drift"
     mkdir -p "$DRIFT_DIR"
+
+    # drift_main's preflight requires curl/jq/decrypt on PATH. The fake tool
+    # injects fetch_live (no network, no creds), so it never calls curl or
+    # decrypt — stub them so the check passes in a hermetic env where the bin/
+    # tools aren't on PATH (CI). jq is real: normalize needs it.
+    STUBS="$DRIFT_DIR/stubs"
+    mkdir -p "$STUBS"
+    local c
+    for c in curl decrypt; do
+        printf '#!/usr/bin/env bash\n' > "$STUBS/$c"
+        chmod +x "$STUBS/$c"
+    done
+    export PATH="$STUBS:$PATH"
+
     LIVE_JSON="$DRIFT_DIR/live.json"
     VAULT_DOC="$DRIFT_DIR/doc.md"
     TOOL="$DRIFT_DIR/faketool"
