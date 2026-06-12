@@ -117,10 +117,11 @@ Usage: hq schema [--check]
 Regenerate HQ's docs_index/schema.json from the installed severino-vault-mcp,
 which is the single canonical frontmatter contract. The MCP validates vault
 writes against it; HQ's importer validates the manifest against the committed
-copy. This command keeps that copy current.
+copy. Also checks the vault's human Frontmatter Schema doc for stale enum lists.
 
-  --check   Verify the committed copy matches the MCP and exit 1 on drift,
-            without writing. For CI or a pre-deploy gate.
+  --check   Verify both downstream copies (HQ schema.json and the vault schema
+            doc) match the MCP and exit 1 on drift, without writing. For CI or
+            a pre-deploy gate.
 HELP
             return 0 ;;
         "") : ;;
@@ -137,15 +138,52 @@ HELP
         || die "error" "HQ docs_index not found at $HQ_LOCAL_PATH/docs_index"
 
     if [[ "$check" == "1" ]]; then
+        local failed=0
         if diff -q <(severino-vault-mcp schema --json) "$dest" >/dev/null 2>&1; then
             msg "$GREEN" "ok" "docs_index/schema.json matches the MCP"
         else
-            die "error" "docs_index/schema.json is stale — run \`hq schema\`" 1
+            msg "$RED" "drift" "docs_index/schema.json is stale — run \`hq schema\`"
+            failed=1
         fi
+
+        local doc_out
+        if [[ ! -f "$HQ_SCHEMA_DOC" ]]; then
+            msg "$YELLOW" "skip" "vault schema doc not found: $HQ_SCHEMA_DOC"
+        elif doc_out="$(severino-vault-mcp schema --check-doc "$HQ_SCHEMA_DOC" 2>&1)"; then
+            msg "$GREEN" "ok" "vault Frontmatter Schema doc matches the MCP"
+        else
+            msg "$RED" "drift" "vault Frontmatter Schema doc lists stale enum values:"
+            printf '%s\n' "$doc_out" | sed 's/^/  /'
+            failed=1
+        fi
+
+        [[ "$failed" == "0" ]] || die "error" "schema drift — fix the above" 1
     else
         severino-vault-mcp schema --json > "$dest"
         msg "$GREEN" "wrote" "docs_index/schema.json (from the MCP)"
-        msg "$DIM" "next" "commit it and deploy HQ so the contract ships"
+
+        local doc_out
+        if [[ -f "$HQ_SCHEMA_DOC" ]] \
+            && ! doc_out="$(severino-vault-mcp schema --check-doc "$HQ_SCHEMA_DOC" 2>&1)"; then
+            msg "$YELLOW" "warn" "vault Frontmatter Schema doc lists stale enum values:"
+            printf '%s\n' "$doc_out" | sed 's/^/  /'
+            msg "$DIM" "fix" "update the enum lines in $HQ_SCHEMA_DOC by hand"
+        fi
+        msg "$DIM" "next" "commit schema.json + deploy HQ so the contract ships"
+    fi
+}
+
+# Non-fatal preflight: warn if HQ's committed schema.json lags the installed
+# MCP. A stale contract means the deployed importer can reject docs the MCP
+# considers valid. Best-effort — silent if the MCP or the file is absent.
+schema_drift_warn() {
+    command -v severino-vault-mcp >/dev/null 2>&1 || return 0
+    severino-vault-mcp schema --json >/dev/null 2>&1 || return 0
+    local dest="$HQ_LOCAL_PATH/docs_index/schema.json"
+    [[ -f "$dest" ]] || return 0
+    if ! diff -q <(severino-vault-mcp schema --json) "$dest" >/dev/null 2>&1; then
+        msg "$YELLOW" "schema" \
+            "HQ docs_index/schema.json lags the MCP — run \`hq schema\`, commit, deploy"
     fi
 }
 
@@ -176,6 +214,8 @@ HELP
             *) die "unknown flag: $1 (try \`hq sync --help\`)" ;;
         esac
     done
+
+    schema_drift_warn
 
     local tmp
     tmp="$(mktemp -t hq-manifest.XXXXXX.json)"
@@ -251,51 +291,37 @@ PY
 }
 
 cmd_doctor() {
-    python3 - "$VAULT" "$HQ_VAULT_DIRS" <<'PY'
-import sys
-from pathlib import Path
+    # The "what counts as a valid indexed doc" contract (skip rules, slim
+    # writeup/page tolerance) lives once, in the MCP's manifest generator. Ask
+    # it for the structured report instead of re-walking the vault here.
+    require_manifest_mcp
+    local report
+    report="$(severino-vault-mcp hq-manifest "$VAULT" "$HQ_VAULT_DIRS" --report 2>/dev/null)" \
+        || true
+    [[ -n "$report" ]] \
+        || die "error" "hq-manifest --report returned nothing; run \`site reinstall-mcp\`"
 
-vault = Path(sys.argv[1])
-subdirs = [s for s in sys.argv[2].split(":") if s]
-problems = []
-skip_dirs = {".git", ".obsidian", "00 Templates", "Templates", "source"}
+    printf '%s' "$report" | python3 -c '
+import json, sys
 
-# The manifest generator synthesizes stable fallback doc_ids for slim
-# site-CMS files under these directories: writeup-<slug> and page-<slug>.
-slim_contract_dirs = {"05 Writeups", "06 Pages"}
+r = json.load(sys.stdin)
+missing = r.get("missing_frontmatter", [])
+dups = r.get("duplicates", [])
 
-def should_skip(path: Path) -> bool:
-    return any(part in skip_dirs for part in path.parts)
-
-for sub in subdirs:
-    root = vault / sub
-    if not root.is_dir():
-        continue
-    for path in sorted(root.rglob("*.md")):
-        if should_skip(path):
-            continue
-        if path.name.startswith("_"):
-            continue
-        text = path.read_text(encoding="utf-8", errors="replace")
-        if not text.lstrip().startswith("---"):
-            problems.append((path, "no frontmatter"))
-            continue
-        if "doc_id:" not in text.split("---", 2)[1]:
-            relative = path.relative_to(vault)
-            top = relative.parts[0] if relative.parts else ""
-            if top in slim_contract_dirs and path.name == "index.md":
-                continue
-            problems.append((path, "missing doc_id"))
-
-if not problems:
-    print("ok: every indexed doc has valid frontmatter")
+if not missing and not dups:
+    print("ok: %s indexed docs have valid frontmatter" % r.get("count", 0))
     sys.exit(0)
 
-print(f"{len(problems)} doc(s) need attention:")
-for p, why in problems:
-    print(f"  - [{why}] {p.relative_to(vault)}")
+if dups:
+    print("%d duplicate doc_id(s):" % len(dups))
+    for d in dups:
+        print("  - %s: %s  <->  %s" % (d["doc_id"], d["first"], d["second"]))
+if missing:
+    print("%d doc(s) missing or invalid frontmatter:" % len(missing))
+    for path in missing:
+        print("  - " + path)
 sys.exit(1)
-PY
+'
 }
 
 cmd_validate() {
@@ -317,24 +343,9 @@ HELP
     esac
 
     msg "$DIM" "validate" "HQ registry ↔ vault docs"
-    ssh "$HQ_SSH_HOST" "cd '$HQ_REMOTE_PATH' && sudo docker compose exec -T app python manage.py shell" <<'PY'
-from projects.models import Project
-from assets.models import Asset
-
-orphan_p = sorted(p.slug for p in Project.objects.all() if p.documentation_records.count() == 0)
-orphan_a = sorted(a.slug for a in Asset.objects.all() if a.documentation_records.count() == 0)
-
-print("Projects  %d total, %d with zero docs" % (Project.objects.count(), len(orphan_p)))
-for s in orphan_p:
-    print("          orphan: %s" % s)
-print("Assets    %d total, %d with zero docs" % (Asset.objects.count(), len(orphan_a)))
-for s in orphan_a:
-    print("          orphan: %s" % s)
-if orphan_p or orphan_a:
-    print("Registry  review orphans above — stale slug from a rename, or a duplicate row")
-else:
-    print("Registry  ok — every Project and Asset is referenced by at least one doc")
-PY
+    # Logic lives in the testable manage.py audit_registry command, not an
+    # inline ORM script piped into `manage.py shell`.
+    ssh "$HQ_SSH_HOST" "cd '$HQ_REMOTE_PATH' && sudo docker compose exec -T app python manage.py audit_registry"
 }
 
 cmd_create() {
@@ -350,10 +361,8 @@ Usage: hq create project <slug> --name "<name>" [flags]
 
 Common Project flags:
   --name TEXT           (required) Display name
-  --category CHOICE     wordpress_security | cloudflare | dns_email_security |
-                        homelab | vps | tailscale | adguard | networking |
-                        tls_certificates | automation | cybersecurity_labs | other
-  --status CHOICE       idea | active | paused | completed | published | archived
+  --category CHOICE     project category
+  --status CHOICE       project lifecycle status
   --description TEXT
   --technologies TEXT   Comma-separated
   --repo URL
@@ -362,18 +371,20 @@ Common Project flags:
 
 Common Asset flags:
   --name TEXT           (required) Display name
-  --category CHOICE     networking | server_hardware | software | subscription |
-                        domain | hosting | camera_audio | office | tools |
-                        training | other
-  --status CHOICE       active | retired | sold | returned | replaced
+  --category CHOICE     asset category
+  --status CHOICE       asset lifecycle status
   --vendor TEXT
   --purchase-date YYYY-MM-DD
   --cost DECIMAL
   --business-use INT    0-100 (default 100)
-  --payment CHOICE      cash | debit | credit | ach | paypal | other
+  --payment CHOICE      payment method
   --serial TEXT
   --warranty-date YYYY-MM-DD
   --notes TEXT
+
+The CHOICE lists are owned by HQ's create_project / create_asset management
+commands (derived from the Django models) — they aren't duplicated here to
+avoid drift. Pass an invalid value and the command prints the allowed set.
 
 Examples:
   hq create project my-site --name "My Site" \\

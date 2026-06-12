@@ -115,3 +115,63 @@ SH
     [ "$status" -ne 0 ]
     [[ "$output" == *"site reinstall-mcp"* ]]
 }
+
+# --- hq doctor (delegates to the MCP manifest report) ------------------------
+
+_stub_report_mcp() {
+    cat > "$TEST_BIN/severino-vault-mcp" <<SH
+#!/usr/bin/env bash
+if [[ "\${1:-}" == "hq-manifest" && "\$*" == *"--report"* ]]; then
+    printf '%s\n' '$1'
+    exit ${2:-0}
+fi
+exit 0
+SH
+    chmod +x "$TEST_BIN/severino-vault-mcp"
+}
+
+@test "hq doctor reports missing frontmatter from the MCP report" {
+    _stub_report_mcp '{"ok":true,"count":3,"missing_frontmatter":["05 Writeups/x/notes.md"],"missing_dirs":[]}' 0
+
+    run hq_bin doctor
+
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"missing or invalid frontmatter"* ]]
+    [[ "$output" == *"05 Writeups/x/notes.md"* ]]
+}
+
+@test "hq doctor is clean when the MCP report has no problems" {
+    _stub_report_mcp '{"ok":true,"count":144,"missing_frontmatter":[],"missing_dirs":[]}' 0
+
+    run hq_bin doctor
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"144 indexed docs"* ]]
+}
+
+# --- hq schema --check also guards the vault schema doc ----------------------
+
+@test "hq schema --check flags a stale vault Frontmatter Schema doc" {
+    cat > "$TEST_BIN/severino-vault-mcp" <<'SH'
+#!/usr/bin/env bash
+case "${1:-} ${2:-}" in
+    "schema --json")      printf '%s\n' '{"doc_types":["runbook"]}'; exit 0 ;;
+    "schema --check-doc")
+        echo "schema doc drift in $3:" >&2
+        echo "  - environment: doc lists unknown ['lab']" >&2
+        exit 1 ;;
+esac
+exit 0
+SH
+    chmod +x "$TEST_BIN/severino-vault-mcp"
+    mkdir -p "$HQ_LOCAL_PATH/docs_index"
+    printf '%s\n' '{"doc_types":["runbook"]}' > "$HQ_LOCAL_PATH/docs_index/schema.json"
+    export HQ_SCHEMA_DOC="$TEST_ROOT/schema-doc.md"
+    printf 'environment: homelab | lab\n' > "$HQ_SCHEMA_DOC"
+
+    run hq_bin schema --check
+
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"vault Frontmatter Schema doc lists stale enum values"* ]]
+    [[ "$output" == *"lab"* ]]
+}
