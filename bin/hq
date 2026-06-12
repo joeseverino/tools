@@ -11,8 +11,6 @@ set -euo pipefail
 
 source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" hq
 
-LIB_DIR="$TOOLS_HOME/lib"
-
 usage() {
     cat <<EOF
 Usage: hq <command> [args]
@@ -84,8 +82,23 @@ Examples:
 EOF
 }
 
+require_manifest_mcp() {
+    command -v severino-vault-mcp >/dev/null 2>&1 \
+        || die "error" "severino-vault-mcp is required; run \`site reinstall-mcp\`"
+}
+
+build_manifest() {
+    require_manifest_mcp
+    local help
+    help="$(severino-vault-mcp --help 2>&1 || true)"
+    if [[ "$help" != *"hq-manifest"* ]]; then
+        die "error" "installed severino-vault-mcp is outdated; run \`site reinstall-mcp\`"
+    fi
+    severino-vault-mcp hq-manifest "$VAULT" "$HQ_VAULT_DIRS"
+}
+
 cmd_manifest() {
-    python3 "$LIB_DIR/hq/manifest.py" "$VAULT" "$HQ_VAULT_DIRS"
+    build_manifest
 }
 
 cmd_sync() {
@@ -120,7 +133,7 @@ HELP
     tmp="$(mktemp -t hq-manifest.XXXXXX.json)"
     trap 'rm -f "${tmp:-}"' EXIT
 
-    python3 "$LIB_DIR/hq/manifest.py" "$VAULT" "$HQ_VAULT_DIRS" > "$tmp" 2>/dev/null
+    build_manifest > "$tmp"
 
     msg "$DIM" "sync" "vault → HQ"
     local stats_json

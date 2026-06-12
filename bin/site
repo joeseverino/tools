@@ -54,10 +54,9 @@ Commands:
                       npm audit, npm outdated. No build.
   reinstall-mcp       Reinstall the severino-vault-mcp package from source.
                       Use \`/mcp\` Reconnect afterward in Claude Code.
-  publish-writeup <slug>  Validate one writeup via the severino-vault-mcp
-                      pre-flight gate, then run publish-all. Refuses to ship
-                      if the MCP reports blockers, missing slugs/images, or
-                      unresolved related_projects / related_assets.
+  publish-writeup <slug>  Run the full publish flow with the named writeup
+                      highlighted. The authoritative all-published gate runs
+                      once before any sync, build, commit, or push.
   new-writeup <slug>  Scaffold a new vault writeup folder from the template.
                       Creates 05 Writeups/<slug>/ with index.md and images/.
                       Starts as published: false so it stays out of the build
@@ -92,6 +91,11 @@ Environment:
   SITE_LIVE_URL   Defaults to https://jseverino.com
   SITE_COMPARE_PORT  Defaults to 4178
   SITE_COMPARE_BROWSER  Defaults to Safari on macOS
+  MCP_HOME        MCP source checkout used for install-drift comparison
+  SITE_MCP_AUTO_REINSTALL=1
+                  Repair MCP install drift without prompting
+  SITE_SKIP_MCP_DRIFT_CHECK=1
+                  Skip source/install comparison (tests or external installs)
 EOF
 }
 
@@ -543,9 +547,76 @@ HELP
     msg "$DIM" "next" "edit title + description, drop cover.png in images/, flip published: true when ready"
 }
 
+mcp_source_fingerprint() {
+    local mcp_home="${MCP_HOME:-$CODE_HOME/Assets/severino-vault-mcp}"
+    [[ -d "$mcp_home/src/severino_vault_mcp" ]] || return 1
+    MCP_SRC="$mcp_home/src/severino_vault_mcp" node -e '
+        const crypto = require("node:crypto");
+        const fs = require("node:fs");
+        const path = require("node:path");
+        const dir = process.env.MCP_SRC;
+        const hash = crypto.createHash("sha256");
+        for (const name of fs.readdirSync(dir).filter((n) => n.endsWith(".py")).sort()) {
+            hash.update(name); hash.update(Buffer.from([0]));
+            hash.update(fs.readFileSync(path.join(dir, name))); hash.update(Buffer.from([0]));
+        }
+        console.log(hash.digest("hex").slice(0, 16));
+    '
+}
+
+# Invoke the installed vault MCP against the notes vault. Centralizes the
+# SVMC_VAULT_PATH export and the binary name so a new call site can't silently
+# fall back to the MCP's own configured default vault. `require_mcp` gates
+# version drift separately; this just runs the command and passes argv through.
+svmc() {
+    SVMC_VAULT_PATH="$NOTES_HOME" severino-vault-mcp "$@"
+}
+
+mcp_reinstall_prompt() {
+    local reason="$1" answer=""
+
+    msg "$YELLOW" "stale" "$reason"
+    if [[ "${SITE_MCP_AUTO_REINSTALL:-}" == "1" ]]; then
+        cmd_reinstall_mcp
+        return
+    fi
+    if [[ ! -t 0 || ! -t 1 ]]; then
+        die "error" "run \`site reinstall-mcp\`, then retry" 1
+    fi
+
+    printf '  Reinstall severino-vault-mcp now? [Y/n] ' > /dev/tty
+    IFS= read -r answer < /dev/tty || answer="n"
+    case "${answer:-y}" in
+        y|Y|yes|YES|Yes) cmd_reinstall_mcp ;;
+        *) die "error" "reinstall cancelled; run \`site reinstall-mcp\` when ready" 1 ;;
+    esac
+}
+
 require_mcp() {
-    command -v severino-vault-mcp >/dev/null 2>&1 \
-        || die "error" "severino-vault-mcp not on PATH (uv tool install the MCP first)"
+    local installed_fp="" source_fp=""
+    if ! command -v severino-vault-mcp >/dev/null 2>&1; then
+        mcp_reinstall_prompt "severino-vault-mcp is not installed"
+    fi
+
+    # Test fixtures and external installations may not have a corresponding
+    # source checkout. Callers can explicitly skip source-drift comparison.
+    [[ "${SITE_SKIP_MCP_DRIFT_CHECK:-}" == "1" ]] && return 0
+    source_fp="$(mcp_source_fingerprint 2>/dev/null || true)"
+    [[ -n "$source_fp" ]] || return 0
+
+    if ! installed_fp="$(severino-vault-mcp --fingerprint 2>/dev/null)"; then
+        mcp_reinstall_prompt \
+            "installed severino-vault-mcp is too old to verify against source"
+        installed_fp="$(severino-vault-mcp --fingerprint 2>/dev/null || true)"
+    elif [[ "$installed_fp" != "$source_fp" ]]; then
+        mcp_reinstall_prompt \
+            "installed severino-vault-mcp ($installed_fp) does not match source ($source_fp)"
+        installed_fp="$(severino-vault-mcp --fingerprint 2>/dev/null || true)"
+    fi
+
+    if [[ "$installed_fp" != "$source_fp" ]]; then
+        die "error" "MCP reinstall did not match source; run \`site doctor\`" 1
+    fi
 }
 
 cmd_validate() {
@@ -579,7 +650,7 @@ HELP
         || die "error" "writeup folder not found: $NOTES_HOME/05 Writeups/$slug"
 
     local report
-    report="$(SVMC_VAULT_PATH="$NOTES_HOME" severino-vault-mcp prepare-writeup-publish "$slug" 2>/dev/null || true)"
+    report="$(svmc prepare-writeup-publish "$slug" 2>/dev/null || true)"
     [[ -n "$report" ]] || die "error" "prepare-writeup-publish returned no report"
 
     if printf '%s' "$report" | node -e '
@@ -636,7 +707,7 @@ HELP
     fi
     require_mcp
     local report
-    report="$(SVMC_VAULT_PATH="$NOTES_HOME" severino-vault-mcp technology-catalog)" \
+    report="$(svmc technology-catalog)" \
         || die "error" "technology-catalog failed"
     printf '%s' "$report" | node -e '
         let raw = "";
@@ -669,7 +740,7 @@ HELP
 }
 
 featured_render() {
-    SVMC_VAULT_PATH="$NOTES_HOME" severino-vault-mcp list-writeups --filter featured | node -e '
+    svmc list-writeups --filter featured | node -e '
         let raw = "";
         process.stdin.on("data", (d) => (raw += d));
         process.stdin.on("end", () => {
@@ -717,9 +788,10 @@ Keys:
                shows server/git/build status and runs dev, compare,
                doctor, diagnose, build, test, and publish in place
 
-Saving applies everything through severino-vault-mcp (update-writeup,
-reorder-featured), so the featured list is always sequential 1..N and the
-YAML edits are format-preserving. Ship the result with \`site publish\`.
+Loading uses one severino-vault-mcp dashboard snapshot. Saving submits one
+transactional writeup plan, so scalar edits and the complete featured order
+either all apply or roll back together. The featured list remains sequential
+1..N and YAML edits are format-preserving. Ship with \`site publish\`.
 HELP
         return 0
     fi
@@ -765,7 +837,7 @@ HELP
     fi
 
     local position
-    position="$(SVMC_VAULT_PATH="$NOTES_HOME" severino-vault-mcp list-writeups --filter featured | node -e '
+    position="$(svmc list-writeups --filter featured | node -e '
         let raw = "";
         process.stdin.on("data", (d) => (raw += d));
         process.stdin.on("end", () => {
@@ -798,7 +870,7 @@ HELP
     ' "$slug" "$target")" || die "error" "could not resolve target for $slug" 1
 
     local result
-    if ! result="$(SVMC_VAULT_PATH="$NOTES_HOME" severino-vault-mcp reorder-featured "$slug" "$position" 2>&1)"; then
+    if ! result="$(svmc reorder-featured "$slug" "$position" 2>&1)"; then
         printf '%s\n' "$result"
         die "error" "reorder failed" 1
     fi
@@ -885,7 +957,7 @@ verify_writeup_live() {
     # live checks assert what the frontmatter says should be there.
     if command -v severino-vault-mcp >/dev/null 2>&1; then
         local meta
-        meta="$(SVMC_VAULT_PATH="$NOTES_HOME" severino-vault-mcp prepare-writeup-publish "$slug" 2>/dev/null || true)"
+        meta="$(svmc prepare-writeup-publish "$slug" 2>/dev/null || true)"
         if [[ -n "$meta" ]]; then
             local tech_list featured_slot tag tag_url
             tech_list="$(printf '%s' "$meta" | node -e '
@@ -927,7 +999,8 @@ verify_writeup_live() {
             fi
         fi
     else
-        msg "$YELLOW" "skip" "severino-vault-mcp not on PATH — tag/featured checks skipped"
+        msg "$RED" "mcp" "severino-vault-mcp disappeared; tag/featured checks failed"
+        failed=1
     fi
 
     return "$failed"
@@ -939,14 +1012,12 @@ cmd_publish_writeup() {
         cat <<HELP
 Usage: site publish-writeup <slug>
 
-Gated full-publish for one writeup. Runs the severino-vault-mcp
-prepare-writeup-publish CLI as a pre-flight check, then chains into
-\`site publish-all\` if the writeup is ready.
+Run the full publish workflow with one writeup highlighted. The same
+authoritative gate as \`site publish\` validates every published writeup
+exactly once before any sync, build, commit, or push.
 
-Exits before any commit/push if the MCP reports blockers, missing tech
-slugs, missing images, or unresolved related_projects / related_assets.
-Use this instead of running \`site publish-all\` blind when you've just
-finished editing a single writeup.
+Exits before mutation if any published writeup has blockers, missing tech
+slugs or images, or unresolved related_projects / related_assets.
 
 Requires the \`severino-vault-mcp\` console script on PATH (installed via
 \`uv tool install ~/Documents/Code/Assets/severino-vault-mcp\`).
@@ -958,32 +1029,19 @@ HELP
         die "error" "slug must be lowercase-kebab-case: '$slug'"
     fi
 
-    if ! command -v severino-vault-mcp >/dev/null 2>&1; then
-        die "error" "severino-vault-mcp not on PATH (uv tool install the MCP first)"
-    fi
-
     local writeup_dir="$NOTES_HOME/05 Writeups/$slug"
     [[ -d "$writeup_dir" ]] || die "error" "writeup folder not found: $writeup_dir"
 
-    msg "$DIM" "validate" "prepare-writeup-publish $slug"
-    local report
-    if ! report="$(SVMC_VAULT_PATH="$NOTES_HOME" severino-vault-mcp prepare-writeup-publish "$slug" 2>&1)"; then
-        echo
-        msg "$RED" "blocked" "writeup is not ready to publish"
-        printf '%s\n' "$report"
-        echo
-        die "error" "fix the issues above, then re-run \`site publish-writeup $slug\`" 1
-    fi
-    msg "$GREEN" "validate" "ok"
-
-    cmd_publish_all
+    cmd_publish_all --focus-slug "$slug"
 }
 
 cmd_publish_all() {
     local skip_push=""
+    local focus_slug=""
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
             --no-push) skip_push="1"; shift ;;
+            --focus-slug) focus_slug="${2:-}"; shift 2 ;;
             -h|--help)
                 cat <<HELP
 Usage: site publish [--no-push]        (alias: site publish-all)
@@ -1019,34 +1077,31 @@ HELP
     done
 
     require_site
+    require_mcp
     command -v hq >/dev/null 2>&1 || die "error" "hq CLI not on PATH"
 
     msg "$DIM" "step 1/5" "writeup gate (every published writeup)"
-    if command -v severino-vault-mcp >/dev/null 2>&1; then
-        local gate
-        if ! gate="$(SVMC_VAULT_PATH="$NOTES_HOME" severino-vault-mcp validate-all-writeups 2>/dev/null)"; then
-            printf '%s' "$gate" | node -e '
-                let raw = "";
-                process.stdin.on("data", (d) => (raw += d));
-                process.stdin.on("end", () => {
-                    const r = JSON.parse(raw);
-                    for (const w of r.writeups || []) {
-                        if (w.ok) continue;
-                        console.log(w.slug + ":");
-                        let listed = 0;
-                        for (const b of w.blockers || []) { console.log("  - " + b); listed++; }
-                        for (const m of w.missing_tech_slugs || []) { console.log("  - missing tech slug: " + m); listed++; }
-                        for (const m of w.missing_images || []) { console.log("  - missing image: " + m); listed++; }
-                        if (!listed) console.log("  - unresolved related refs (run: site validate " + w.slug + ")");
-                    }
-                });
-            ' || true
-            die "error" "fix the writeups above, then re-run \`site publish\`" 1
-        fi
-        msg "$GREEN" "gate" "all published writeups pass"
-    else
-        msg "$YELLOW" "gate" "severino-vault-mcp not on PATH — writeup gate skipped"
+    local gate
+    if ! gate="$(svmc validate-all-writeups 2>/dev/null)"; then
+        printf '%s' "$gate" | node -e '
+            let raw = "";
+            process.stdin.on("data", (d) => (raw += d));
+            process.stdin.on("end", () => {
+                const r = JSON.parse(raw);
+                for (const w of r.writeups || []) {
+                    if (w.ok) continue;
+                    console.log(w.slug + ":");
+                    let listed = 0;
+                    for (const b of w.blockers || []) { console.log("  - " + b); listed++; }
+                    for (const m of w.missing_tech_slugs || []) { console.log("  - missing tech slug: " + m); listed++; }
+                    for (const m of w.missing_images || []) { console.log("  - missing image: " + m); listed++; }
+                    if (!listed) console.log("  - unresolved related refs (run: site validate " + w.slug + ")");
+                }
+            });
+        ' || true
+        die "error" "fix the writeups above, then re-run \`site publish\`" 1
     fi
+    msg "$GREEN" "gate" "all published writeups pass${focus_slug:+ (including $focus_slug)}"
 
     msg "$DIM" "step 2/5" "hq sync"
     hq sync
@@ -1336,18 +1391,7 @@ cmd_doctor() {
         msg "$RED" "drift" "installed severino-vault-mcp predates --fingerprint — run \`site reinstall-mcp\`"
         failed=1
     else
-        source_fp="$(MCP_SRC="$mcp_home/src/severino_vault_mcp" node -e '
-            const crypto = require("node:crypto");
-            const fs = require("node:fs");
-            const path = require("node:path");
-            const dir = process.env.MCP_SRC;
-            const hash = crypto.createHash("sha256");
-            for (const name of fs.readdirSync(dir).filter((n) => n.endsWith(".py")).sort()) {
-                hash.update(name); hash.update(Buffer.from([0]));
-                hash.update(fs.readFileSync(path.join(dir, name))); hash.update(Buffer.from([0]));
-            }
-            console.log(hash.digest("hex").slice(0, 16));
-        ')"
+        source_fp="$(mcp_source_fingerprint)"
         if [[ "$installed_fp" == "$source_fp" ]]; then
             msg "$GREEN" "ok" "installed severino-vault-mcp matches source ($installed_fp)"
         else
@@ -1382,10 +1426,17 @@ cmd_doctor() {
 
 cmd_reinstall_mcp() {
     local mcp_home="${MCP_HOME:-$CODE_HOME/Assets/severino-vault-mcp}"
+    local installed_fp source_fp
     [[ -d "$mcp_home" ]] || die "error" "MCP repo not found: $mcp_home"
     msg "$DIM" "step" "uv tool install --reinstall ."
     (cd "$mcp_home" && uv tool install --reinstall .)
-    msg "$GREEN" "reinstalled" "now run \`/mcp\` Reconnect in Claude Code to pick up tool schema changes"
+    installed_fp="$(severino-vault-mcp --fingerprint 2>/dev/null || true)"
+    source_fp="$(mcp_source_fingerprint 2>/dev/null || true)"
+    if [[ -n "$source_fp" && "$installed_fp" != "$source_fp" ]]; then
+        die "error" "reinstall completed but fingerprint still differs" 1
+    fi
+    msg "$GREEN" "reinstalled" "severino-vault-mcp ${installed_fp:-installed}"
+    msg "$DIM" "note" "reconnect long-running MCP clients only if their tool schema must refresh"
 }
 
 case "${1:-}" in

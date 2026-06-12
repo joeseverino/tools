@@ -5,27 +5,27 @@
 # assert what a save would have written.
 
 case "${1:-}" in
-    list-writeups)
+    writeup-dashboard)
+        if [[ -n "${FAKE_MCP_LOG:-}" ]]; then
+            printf '%s\n' "$*" >> "$FAKE_MCP_LOG"
+        fi
         cat <<'JSON'
 {"ok":true,"writeups":[
  {"slug":"alpha","title":"Alpha Writeup","published":true,"featured":true,"featured_order":1,"published_at":"2026-01-01"},
  {"slug":"beta","title":"Beta Writeup","published":true,"featured":true,"featured_order":2,"published_at":"2026-02-01"},
  {"slug":"gamma","title":"Gamma Draft","published":false,"featured":false}
-]}
-JSON
-        ;;
-    validate-all-writeups)
-        cat <<'JSON'
-{"ok":true,"writeups":[
+],"validation":{"ok":false,"writeups":[
  {"slug":"alpha","blockers":[],"nits":[]},
  {"slug":"beta","blockers":[],"nits":["description ends without a period"]},
  {"slug":"gamma","blockers":["published is false","missing image: cover.png"],"nits":[]}
-]}
+]}}
 JSON
         ;;
-    update-writeup|reorder-featured)
+    apply-writeup-plan)
         if [[ -n "${FAKE_MCP_LOG:-}" ]]; then
-            printf '%s\n' "$*" >> "$FAKE_MCP_LOG"
+            printf '%s ' "$*" >> "$FAKE_MCP_LOG"
+            cat >> "$FAKE_MCP_LOG"
+            printf '\n' >> "$FAKE_MCP_LOG"
         fi
         echo '{"ok":true}'
         ;;
