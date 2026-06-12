@@ -493,7 +493,30 @@ The writeup lifecycle: `site new-writeup <slug>` → write in Obsidian →
 The publish command needs no slug — it gates every published writeup,
 builds, ships, and verifies the affected pages on the live site itself.
 (`site publish-all` remains as an alias; `site publish-writeup <slug>`
-gates one slug explicitly.)
+runs the same batch gate once and highlights the named slug.)
+
+Publishing fails closed when `severino-vault-mcp` is missing, stale, or cannot
+run. The writeup gate is never skipped.
+
+`site manage` initializes through one `severino-vault-mcp writeup-dashboard`
+call, which shares a single writeup, catalog, and vault snapshot between the
+list and publish-readiness results. Saving sends one JSON plan to
+`apply-writeup-plan`; scalar edits and the complete featured order are staged
+and committed as one locked transaction, with rollback if any replacement
+fails.
+
+Before any MCP-backed site command runs, `site` compares the installed
+package fingerprint with the local MCP source checkout. Interactive commands
+offer to reinstall a missing, legacy, or stale package immediately.
+Noninteractive commands fail with `site reinstall-mcp` instead of forwarding
+an incompatible subcommand and exposing raw parser output.
+
+`hq manifest` and `hq sync` delegate frontmatter parsing to
+`severino-vault-mcp hq-manifest`. This keeps vault indexing, MCP reads, and HQ
+imports on one parser and rejects duplicate `doc_id` values before syncing.
+
+Set `SITE_MCP_AUTO_REINSTALL=1` for trusted local automation that should repair
+install drift without prompting.
 
 `site seo <url|path|slug>` reads the built Astro HTML from `dist.nosync` and renders a Google-style search result preview with canonical, title, description, robots, and Open Graph checks. Pass a domain, page slug, writeup slug, or absolute path; add `--result` for only the search-result mockup; run `site build` first if the page has not been built locally.
 

@@ -21,6 +21,7 @@ tui() { node "$TOOLS_HOME/lib/site/manage-tui.mjs"; }
     [[ "$output" == *"alpha"* ]]
     [[ "$output" == *"not featured"* ]]
     [[ "$output" == *"new writeup…"* ]]
+    [ "$(grep -c -- '^writeup-dashboard$' "$FAKE_MCP_LOG")" -eq 1 ]
 }
 
 @test "smoke: draft with real gate issues gets the ! mark, clean rows don't" {
@@ -108,13 +109,13 @@ tui() { node "$TOOLS_HOME/lib/site/manage-tui.mjs"; }
     [ "$status" -eq 0 ]
     [[ "$output" == *"alpha: unpublish"* ]]
     [[ "$output" == *"saved"* ]]
-    grep -q -- 'update-writeup alpha --published false' "$FAKE_MCP_LOG"
+    grep -q -- 'apply-writeup-plan.*"slug":"alpha".*"published":false' "$FAKE_MCP_LOG"
 }
 
-@test "replay: unfeaturing via f renumbers the remaining slots on save" {
+@test "replay: unfeaturing via f submits the complete featured order once" {
     export MANAGE_TUI_KEYS='f,s'
     run tui
     [ "$status" -eq 0 ]
-    grep -q -- 'reorder-featured alpha 0' "$FAKE_MCP_LOG"
-    grep -q -- 'reorder-featured beta 1' "$FAKE_MCP_LOG"
+    [ "$(grep -c -- 'apply-writeup-plan' "$FAKE_MCP_LOG")" -eq 1 ]
+    grep -q -- '"featured_order":\["beta"\]' "$FAKE_MCP_LOG"
 }

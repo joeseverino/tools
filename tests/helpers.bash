@@ -32,6 +32,7 @@ setup_manage() {
     mkdir -p "$SITE_HOME"
     export SITE_LIVE_URL="http://127.0.0.1:9"
     export FAKE_MCP_LOG="$BATS_TEST_TMPDIR/mcp-calls.log"
+    export SITE_SKIP_MCP_DRIFT_CHECK=1
 }
 
 encrypt_bin() { "$TOOLS_HOME/bin/encrypt" "$@"; }

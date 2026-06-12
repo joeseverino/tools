@@ -52,8 +52,10 @@ drift_diff() {
 }
 
 # Stamp `last_reviewed: <today>` in the doc's frontmatter — through the vault
-# MCP, the canonical frontmatter writer (schema-validated, reloads the vault
-# cache), not a raw YAML edit. A pull is a review, so the date should move.
+# MCP's `touch-reviewed`, the canonical frontmatter writer (schema-validated,
+# atomic), not a raw YAML edit. It deliberately skips the vault-cache rebuild
+# the other writers pay for, since the guard only needs the file on disk
+# updated. A pull is a review, so the date should move.
 #
 # Best-effort: skips silently if the MCP CLI isn't on PATH or the doc isn't
 # under $NOTES_HOME (the MCP only writes inside the indexed vault). $NOTES_HOME
