@@ -54,3 +54,64 @@ SH
     [[ "$output" == *"site reinstall-mcp"* ]]
     [[ "$output" != *"usage: severino-vault-mcp"* ]]
 }
+
+# A stub MCP that emits a fixed canonical schema for `schema --json`.
+_stub_schema_mcp() {
+    cat > "$TEST_BIN/severino-vault-mcp" <<'SH'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "schema" ]]; then
+    printf '%s\n' '{"doc_types":["runbook"],"environments":["homelab","other"]}'
+    exit 0
+fi
+exit 0
+SH
+    chmod +x "$TEST_BIN/severino-vault-mcp"
+    mkdir -p "$HQ_LOCAL_PATH/docs_index"
+}
+
+@test "hq schema regenerates docs_index/schema.json from the MCP" {
+    _stub_schema_mcp
+
+    run hq_bin schema
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"wrote"* ]]
+    [ "$(cat "$HQ_LOCAL_PATH/docs_index/schema.json")" = \
+        '{"doc_types":["runbook"],"environments":["homelab","other"]}' ]
+}
+
+@test "hq schema --check passes when the committed copy matches the MCP" {
+    _stub_schema_mcp
+    printf '%s\n' '{"doc_types":["runbook"],"environments":["homelab","other"]}' \
+        > "$HQ_LOCAL_PATH/docs_index/schema.json"
+
+    run hq_bin schema --check
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"matches the MCP"* ]]
+}
+
+@test "hq schema --check fails (exit 1) when the committed copy is stale" {
+    _stub_schema_mcp
+    printf '%s\n' '{"doc_types":["runbook"],"environments":["homelab"]}' \
+        > "$HQ_LOCAL_PATH/docs_index/schema.json"
+
+    run hq_bin schema --check
+
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"stale"* ]]
+}
+
+@test "hq schema fails closed when the installed MCP lacks the schema command" {
+    cat > "$TEST_BIN/severino-vault-mcp" <<'SH'
+#!/usr/bin/env bash
+exit 2
+SH
+    chmod +x "$TEST_BIN/severino-vault-mcp"
+    mkdir -p "$HQ_LOCAL_PATH/docs_index"
+
+    run hq_bin schema
+
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"site reinstall-mcp"* ]]
+}

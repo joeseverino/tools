@@ -53,9 +53,14 @@ The console script is on PATH (`uv tool install`). Existing subcommands:
 `drift.sh`; **fast path: skips the vault-cache rebuild the other writers pay
 for**), `prepare-writeup-publish`, `list-writeups`, `technology-catalog`,
 `validate-all-writeups`, `reorder-featured`, `update-writeup`, `hq-manifest`,
-`doctor`. Each wraps the same-named tool in `server.py`, prints JSON, exits
-0/1 on `ok`. `bin/site` is the reference caller; `lib/drift.sh:drift_touch_reviewed`
+`schema`, `doctor`. Each wraps the same-named tool in `server.py`, prints JSON,
+exits 0/1 on `ok`. `bin/site` is the reference caller; `lib/drift.sh:drift_touch_reviewed`
 is the minimal one (overridable via `$DRIFT_REVIEW_BIN` so bats can stub it).
+
+**Shared frontmatter schema:** the MCP's `schema.py` is the one canonical enum
+contract; `severino-vault-mcp schema --json` emits it. `hq schema` regenerates
+HQ's committed `docs_index/schema.json` from it, and `hq schema --check` fails on
+drift (CI / pre-deploy). Don't hand-maintain enum lists anywhere downstream.
 
 **Cross-repo JSON contract** (keep both sides in sync):
 - One JSON object per call; exit 0 on success, 1 on failure.
