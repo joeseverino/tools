@@ -39,6 +39,7 @@ tools/
     ts-acl               # tailscale: fetch live ACL, diff against vault mirror
     cf-dns               # cloudflare: fetch live DNS, diff against vault mirror
     adguard              # adguard: fetch live DNS rewrites, diff against vault mirror
+    nginx                # nginx proxy manager: fetch live proxy hosts, diff against vault mirror
     hq                   # severino-hq: sync vault frontmatter → HQ docs index
     site                 # jseverino.com: vault → Astro build → Cloudflare Pages
     brand                # severino-brand: render brand kits via branding-engine
@@ -48,7 +49,7 @@ tools/
     common.sh            # shared: colors, msg, die, header, footer, state
     init.sh              # shared: bootstrap sourced by every tool
     key.sh               # shared: SSH passphrase + age-key unlock
-    drift.sh             # shared: show/diff/pull core for ts-acl/cf-dns/adguard
+    drift.sh             # shared: show/diff/pull core for ts-acl/cf-dns/adguard/nginx
     hq/                  # hq implementation (frontmatter → manifest JSON)
     site/                # site implementation (the `site manage` TUI)
     doc-to-pdf/          # doc-to-pdf implementation (markdown-it + mermaid)
@@ -59,6 +60,7 @@ tools/
     ts-acl.sh            # creds path + tailnet + vault ACL doc for ts-acl
     cf-dns.sh            # token path + zone + vault DNS doc for cf-dns
     adguard.sh           # creds + base URL + vault doc for adguard
+    nginx.sh             # creds + base URL + vault doc for nginx
     site.sh.example      # template — copy to site.sh: site path + dev host
     backup.sh.example    # template — copy to backup.sh, edit, ignore
   completions/
