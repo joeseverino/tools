@@ -1,13 +1,18 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 # ts-acl — fetch the live Tailscale ACL and diff it against the vault mirror.
-#
-# Uses a read-only (acl:read) OAuth client whose credentials live age-encrypted
-# at $TS_ACL_CREDS. No plaintext secret ever touches disk (decrypt -p streams).
+# Drift-guard sibling of cf-dns / adguard; the show/diff/pull mechanics live in
+# lib/drift.sh. Uses a read-only (acl:read) OAuth client whose credentials live
+# age-encrypted at $TS_ACL_CREDS — no plaintext ever touches disk (decrypt -p
+# streams it).
 set -euo pipefail
 
 source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "ts-acl"
+# shellcheck source=lib/drift.sh
+source "$TOOLS_HOME/lib/drift.sh"
 
 API="https://api.tailscale.com/api/v2"
+DRIFT_VAULT_DOC="$TS_ACL_VAULT_DOC"
+DRIFT_VAULT_HEADING="## Access Controls"
 
 usage() {
     cat <<EOF
@@ -16,6 +21,7 @@ Usage: ts-acl <command>
 Commands:
   show        Fetch and print the live ACL policy (sorted JSON).
   diff        Diff the live ACL against the vault mirror ($TS_ACL_VAULT_DOC).
+  pull        Regenerate the vault mirror block from the live ACL.
   -h, help    Show this help.
 
 Config (config/ts-acl.sh, override via env):
@@ -64,55 +70,19 @@ get_token() {
     echo "$token"
 }
 
-# Fetch the live policy as sorted JSON.
+# Fetch the live ACL policy, normalized.
 fetch_live() {
     local token; token=$(get_token)
     curl -fsS "$API/tailnet/$TS_TAILNET/acl" \
          -H "Authorization: Bearer $token" \
          -H "Accept: application/json" 2>/dev/null \
-        | jq -S '.' \
+        | normalize \
         || die "error" "ACL fetch failed"
 }
 
-# Pull the fenced ```json block under the "Access Controls" heading from the doc.
-vault_block() {
-    [[ -f $TS_ACL_VAULT_DOC ]] || die "error" "vault doc not found: $TS_ACL_VAULT_DOC"
-    awk '
-        /^## Access Controls/ { in_section = 1 }
-        in_section && /^```json/ { capture = 1; next }
-        capture && /^```/ { exit }
-        capture { print }
-    ' "$TS_ACL_VAULT_DOC" | jq -S '.' \
-        || die "error" "could not parse JSON block from $TS_ACL_VAULT_DOC"
+# The ACL is a single JSON policy object; normalize = sort keys. Idempotent.
+normalize() {
+    jq -S '.'
 }
 
-cmd_show() {
-    fetch_live
-}
-
-cmd_diff() {
-    local live vault
-    live=$(fetch_live)
-    vault=$(vault_block)
-    if diff_out=$(diff <(echo "$vault") <(echo "$live")); then
-        msg "$GREEN" "in sync" "live ACL matches the vault mirror"
-        echo
-    else
-        msg "$YELLOW" "drift" "live ACL differs from the vault mirror (< vault, > live)"
-        echo
-        echo "$diff_out"
-        echo
-        exit 1
-    fi
-}
-
-for cmd in curl jq decrypt; do
-    command -v "$cmd" >/dev/null || die "error" "missing required command: $cmd"
-done
-
-case "${1:-help}" in
-    show)        cmd_show ;;
-    diff)        cmd_diff ;;
-    -h|help|'')  usage ;;
-    *)           die "usage" "unknown command: $1 (try -h)" 2 ;;
-esac
+drift_main "$@"

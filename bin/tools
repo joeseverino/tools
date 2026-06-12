@@ -400,9 +400,15 @@ EOF
         for f in bin/* bench/*.sh; do
             shebang_has bash "$f" && sc_targets+=("$f")
         done
-        sc_targets+=(lib/common.sh lib/init.sh lib/key.sh
-                     config/crypt.sh config/vault.sh config/backup.sh.example
-                     config/hq.sh config/ts-acl.sh config/site.sh.example)
+        # lib/*.sh and config/*.sh have no shebang to route on, so discover them
+        # via git: tracked or new-but-unignored sources are linted, while
+        # gitignored user-local config copies (backup.sh, site.sh, ...) are not.
+        # New files (a new lib helper or config/<tool>.sh) are covered
+        # automatically — no hand-editing here.
+        while IFS= read -r f; do
+            sc_targets+=("$f")
+        done < <(git ls-files --cached --others --exclude-standard \
+                     'lib/*.sh' 'config/*.sh' 'config/*.sh.example')
         if err=$(shellcheck -x "${sc_targets[@]}" 2>&1); then
             check "shellcheck" 1 "${#sc_targets[@]} files"
         else
@@ -450,21 +456,39 @@ EOF
 # ---------- new (scaffold a tool with the house conventions) ----------
 
 cmd_new() {
-    local name="${1:-}"
-    if [[ "$name" == "-h" || "$name" == "--help" ]]; then
-        cat <<EOF
-Usage: tools new <name>
+    local name="" drift=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -h|--help)
+                cat <<EOF
+Usage: tools new <name> [--drift]
 
 Scaffold bin/<name>: bash + set -euo pipefail, the lib/init.sh sourcing
 line, a usage() block, and arg parsing wired to die/msg. Prints the
 follow-ups (completions, install) when done.
+
+  --drift   Scaffold a drift-guard tool instead (the ts-acl / cf-dns shape):
+            show / diff / pull, with get_token / fetch_live / normalize /
+            vault_block already wired, plus a config/<name>.sh template.
+            Fill in the TODOs (endpoint, creds key, jq projection).
 EOF
-        return 0
-    fi
-    [[ -n "$name" ]] || die "usage" "tools new <name> (try -h)" 2
+                return 0 ;;
+            --drift)    drift=1; shift ;;
+            -*)         die "usage" "unknown option: $1 (try -h)" 2 ;;
+            *)          name="$1"; shift ;;
+        esac
+    done
+    [[ -n "$name" ]] || die "usage" "tools new <name> [--drift] (try -h)" 2
     [[ "$name" =~ ^[a-z][a-z0-9-]*$ ]] || die "usage" "name must be lowercase letters, digits, dashes" 2
     local target="$TOOLS_HOME/bin/$name"
     [[ -e "$target" ]] && die "error" "bin/$name already exists"
+    # Env-var prefix for config vars: cf-dns → CF_DNS, adguard → ADGUARD.
+    local prefix; prefix=$(printf '%s' "$name" | tr '[:lower:]-' '[:upper:]_')
+
+    if (( drift )); then
+        new_drift "$name" "$prefix" "$target"
+        return 0
+    fi
 
     cat > "$target" <<'EOF'
 #!/usr/bin/env bash
@@ -505,6 +529,118 @@ EOF
     msg "$DIM"   "next"    "1. implement it (tool-specific files go in lib/$name/)"
     msg "$DIM"   "next"    "2. add $name to the #compdef line in completions/_tools-suite"
     msg "$DIM"   "next"    "3. tools install && tools check"
+    echo
+}
+
+# Scaffold a drift-guard tool + its config. __NAME__ / __PREFIX__ are filled in
+# after the heredocs are written (the heredocs are quoted, so nothing expands).
+new_drift() {
+    local name="$1" prefix="$2" target="$3"
+
+    cat > "$target" <<'EOF'
+#!/usr/bin/env bash
+# __NAME__ — fetch live state from an API and diff it against the vault mirror.
+# Drift-guard sibling of cf-dns / adguard; show / diff / pull live in lib/drift.sh.
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "__NAME__"
+# shellcheck source=lib/drift.sh
+source "$TOOLS_HOME/lib/drift.sh"
+
+# TODO: API base for the service.
+API="https://api.example.com"
+
+# shellcheck disable=SC2153  # ${__PREFIX___VAULT_DOC} comes from config/__NAME__.sh
+DRIFT_VAULT_DOC="${__PREFIX___VAULT_DOC}"
+# shellcheck disable=SC2153
+DRIFT_VAULT_HEADING="${__PREFIX___VAULT_HEADING}"
+
+usage() {
+    cat <<HELP
+Usage: __NAME__ <command>
+
+Commands:
+  show        Fetch and print the live state (normalized, sorted JSON).
+  diff        Diff live vs the vault mirror; exit 1 on drift.
+  pull        Regenerate the vault mirror block from live.
+  -h, help    Show this help.
+
+Config (config/__NAME__.sh, override via env):
+  __PREFIX___CREDS         age-encrypted env holding the API credential
+  __PREFIX___VAULT_DOC     vault doc holding the mirror
+  __PREFIX___VAULT_HEADING heading whose fenced \`\`\`json block is the mirror
+HELP
+}
+
+# Decrypt the creds env and echo the secret. Stays in memory only.
+# TODO: read whatever key(s) your API needs (Bearer token, user/pass, ...).
+get_token() {
+    [[ -f ${__PREFIX___CREDS} ]] || die "error" "creds not found: ${__PREFIX___CREDS} (see -h)"
+    local token="" k v
+    while IFS='=' read -r k v; do
+        case $k in
+            __PREFIX___TOKEN) token=$v ;;
+        esac
+    done < <(decrypt -p "${__PREFIX___CREDS}" 2>/dev/null) \
+        || die "error" "could not decrypt ${__PREFIX___CREDS} (try: tools key test)"
+    [[ -n $token ]] || die "error" "creds need __PREFIX___TOKEN=..."
+    echo "$token"
+}
+
+# Fetch live state and reduce to the normalized, sorted set.
+# TODO: point at the real endpoint; paginate if the API does.
+fetch_live() {
+    local token; token=$(get_token)
+    curl -fsS "$API/TODO" \
+         -H "Authorization: Bearer $token" \
+         -H "Accept: application/json" 2>/dev/null \
+        | normalize \
+        || die "error" "live fetch failed"
+}
+
+# Normalize a raw API response (stdin) to the diffable shape. Must be idempotent
+# on its own output — drift.sh re-runs it over the stored block.
+# TODO: project to the meaningful fields and sort deterministically.
+normalize() {
+    jq -S 'map({TODO: .}) | sort_by(tostring)'
+}
+
+# lib/drift.sh provides show / diff / pull / dispatch over DRIFT_VAULT_DOC.
+drift_main "$@"
+EOF
+    sed -i '' -e "s/__NAME__/$name/g" -e "s/__PREFIX__/$prefix/g" "$target"
+    chmod +x "$target"
+
+    local cfg="$TOOLS_HOME/config/$name.sh"
+    if [[ ! -e "$cfg" ]]; then
+        cat > "$cfg" <<'EOF'
+# shellcheck shell=bash
+# config/__NAME__.sh — __NAME__ drift checker configuration
+#
+# Sourced by `__NAME__`. Each variable can be overridden per-invocation.
+
+: "${KEYS_HOME:?set in ~/.zshrc}"
+: "${NOTES_HOME:?set in ~/.zshrc}"
+
+# age-encrypted env holding the API credential(s). Contents (example):
+#   __PREFIX___TOKEN=...
+# Create with:  encrypt __NAME__.env   then move the .age here.
+: "${__PREFIX___CREDS:=$KEYS_HOME/__NAME__/__NAME__.env.age}"
+
+# Vault doc holding the machine-readable mirror, and the heading whose fenced
+# ```json block `diff`/`pull` read and rewrite.
+: "${__PREFIX___VAULT_DOC:=$NOTES_HOME/TODO.md}"
+: "${__PREFIX___VAULT_HEADING:=## Canonical Records (__NAME__)}"
+EOF
+        sed -i '' -e "s/__NAME__/$name/g" -e "s/__PREFIX__/$prefix/g" "$cfg"
+    fi
+
+    echo
+    msg "$GREEN" "created" "bin/$name (drift guard) + config/$name.sh"
+    msg "$DIM"   "next"    "1. fill the TODOs: API base, get_token keys, fetch_live endpoint, normalize jq"
+    msg "$DIM"   "next"    "2. set CREDS / VAULT_DOC / VAULT_HEADING in config/$name.sh"
+    msg "$DIM"   "next"    "3. add $name to #compdef + a _${name//-/_} completion; seed the vault block via: $name pull"
+    msg "$DIM"   "next"    "4. tools install && tools check"
     echo
 }
 

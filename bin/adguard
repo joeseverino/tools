@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# adguard — fetch the live AdGuard Home DNS rewrites and diff them against the
+# vault mirror. Drift-guard sibling of cf-dns / ts-acl; the show/diff/pull
+# mechanics live in lib/drift.sh.
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "adguard"
+# shellcheck source=lib/drift.sh
+source "$TOOLS_HOME/lib/drift.sh"
+
+DRIFT_VAULT_DOC="$ADGUARD_VAULT_DOC"
+DRIFT_VAULT_HEADING="$ADGUARD_VAULT_HEADING"
+
+usage() {
+    cat <<HELP
+Usage: adguard <command>
+
+Commands:
+  show        Fetch and print the live DNS rewrites (normalized, sorted JSON).
+  diff        Diff live vs the vault mirror; exit 1 on drift.
+  pull        Regenerate the vault mirror block from the live rewrites.
+  -h, help    Show this help.
+
+Config (config/adguard.sh, override via env):
+  ADGUARD_CREDS         age-encrypted env holding ADGUARD_USER + ADGUARD_PASS
+  ADGUARD_URL           AdGuard Home base URL (e.g. http://192.168.1.233:3001)
+  ADGUARD_VAULT_DOC     vault doc holding the mirror
+  ADGUARD_VAULT_HEADING heading whose fenced \`\`\`json block is the mirror
+
+Rewrites are normalized to domain/answer, sorted by domain.
+HELP
+}
+
+# Decrypt the creds env and echo "user:pass" for curl basic auth. In memory only.
+get_creds() {
+    [[ -f ${ADGUARD_CREDS} ]] || die "error" "creds not found: ${ADGUARD_CREDS} (see -h)"
+    local user="" pass="" k v
+    while IFS='=' read -r k v; do
+        case $k in
+            ADGUARD_USER) user=$v ;;
+            ADGUARD_PASS) pass=$v ;;
+        esac
+    done < <(decrypt -p "${ADGUARD_CREDS}" 2>/dev/null) \
+        || die "error" "could not decrypt ${ADGUARD_CREDS} (try: tools key test)"
+    [[ -n $user && -n $pass ]] || die "error" "creds need ADGUARD_USER + ADGUARD_PASS"
+    printf '%s:%s' "$user" "$pass"
+}
+
+# Fetch the live DNS rewrites and reduce to the normalized, sorted set.
+fetch_live() {
+    local creds; creds=$(get_creds)
+    curl -fsS -u "$creds" "${ADGUARD_URL%/}/control/rewrite/list" \
+         -H "Accept: application/json" 2>/dev/null \
+        | normalize \
+        || die "error" "rewrite list fetch failed (is $ADGUARD_URL reachable?)"
+}
+
+# Normalize the rewrite array (stdin) to the diffable shape. Idempotent.
+normalize() {
+    jq -S 'map({domain, answer}) | sort_by(.domain, .answer)'
+}
+
+drift_main "$@"

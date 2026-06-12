@@ -37,6 +37,8 @@ tools/
     backup               # backup: mirror tracked files into $BACKUPS_HOME
     dns-test             # diag: compare DNS resolver latency across paths
     ts-acl               # tailscale: fetch live ACL, diff against vault mirror
+    cf-dns               # cloudflare: fetch live DNS, diff against vault mirror
+    adguard              # adguard: fetch live DNS rewrites, diff against vault mirror
     hq                   # severino-hq: sync vault frontmatter → HQ docs index
     site                 # jseverino.com: vault → Astro build → Cloudflare Pages
     brand                # severino-brand: render brand kits via branding-engine
@@ -46,6 +48,7 @@ tools/
     common.sh            # shared: colors, msg, die, header, footer, state
     init.sh              # shared: bootstrap sourced by every tool
     key.sh               # shared: SSH passphrase + age-key unlock
+    drift.sh             # shared: show/diff/pull core for ts-acl/cf-dns/adguard
     hq/                  # hq implementation (frontmatter → manifest JSON)
     site/                # site implementation (the `site manage` TUI)
     doc-to-pdf/          # doc-to-pdf implementation (markdown-it + mermaid)
@@ -54,6 +57,8 @@ tools/
     vault.sh             # default vault + inbox paths from $NOTES_HOME
     hq.sh                # HQ_SSH_HOST + HQ_REMOTE_PATH + HQ_URL guards
     ts-acl.sh            # creds path + tailnet + vault ACL doc for ts-acl
+    cf-dns.sh            # token path + zone + vault DNS doc for cf-dns
+    adguard.sh           # creds + base URL + vault doc for adguard
     site.sh.example      # template — copy to site.sh: site path + dev host
     backup.sh.example    # template — copy to backup.sh, edit, ignore
   completions/
@@ -170,7 +175,12 @@ lives in one place. It discovers scripts by shebang (`bash -n`, `zsh -n`,
 bats test suite in `tests/`, and the bench assertions in `bench/`.
 `tools new <name>` drops a canonical skeleton in `bin/` — init.sh
 sourcing, usage block, arg loop, correct exit codes — and prints the
-follow-ups.
+follow-ups. `tools new <name> --drift` scaffolds a drift-guard tool
+instead (the `ts-acl` / `cf-dns` / `adguard` shape): `show` / `diff` /
+`pull` with `get_token` / `fetch_live` / `normalize` / `vault_block`
+already wired, plus a matching `config/<name>.sh` — fill in the TODOs
+(endpoint, creds key, jq projection) and seed the vault block with
+`<name> pull`.
 
 #### tools key — passphrase cache
 
@@ -595,6 +605,7 @@ the vault, so policy drift gets caught instead of silently going stale.
 ```
 ts-acl show     # print the live policy (sorted JSON)
 ts-acl diff     # diff live vs the vault mirror; exit 1 on drift
+ts-acl pull     # regenerate the vault mirror block from the live ACL
 ```
 
 Auth credentials live age-encrypted at `$TS_ACL_CREDS`
@@ -619,6 +630,77 @@ the fenced ```json block from `$TS_ACL_VAULT_DOC`. Needs `curl` and `jq`.
 Setup: create either an API access token or (preferred) an OAuth client scoped
 to `acl:read` in the Tailscale admin console, then encrypt the env file to
 `$TS_ACL_CREDS`.
+
+### cf-dns
+
+The DNS sibling of `ts-acl`: fetch the live Cloudflare DNS records and diff them
+against a mirror stored in the vault, so zone drift gets caught instead of
+silently going stale.
+
+```
+cf-dns show     # print the live records (normalized, sorted JSON)
+cf-dns diff     # diff live vs the vault mirror; exit 1 on drift
+cf-dns pull     # regenerate the vault mirror block from the live zone
+```
+
+The mirror is a fenced ```json block under `$CF_DNS_VAULT_HEADING` in
+`$CF_DNS_VAULT_DOC` (the prose tables in that doc are for humans; the block is
+the diff target). Records are normalized to `type` / `name` / `content` /
+`proxied` — plus `priority` for `MX` — and Cloudflare-internal fields (id,
+timestamps, meta) are dropped, so the diff is stable. `diff` re-sorts both
+sides; `pull` rewrites the block in place. The accept-drift loop is:
+`cf-dns diff` → reconcile the prose tables → `cf-dns pull` → `hq sync`.
+
+Auth is a Cloudflare API token age-encrypted at `$CF_DNS_CREDS`
+(default `$KEYS_HOME/cloudflare/cf-dns.env.age`) as an env file:
+
+```
+CF_API_TOKEN=...
+```
+
+Scope it to `Zone.DNS:Read` (plus `Zone:Read` so `cf-dns` can resolve the zone
+id from `$CF_ZONE`; pin `$CF_ZONE_ID` to drop that). `cf-dns` streams the token
+via `decrypt -p` (no plaintext on disk), then reads
+`GET /zones/{id}/dns_records`. Needs `curl` and `jq`.
+
+Setup: create the scoped token at Cloudflare → My Profile → API Tokens, then
+`encrypt cf-dns.env` and move the `.age` to `$CF_DNS_CREDS`. Seed the mirror
+with `cf-dns pull`.
+
+### adguard
+
+The homelab-DNS sibling of `cf-dns`: fetch the live AdGuard Home DNS rewrites
+and diff them against a mirror in the vault, so the rewrite set that routes
+`*.homelab` and the Tailscale-only `*.jseverino.com` services can't drift
+unnoticed.
+
+```
+adguard show     # print the live rewrites (normalized, sorted JSON)
+adguard diff     # diff live vs the vault mirror; exit 1 on drift
+adguard pull     # regenerate the vault mirror block from the live rewrites
+```
+
+Reads `GET $ADGUARD_URL/control/rewrite/list` and normalizes each entry to
+`domain` / `answer`, sorted by domain. The mirror is the fenced ```json block
+under `$ADGUARD_VAULT_HEADING` in `$ADGUARD_VAULT_DOC`; the prose rewrite tables
+in that doc stay for humans. Same accept-drift loop as `cf-dns`:
+`adguard diff` → reconcile the tables → `adguard pull` → `hq sync`.
+
+Auth is the AdGuard web-UI login (HTTP basic auth), age-encrypted at
+`$ADGUARD_CREDS` (default `$KEYS_HOME/adguard/adguard.env.age`):
+
+```
+ADGUARD_USER=...
+ADGUARD_PASS=...
+```
+
+`$ADGUARD_URL` defaults to `http://192.168.1.233:3001` (reachable over LAN or
+Tailscale). `adguard` streams the creds via `decrypt -p` (no plaintext on
+disk). Needs `curl` and `jq`.
+
+Setup: `encrypt adguard.env` and move the `.age` to `$ADGUARD_CREDS`, then seed
+the mirror with `adguard pull`. This tool was scaffolded with
+`tools new adguard --drift` (see below).
 
 ### remember
 
