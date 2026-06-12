@@ -60,7 +60,13 @@ is the minimal one (overridable via `$DRIFT_REVIEW_BIN` so bats can stub it).
 **Shared frontmatter schema:** the MCP's `schema.py` is the one canonical enum
 contract; `severino-vault-mcp schema --json` emits it. `hq schema` regenerates
 HQ's committed `docs_index/schema.json` from it, and `hq schema --check` fails on
-drift (CI / pre-deploy). Don't hand-maintain enum lists anywhere downstream.
+drift (CI / pre-deploy, including the vault's Frontmatter Schema doc). Don't
+hand-maintain enum lists anywhere downstream.
+
+**No hand-rolled logic in `bin/hq`:** `hq doctor` reports the vault↔HQ gap via
+`severino-vault-mcp hq-manifest --report` (not a re-walk), and `hq validate`
+calls HQ's `manage.py audit_registry` (not an inline ORM script over SSH). Keep
+the contract/logic in the MCP or a `manage.py` command; `bin/hq` just formats.
 
 **Cross-repo JSON contract** (keep both sides in sync):
 - One JSON object per call; exit 0 on success, 1 on failure.

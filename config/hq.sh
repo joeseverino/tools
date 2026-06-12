@@ -17,6 +17,10 @@
 # ignored — we don't want to vacuum personal notes into HQ.
 : "${HQ_VAULT_DIRS:=01 Projects:02 Infrastructure:03 Runbooks:05 Writeups:06 Pages}"
 
+# Human-readable frontmatter contract doc in the vault. `hq schema` checks its
+# enum lists against the canonical MCP schema so it can't silently drift.
+: "${HQ_SCHEMA_DOC:=$VAULT/02 Infrastructure/Severino HQ/Frontmatter Schema.md}"
+
 # SSH alias of the server where Severino HQ runs. Set in your ~/.zshrc to
 # match the entry in your ~/.ssh/config — e.g. `export HQ_SSH_HOST=hq-host`.
 : "${HQ_SSH_HOST:?set in ~/.zshrc — SSH alias for the HQ server}"
