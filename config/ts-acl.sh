@@ -18,4 +18,4 @@
 : "${TS_TAILNET:=-}"
 
 # Vault doc whose fenced ```json ACL block is the stored mirror, used by `diff`.
-: "${TS_ACL_VAULT_DOC:=$NOTES_HOME/02 Infrastructure/Tailscale/Tailscale.md}"
+: "${TS_ACL_VAULT_DOC:=$NOTES_HOME/02 Infrastructure/Tailscale/ACL Policy.md}"

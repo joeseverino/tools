@@ -1,4 +1,4 @@
-#compdef tools vault encrypt decrypt inbox backup open-age dns-test site hq remember brand ts-acl cf-dns adguard doc-to-pdf
+#compdef tools vault encrypt decrypt inbox backup open-age dns-test site hq remember brand ts-acl cf-dns adguard nginx doc-to-pdf
 # Completion for the personal CLI tools.
 #
 # Install by adding to ~/.zshrc, BEFORE `compinit`:
@@ -257,6 +257,19 @@ _ts_acl() {
     esac
 }
 
+_nginx() {
+    local -a subs
+    subs=(
+        'show:print the live proxy hosts (normalized, sorted JSON)'
+        'diff:diff live vs the vault mirror; exit 1 on drift'
+        'pull:regenerate the vault mirror block from the live proxy hosts'
+    )
+    _arguments -C '1: :->cmd'
+    case $state in
+        cmd) _describe 'subcommand' subs ;;
+    esac
+}
+
 case "$service" in
     tools)    _tools    "$@" ;;
     vault)    _vault    "$@" ;;
@@ -271,5 +284,6 @@ case "$service" in
     cf-dns)   _cf_dns   "$@" ;;
     adguard)  _adguard  "$@" ;;
     ts-acl)   _ts_acl   "$@" ;;
+    nginx)    _nginx    "$@" ;;
     remember|brand|doc-to-pdf) _files ;;
 esac

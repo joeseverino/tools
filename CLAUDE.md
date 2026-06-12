@@ -12,8 +12,33 @@ re-derive from the code every session.
 - `lib/` — shared helpers flat (`common.sh`, `init.sh`, `key.sh`,
   `drift.sh`); tool-specific support files under `lib/<tool>/` (e.g.
   `lib/hq/`, `lib/site/`, `lib/doc-to-pdf/`). `drift.sh` is the shared core
-  for the drift-guard tools (`ts-acl`, `cf-dns`, `adguard`): they provide
-  `get_token`/`fetch_live`/`normalize` + config and call `drift_main`.
+  for the drift-guard tools (`ts-acl`, `cf-dns`, `adguard`, `nginx`): they
+  provide `get_token`/`fetch_live`/`normalize` + config and call `drift_main`.
+  On a successful `pull`, `drift.sh` stamps the vault doc's `last_reviewed`
+  through the MCP (see below) — a pull is a review.
+
+## Calling the severino-vault-mcp from this repo
+
+We own the MCP (`~/Documents/Code/Assets/severino-vault-mcp/`). Shell tools
+call it as a plain CLI — **don't** hand-edit vault frontmatter or shell out to
+`yq`; the MCP is the schema-validated writer that also reloads the vault cache:
+
+```bash
+SVMC_VAULT_PATH="$NOTES_HOME" severino-vault-mcp <subcommand> [args] [--pretty]
+```
+
+The console script is on PATH (`uv tool install`). Existing subcommands:
+`touch-reviewed <relative-path>` (set `last_reviewed` to today — used by
+`drift.sh`), `prepare-writeup-publish`, `list-writeups`, `technology-catalog`,
+`validate-all-writeups`, `reorder-featured`, `update-writeup`, `doctor`. Each
+wraps the same-named tool in `server.py`, prints JSON, and exits 0/1 on `ok`.
+`bin/site` is the reference caller; `lib/drift.sh:drift_touch_reviewed` is the
+minimal one (overridable via `$DRIFT_REVIEW_BIN` so bats can stub it).
+
+**To expose another MCP tool to the shell:** add a subparser + handler in the
+MCP's `src/severino_vault_mcp/__main__.py` (mirror an existing block), then
+`site reinstall-mcp` to make the new subcommand live (a stale `uv tool` install
+is what `site doctor`'s fingerprint check catches).
 - `config/` — per-tool defaults derived from layout env vars. Files ending
   `.example` are templates; their gitignored copies are user-specific.
 - `tests/` — bats suite. Hermetic: throwaway keys, tmpdirs, no Keychain.

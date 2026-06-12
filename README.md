@@ -176,11 +176,22 @@ bats test suite in `tests/`, and the bench assertions in `bench/`.
 `tools new <name>` drops a canonical skeleton in `bin/` — init.sh
 sourcing, usage block, arg loop, correct exit codes — and prints the
 follow-ups. `tools new <name> --drift` scaffolds a drift-guard tool
-instead (the `ts-acl` / `cf-dns` / `adguard` shape): `show` / `diff` /
-`pull` with `get_token` / `fetch_live` / `normalize` / `vault_block`
-already wired, plus a matching `config/<name>.sh` — fill in the TODOs
-(endpoint, creds key, jq projection) and seed the vault block with
-`<name> pull`.
+instead (the `ts-acl` / `cf-dns` / `adguard` / `nginx` shape): `show` /
+`diff` / `pull` with `get_token` / `fetch_live` / `normalize` /
+`vault_block` already wired, plus a matching `config/<name>.sh` — fill in
+the TODOs (endpoint, creds key, jq projection) and seed the vault block
+with `<name> pull`.
+
+A successful `pull` also stamps the mirror doc's `last_reviewed` to today
+— a pull is a review. It does this through the
+[`severino-vault-mcp`](https://github.com/joeseverino/severino-vault-mcp)
+console script (`severino-vault-mcp touch-reviewed <vault-relative-path>`,
+which wraps the MCP's schema-validated `update_frontmatter` and reloads
+the vault cache), never a raw YAML edit. The step is best-effort: it's
+skipped silently if the MCP binary isn't on `PATH` or the doc lives
+outside `$NOTES_HOME`. So the loop is `<tool> diff` → reconcile the prose
+→ `<tool> pull` (regenerates the block **and** bumps `last_reviewed`) →
+`hq sync`.
 
 #### tools key — passphrase cache
 
@@ -701,6 +712,42 @@ disk). Needs `curl` and `jq`.
 Setup: `encrypt adguard.env` and move the `.age` to `$ADGUARD_CREDS`, then seed
 the mirror with `adguard pull`. This tool was scaffolded with
 `tools new adguard --drift` (see below).
+
+### nginx
+
+The reverse-proxy sibling of `cf-dns` / `adguard`: fetch the live Nginx Proxy
+Manager proxy hosts and diff them against a mirror in the vault, so the host →
+upstream map (`hq.jseverino.com`, `adguard.homelab`, …) can't drift unnoticed.
+
+```
+nginx show     # print the live proxy hosts (normalized, sorted JSON)
+nginx diff     # diff live vs the vault mirror; exit 1 on drift
+nginx pull     # regenerate the vault mirror block from the live proxy hosts
+```
+
+Reads `GET $NGINX_URL/nginx/proxy-hosts` and normalizes each host to
+`domain_names` / `forward_scheme` / `forward_host` / `forward_port` / `enabled`,
+sorted by domain. The mirror is the fenced ```json block under
+`$NGINX_VAULT_HEADING` in `$NGINX_VAULT_DOC`; the prose table in that doc stays
+for humans. Same accept-drift loop: `nginx diff` → reconcile the table →
+`nginx pull` → `hq sync`.
+
+NPM has no long-lived API tokens, so `nginx` exchanges the web-UI login for a
+short-lived Bearer per call (`POST $NGINX_URL/tokens`). The login is
+age-encrypted at `$NGINX_CREDS` (default `$KEYS_HOME/nginx/nginx.env.age`):
+
+```
+NGINX_EMAIL=...
+NGINX_PASSWORD=...
+```
+
+`$NGINX_URL` defaults to `http://192.168.1.233:81/api` (reachable over LAN or
+Tailscale). `nginx` streams the creds via `decrypt -p` (no plaintext on disk).
+Needs `curl` and `jq`.
+
+Setup: `encrypt nginx.env` and move the `.age` to `$NGINX_CREDS`, then seed the
+mirror with `nginx pull`. This tool was scaffolded with `tools new nginx --drift`
+(see below).
 
 ### remember
 

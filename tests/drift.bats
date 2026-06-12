@@ -27,7 +27,7 @@ JSON
 set -euo pipefail
 source "$TOOLS_HOME/lib/common.sh"
 source "$TOOLS_HOME/lib/drift.sh"
-DRIFT_VAULT_DOC="$VAULT_DOC"
+DRIFT_VAULT_DOC="\${DRIFT_VAULT_DOC:-$VAULT_DOC}"
 DRIFT_VAULT_HEADING="## Mirror"
 usage() { echo "usage text"; }
 normalize() { jq -S 'sort_by(.id)'; }
@@ -125,6 +125,48 @@ EOF
     run "$TOOL" diff
     [ "$status" -eq 0 ]
     [[ "$output" == *"in sync"* ]]
+}
+
+@test "pull: stamps last_reviewed via the vault-mcp touch-reviewed CLI" {
+    # Stub the MCP binary; record argv so we can assert the subcommand and the
+    # vault-relative path drift.sh hands it.
+    local stub="$DRIFT_DIR/severino-vault-mcp"
+    cat > "$stub" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" > "$DRIFT_DIR/mcp.args"
+echo '{"ok":true}'
+EOF
+    chmod +x "$stub"
+    export DRIFT_REVIEW_BIN="$stub"
+    # The doc must live under NOTES_HOME for the relative-path math to fire.
+    export NOTES_HOME="$DRIFT_DIR/vault"
+    export DRIFT_VAULT_DOC="$NOTES_HOME/sub/doc.md"
+    mkdir -p "$NOTES_HOME/sub"
+    cat > "$DRIFT_VAULT_DOC" <<'EOF'
+---
+doc_id: test
+---
+
+## Mirror
+
+```json
+[]
+```
+EOF
+    run "$TOOL" pull
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"reviewed"* ]]
+    run cat "$DRIFT_DIR/mcp.args"
+    [ "$output" = "touch-reviewed sub/doc.md" ]
+}
+
+@test "pull: review stamp is skipped cleanly when the MCP binary is absent" {
+    export DRIFT_REVIEW_BIN="$DRIFT_DIR/no-such-mcp"
+    write_doc '[]'
+    run "$TOOL" pull
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"pulled"* ]]
+    [[ "$output" != *"reviewed"* ]]
 }
 
 @test "pull: clean teardown — no set -u unbound-variable error" {

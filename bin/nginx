@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# nginx — fetch the live Nginx Proxy Manager proxy hosts and diff them against
+# the vault mirror. Drift-guard sibling of cf-dns / adguard; show / diff / pull
+# live in lib/drift.sh. NPM has no API tokens at rest: we exchange the web-UI
+# credentials (age-encrypted at $NGINX_CREDS) for a short-lived Bearer per call.
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "nginx"
+# shellcheck source=lib/drift.sh
+source "$TOOLS_HOME/lib/drift.sh"
+
+# shellcheck disable=SC2153  # ${NGINX_VAULT_DOC} comes from config/nginx.sh
+DRIFT_VAULT_DOC="${NGINX_VAULT_DOC}"
+# shellcheck disable=SC2153
+DRIFT_VAULT_HEADING="${NGINX_VAULT_HEADING}"
+
+usage() {
+    cat <<HELP
+Usage: nginx <command>
+
+Commands:
+  show        Fetch and print the live proxy hosts (normalized, sorted JSON).
+  diff        Diff live vs the vault mirror; exit 1 on drift.
+  pull        Regenerate the vault mirror block from the live proxy hosts.
+  -h, help    Show this help.
+
+Config (config/nginx.sh, override via env):
+  NGINX_CREDS         age-encrypted env holding NGINX_EMAIL + NGINX_PASSWORD
+  NGINX_URL           Nginx Proxy Manager API base (e.g. http://host:81/api)
+  NGINX_VAULT_DOC     vault doc holding the mirror
+  NGINX_VAULT_HEADING heading whose fenced \`\`\`json block is the mirror
+
+Proxy hosts are normalized to domain_names / forward_scheme / forward_host /
+forward_port / enabled, sorted by domain.
+HELP
+}
+
+# Decrypt the creds env and echo "email<TAB>secret". In memory only, never on disk.
+get_creds() {
+    [[ -f ${NGINX_CREDS} ]] || die "error" "creds not found: ${NGINX_CREDS} (see -h)"
+    local email="" secret="" k v
+    while IFS='=' read -r k v; do
+        case $k in
+            NGINX_EMAIL)    email=$v ;;
+            NGINX_PASSWORD) secret=$v ;;
+        esac
+    done < <(decrypt -p "${NGINX_CREDS}" 2>/dev/null) \
+        || die "error" "could not decrypt ${NGINX_CREDS} (try: tools key test)"
+    [[ -n $email && -n $secret ]] || die "error" "creds need NGINX_EMAIL + NGINX_PASSWORD"
+    printf '%s\t%s' "$email" "$secret"
+}
+
+# Exchange the web-UI creds for a Bearer token (NPM has no long-lived tokens).
+get_token() {
+    local creds email secret resp token
+    creds=$(get_creds)
+    email=${creds%%$'\t'*}
+    secret=${creds#*$'\t'}
+    resp=$(jq -nc --arg i "$email" --arg s "$secret" '{identity:$i,secret:$s}' \
+           | curl -fsS "${NGINX_URL%/}/tokens" \
+                  -H "Content-Type: application/json" \
+                  -H "Accept: application/json" \
+                  --data @- 2>/dev/null) \
+        || die "error" "token request failed (is $NGINX_URL reachable?)"
+    token=$(jq -r '.token // empty' <<<"$resp")
+    [[ -n $token ]] || die "error" "no token in NPM response (check NGINX_EMAIL/NGINX_PASSWORD)"
+    echo "$token"
+}
+
+# Fetch the live proxy hosts and reduce to the normalized, sorted set.
+fetch_live() {
+    local token; token=$(get_token)
+    curl -fsS "${NGINX_URL%/}/nginx/proxy-hosts" \
+         -H "Authorization: Bearer $token" \
+         -H "Accept: application/json" 2>/dev/null \
+        | normalize \
+        || die "error" "proxy-hosts fetch failed"
+}
+
+# Normalize the raw proxy-host array (stdin) to the diffable shape. Idempotent
+# on its own output, as drift.sh requires.
+normalize() {
+    jq -S 'map({domain_names: (.domain_names | sort),
+                forward_scheme, forward_host, forward_port, enabled})
+           | sort_by(.domain_names)'
+}
+
+drift_main "$@"
