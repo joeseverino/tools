@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+# cf-dns — fetch the live Cloudflare DNS records and diff them against the vault
+# mirror. Drift-guard sibling of ts-acl / adguard; the show/diff/pull mechanics
+# live in lib/drift.sh. A Zone.DNS:Read token (age-encrypted at $CF_DNS_CREDS,
+# streamed via decrypt -p — no plaintext on disk) is least-privilege.
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "cf-dns"
+# shellcheck source=lib/drift.sh
+source "$TOOLS_HOME/lib/drift.sh"
+
+API="https://api.cloudflare.com/client/v4"
+DRIFT_VAULT_DOC="$CF_DNS_VAULT_DOC"
+DRIFT_VAULT_HEADING="$CF_DNS_VAULT_HEADING"
+
+usage() {
+    cat <<EOF
+Usage: cf-dns <command>
+
+Commands:
+  show        Fetch and print the live DNS records (normalized, sorted JSON).
+  diff        Diff the live records against the vault mirror
+              (\`\`\`json block under "$CF_DNS_VAULT_HEADING" in the vault doc).
+  pull        Regenerate that block from the live zone (accept drift).
+  -h, help    Show this help.
+
+Config (config/cf-dns.sh, override via env):
+  CF_DNS_CREDS         age-encrypted env holding CF_API_TOKEN
+  CF_ZONE              zone name to query (resolved to an id via the API)
+  CF_ZONE_ID           pin the zone id and skip name resolution
+  CF_DNS_VAULT_DOC     vault doc holding the mirror
+  CF_DNS_VAULT_HEADING heading whose fenced \`\`\`json block is the mirror
+
+Records are normalized to type/name/content/proxied (+ priority for MX);
+Cloudflare-internal fields (id, timestamps, meta) are dropped.
+EOF
+}
+
+# Decrypt the creds env and echo CF_API_TOKEN. The secret stays in memory for
+# the life of the call — never written to disk.
+get_token() {
+    [[ -f $CF_DNS_CREDS ]] || die "error" "creds not found: $CF_DNS_CREDS (see -h)"
+
+    local token="" k v
+    while IFS='=' read -r k v; do
+        case $k in
+            CF_API_TOKEN) token=$v ;;
+        esac
+    done < <(decrypt -p "$CF_DNS_CREDS" 2>/dev/null) \
+        || die "error" "could not decrypt $CF_DNS_CREDS (try: tools key test)"
+
+    [[ -n $token ]] || die "error" "creds need CF_API_TOKEN=..."
+    echo "$token"
+}
+
+# Resolve the zone id. Honor a pinned CF_ZONE_ID; else look it up by name.
+zone_id() {
+    local token="$1" resp id
+    if [[ -n ${CF_ZONE_ID:-} ]]; then
+        echo "$CF_ZONE_ID"
+        return
+    fi
+    resp=$(curl -fsS "$API/zones?name=$CF_ZONE&status=active" \
+                -H "Authorization: Bearer $token" \
+                -H "Accept: application/json" 2>/dev/null) \
+        || die "error" "zone lookup failed for $CF_ZONE"
+    id=$(jq -r '.result[0].id // empty' <<<"$resp")
+    [[ -n $id ]] || die "error" "no zone id for $CF_ZONE (is the token scoped to it?)"
+    echo "$id"
+}
+
+# Fetch every DNS record (paginated) and reduce to the normalized, sorted set.
+fetch_live() {
+    local token zid page=1 total=1 all="[]" resp
+    token=$(get_token)
+    zid=$(zone_id "$token")
+
+    while (( page <= total )); do
+        resp=$(curl -fsS "$API/zones/$zid/dns_records?per_page=100&page=$page" \
+                    -H "Authorization: Bearer $token" \
+                    -H "Accept: application/json" 2>/dev/null) \
+            || die "error" "DNS records fetch failed (page $page)"
+        all=$(jq -c --argjson acc "$all" '$acc + .result' <<<"$resp") \
+            || die "error" "unexpected DNS records response (page $page)"
+        total=$(jq -r '.result_info.total_pages // 1' <<<"$resp")
+        (( page++ )) || true
+    done
+
+    normalize <<<"$all"
+}
+
+# Normalize a raw Cloudflare record array (stdin) to the diffable shape.
+# Idempotent on its own output, as drift.sh requires.
+normalize() {
+    jq -S 'map({type, name, content, proxied}
+               + (if .priority != null then {priority} else {} end))
+           | sort_by(.type, .name, .content, (.priority // 0))'
+}
+
+drift_main "$@"

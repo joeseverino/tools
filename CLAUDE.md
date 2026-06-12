@@ -9,9 +9,11 @@ re-derive from the code every session.
 - `bin/` — exactly one executable per tool, nothing else. `tools install`,
   the completions, `tools doctor`, and CI all discover tools by globbing
   `bin/*`.
-- `lib/` — shared helpers flat (`common.sh`, `init.sh`, `key.sh`);
-  tool-specific support files under `lib/<tool>/` (e.g. `lib/hq/`,
-  `lib/site/`, `lib/doc-to-pdf/`).
+- `lib/` — shared helpers flat (`common.sh`, `init.sh`, `key.sh`,
+  `drift.sh`); tool-specific support files under `lib/<tool>/` (e.g.
+  `lib/hq/`, `lib/site/`, `lib/doc-to-pdf/`). `drift.sh` is the shared core
+  for the drift-guard tools (`ts-acl`, `cf-dns`, `adguard`): they provide
+  `get_token`/`fetch_live`/`normalize` + config and call `drift_main`.
 - `config/` — per-tool defaults derived from layout env vars. Files ending
   `.example` are templates; their gitignored copies are user-specific.
 - `tests/` — bats suite. Hermetic: throwaway keys, tmpdirs, no Keychain.
@@ -24,7 +26,7 @@ re-derive from the code every session.
   skeleton. Every tool sources `lib/init.sh`, uses `msg`/`die`/`header`/
   `footer` for output, and exits 0 (success/skips), 1 (failure), 2 (usage).
 - Every tool answers `-h`/`--help`.
-- zsh tools (`dns-test`, `ts-acl`) are the exception to the bash rule.
+- `dns-test` is the lone zsh exception to the bash rule.
 - Node code is ESM (`.mjs`), deps pinned in the root `package.json`,
   resolved by upward `node_modules` lookup.
 - Adding a tool: drop it in `bin/`, add it to the `#compdef` line in

@@ -1,0 +1,137 @@
+#!/usr/bin/env bats
+# drift.bats — hermetic tests for lib/drift.sh, the shared drift-guard core
+# behind ts-acl / cf-dns / adguard. A fake tool injects fetch_live + normalize,
+# so vault_block / diff / pull are exercised with no network, creds, or decrypt.
+
+load helpers
+
+setup() {
+    DRIFT_DIR="$BATS_TEST_TMPDIR/drift"
+    mkdir -p "$DRIFT_DIR"
+    LIVE_JSON="$DRIFT_DIR/live.json"
+    VAULT_DOC="$DRIFT_DIR/doc.md"
+    TOOL="$DRIFT_DIR/faketool"
+
+    # Canned live state — deliberately unsorted so normalize has to order it.
+    cat > "$LIVE_JSON" <<'JSON'
+[
+  {"id":"b","val":2},
+  {"id":"a","val":1}
+]
+JSON
+
+    # A fake drift tool: the real lib/drift.sh with injected hooks. fetch_live
+    # reads the canned file (the only thing a real tool does differently).
+    cat > "$TOOL" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+source "$TOOLS_HOME/lib/common.sh"
+source "$TOOLS_HOME/lib/drift.sh"
+DRIFT_VAULT_DOC="$VAULT_DOC"
+DRIFT_VAULT_HEADING="## Mirror"
+usage() { echo "usage text"; }
+normalize() { jq -S 'sort_by(.id)'; }
+fetch_live() { normalize < "$LIVE_JSON"; }
+drift_main "\$@"
+EOF
+    chmod +x "$TOOL"
+}
+
+# write_doc <block> — vault doc with surrounding frontmatter + prose and the
+# given JSON between the mirror fences.
+write_doc() {
+    cat > "$VAULT_DOC" <<EOF
+---
+doc_id: test
+---
+
+## Intro
+
+prose stays.
+
+## Mirror
+
+note line.
+
+\`\`\`json
+$1
+\`\`\`
+
+## After
+
+tail prose.
+EOF
+}
+
+normalized_live() { jq -S 'sort_by(.id)' < "$LIVE_JSON"; }
+
+@test "diff: in sync when the stored block matches live" {
+    write_doc "$(normalized_live)"
+    run "$TOOL" diff
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"in sync"* ]]
+}
+
+@test "diff: drift (exit 1) when the block differs from live" {
+    write_doc '[]'
+    run "$TOOL" diff
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"drift"* ]]
+}
+
+@test "diff: ordering in the stored block never causes false drift" {
+    # Same records as live, but written in the opposite order — normalize on
+    # both sides must canonicalize them to equal.
+    write_doc '[{"id":"b","val":2},{"id":"a","val":1}]'
+    run "$TOOL" diff
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"in sync"* ]]
+}
+
+@test "pull: seeds an empty placeholder, then diff is in sync (round trip)" {
+    write_doc '[]'
+    run "$TOOL" pull
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"pulled"* ]]
+    run "$TOOL" diff
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"in sync"* ]]
+}
+
+@test "pull: replaces an existing block, preserving surrounding prose" {
+    write_doc '[{"id":"stale","val":9}]'
+    run "$TOOL" pull
+    [ "$status" -eq 0 ]
+    grep -q "prose stays." "$VAULT_DOC"
+    grep -q "^## After"    "$VAULT_DOC"
+    grep -q "tail prose."  "$VAULT_DOC"
+    grep -q '"id": "a"'    "$VAULT_DOC"
+    ! grep -q "stale"      "$VAULT_DOC"
+}
+
+@test "pull: appends the section when the heading is absent" {
+    cat > "$VAULT_DOC" <<'EOF'
+---
+doc_id: test
+---
+
+## Intro
+
+no mirror heading here yet.
+EOF
+    run "$TOOL" pull
+    [ "$status" -eq 0 ]
+    grep -q "^## Mirror" "$VAULT_DOC"
+    run "$TOOL" diff
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"in sync"* ]]
+}
+
+@test "pull: clean teardown — no set -u unbound-variable error" {
+    # Regression guard: the EXIT-trap-on-locals bug printed
+    # "jsonf: unbound variable" after a successful pull.
+    write_doc '[]'
+    run "$TOOL" pull
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"unbound variable"* ]]
+}
