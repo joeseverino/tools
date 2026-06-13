@@ -5,6 +5,11 @@ colored output, aligned status lines, meaningful exit codes, and `-h`
 help on every command. Cohesive enough to feel like one program even
 though each tool is a standalone script.
 
+**Design docs:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (the repo map)
+and [`docs/command-surface-contract.md`](docs/command-surface-contract.md) (the
+emit-once `describe` contract + the v3 effect model, with diagrams). House rules
+for editing are in [`AGENTS.md`](AGENTS.md).
+
 **Platform:** macOS only. The crypt tools rely on `/usr/bin/security`
 (Keychain), `osascript` (passphrase dialogs), and `open -W`. The
 `tools watch` agent uses `launchctl`. None of this has Linux/WSL
@@ -265,6 +270,11 @@ contract — and because both views render from the one `describe_spec`, that
 gate plus the round-trip test in `tests/describe.bats` keep the whole suite
 self-describing as it grows. `lib/describe.sh` runs under both bash and zsh,
 so the lone zsh tool (`dns-test`) self-describes from the same engine.
+
+For the full design — the DSL, the `schema_version 3` shape, the effect model,
+scoped lookup, federation, and the diagrams — see
+[`docs/command-surface-contract.md`](docs/command-surface-contract.md). The
+repo map is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 #### tools key — passphrase cache
 

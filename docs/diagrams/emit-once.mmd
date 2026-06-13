@@ -1,0 +1,37 @@
+%%{init: {'flowchart': {'rankSpacing': 70, 'nodeSpacing': 50}}}%%
+flowchart TB
+    spec["describe_spec()<br/>desc_tool · desc_cmd · desc_opt · desc_pos<br/>desc_effect · desc_para · desc_example · desc_delegate"]
+
+    subgraph engine["lib/describe.sh — one engine (bash + zsh safe)"]
+        run["desc_help_intercept → describe_reset → run spec → render"]
+    end
+
+    spec ==>|"the single source of truth"| engine
+
+    subgraph renderers["Renderers — pure, derived, no prose parsed"]
+        usage["usage()<br/>git-style main -h"]
+        focused["usage_command()<br/>focused &lt;cmd&gt; -h"]
+        json["describe_emit<br/>--describe JSON (schema_version 3)"]
+    end
+
+    engine --> usage
+    engine --> focused
+    engine --> json
+
+    subgraph consumers["Consumers — render-many"]
+        human["Human<br/>clean help text"]
+        tui["tools describe --tui<br/>two-pane explorer"]
+        ai["AI session<br/>tools describe &lt;tool&gt; &lt;cmd&gt;"]
+        guards["CI guards<br/>describe.bats · drift_main diff"]
+        fed["tools describe --repos<br/>one federated document"]
+    end
+
+    usage --> human
+    focused --> human
+    json --> tui
+    json --> ai
+    json --> guards
+    json --> fed
+
+    mcp[("severino-vault-mcp describe<br/>same contract: subset + schema_version + effect")]
+    mcp -.->|"sibling emitter"| fed
