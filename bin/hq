@@ -11,80 +11,36 @@ set -euo pipefail
 
 source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" hq
 
-usage() {
-    cat <<EOF
-Usage: hq <command> [args]
-
-Severino HQ glue. Reads YAML frontmatter from the vault and upserts the
-HQ docs index. Also wraps the routine ssh + docker compose calls for
-managing the HQ deployment.
-
-Commands:
-  manifest             Print the manifest JSON (frontmatter from every doc)
-                       to stdout. Useful for inspection or piping elsewhere.
-
-  sync [--prune]       Pipe the manifest into HQ's manage.py import_docs_manifest
-                       on $HQ_SSH_HOST. Upserts by doc_id; safe to re-run.
-                       --prune deletes orphan rows (after a doc_id rename)
-                       and stale mirrored ContentItems tied only to those rows.
-
-  doctor               Report vault docs that are missing or have invalid
-                       frontmatter, and whether HQ's last-synced manifest is
-                       stale — the gap between vault state and HQ state.
-
-  schema [--check]     Regenerate HQ's docs_index/schema.json from the installed
-                       MCP — the one canonical frontmatter contract both share.
-                       --check verifies it's current (exit 1 on drift) without
-                       writing, for CI / pre-deploy.
-
-  validate             Report HQ registry entries (Projects/Assets) that no
-                       vault doc references — the inverse of \`sync\`'s missing
-                       relations. Catches stale slugs left by a rename and
-                       duplicate registry rows. Read-only.
-
-  create <kind> <slug> [flags]
-                       Create or update a Project or Asset in HQ.
-                       \`hq create project --help\` / \`hq create asset --help\`
-                       for the full flag list. Idempotent (upserts by slug).
-
-  deploy               Fallback: manually re-pull the latest scanned image
-                       from GHCR and restart the container (CI's deploy step).
-                       Normal deploys happen automatically on push to main.
-
-  ship -m MESSAGE      Commit + push a small HQ change. The push IS the deploy:
-                       it triggers the gated pipeline (build -> scan -> deploy
-                       on green). The common "small HQ fix" path.
-
-  logs [-f] [--tail N] Show app container logs. Default tail is 50.
-                       -f / --follow streams live output until Ctrl-C.
-
-  restart              \`docker compose restart app\` — no rebuild, no migrations.
-                       Use for picking up env changes or clearing stuck state.
-
-  open                 Open \$HQ_URL in the browser.
-
-  shell                ssh -t into the HQ Django shell. Handy for poking the ORM.
-
-  superuser            ssh -t into HQ and run createsuperuser interactively.
-
-  export <year> [md|json]
-                       Download the year summary (.md or .json) to ./ and print
-                       the path. Defaults to current year and md.
-
-Env (read from ~/.zshrc unless overridden per-invocation):
-  NOTES_HOME           Vault root (= $NOTES_HOME)
-  HQ_VAULT_DIRS        Colon-separated subdirs to index (= $HQ_VAULT_DIRS)
-  HQ_SSH_HOST          SSH alias of the HQ server (= $HQ_SSH_HOST)
-  HQ_REMOTE_PATH       HQ checkout path on the server (= $HQ_REMOTE_PATH)
-  HQ_LOCAL_PATH        Local HQ checkout (= $HQ_LOCAL_PATH)
-  HQ_URL               Public URL of HQ (= $HQ_URL)
-
-Examples:
-  hq sync                       # most common — push vault → HQ
-  hq manifest | jq '.[] | .doc_id'
-  hq doctor                     # find docs missing frontmatter
-  hq export 2026                # download year-summary-2026.md
-EOF
+describe_spec() {
+    desc_tool "hq" "Sync vault frontmatter to Severino HQ, plus routine HQ deployment ops."
+    desc_synopsis "hq <command> [args]"
+    desc_para "Severino HQ glue. Reads YAML frontmatter from the vault and upserts the"
+    desc_para "HQ docs index. Also wraps the routine ssh + docker compose calls for"
+    desc_para "managing the HQ deployment."
+    desc_cmd manifest  -- "Print the manifest JSON (frontmatter from every doc) to stdout. Useful for inspection or piping elsewhere."
+    desc_cmd sync      -- "Pipe the manifest into HQ's import_docs_manifest. Upserts by doc_id; safe to re-run. --prune deletes orphan rows and stale mirrored ContentItems."
+    desc_cmd doctor    -- "Report vault docs that are missing or have invalid frontmatter, and whether HQ's last-synced manifest is stale."
+    desc_cmd schema    -- "Regenerate HQ's docs_index/schema.json from the installed MCP. --check verifies it's current (exit 1 on drift) without writing."
+    desc_cmd validate  -- "Report HQ registry entries (Projects/Assets) that no vault doc references. Catches stale slugs and duplicate rows. Read-only."
+    desc_cmd create    -- "Create or update a Project or Asset in HQ. \`hq create project --help\` / \`hq create asset --help\` for flags. Idempotent (upserts by slug)."
+    desc_cmd deploy    -- "Fallback: manually re-pull the latest scanned image from GHCR and restart the container (CI's deploy step)."
+    desc_cmd ship      -- "Commit + push a small HQ change. The push IS the deploy: it triggers the gated pipeline (build -> scan -> deploy on green)."
+    desc_cmd logs      -- "Show app container logs. Default tail is 50. -f / --follow streams live output until Ctrl-C."
+    desc_cmd restart   -- "\`docker compose restart app\` — no rebuild, no migrations. For picking up env changes or clearing stuck state."
+    desc_cmd open      -- "Open \$HQ_URL in the browser."
+    desc_cmd shell     -- "ssh -t into the HQ Django shell. Handy for poking the ORM."
+    desc_cmd superuser -- "ssh -t into HQ and run createsuperuser interactively."
+    desc_cmd export    -- "export <year> [md|json] — download the year summary to ./ and print the path. Defaults to current year and md."
+    desc_env NOTES_HOME    -- "Vault root"
+    desc_env HQ_VAULT_DIRS -- "Colon-separated subdirs to index"
+    desc_env HQ_SSH_HOST   -- "SSH alias of the HQ server"
+    desc_env HQ_REMOTE_PATH -- "HQ checkout path on the server"
+    desc_env HQ_LOCAL_PATH -- "Local HQ checkout"
+    desc_env HQ_URL        -- "Public URL of HQ"
+    desc_example "hq sync"                    -- "most common — push vault → HQ"
+    desc_example "hq manifest | jq '.[] | .doc_id'"
+    desc_example "hq doctor"                  -- "find docs missing frontmatter"
+    desc_example "hq export 2026"             -- "download year-summary-2026.md"
 }
 
 require_manifest_mcp() {
@@ -626,6 +582,7 @@ cmd_export() {
 
 case "${1:-}" in
     ""|-h|--help|help) usage; exit 0 ;;
+    --describe) describe_emit "$@"; exit 0 ;;
     manifest)   shift; cmd_manifest "$@" ;;
     sync)       shift; cmd_sync "$@" ;;
     doctor)     shift; cmd_doctor "$@" ;;

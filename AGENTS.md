@@ -7,6 +7,57 @@ from the code every session.
 
 Small bash/zsh/node tools that share one look and feel.
 
+## Command-surface contract (`describe`)
+
+Every tool emits its command surface as one structured JSON document — the
+**emit-once, render-many** standard (vault decision record
+`read_doc('report-emit-once-render-many')`; the `.py` reference impl lives in
+`severino-vault-mcp` as `cli_introspect.describe_parser`).
+
+- **One source per tool.** A tool defines a single `describe_spec()` (the `desc_*`
+  DSL in `lib/describe.sh`). Both `-h`/`--help` (generic `usage()`) **and**
+  `--describe` (JSON) render from it, so the human and machine views *cannot*
+  drift — there is no prose to parse. New tools get this from `tools new`.
+- **Wiring.** Source `lib/init.sh` (it sources `lib/describe.sh`), define
+  `describe_spec`, and add `--describe) describe_emit "$@"; exit 0 ;;` to the
+  dispatch. Drift guards get show/diff/pull from `drift_describe_commands` and
+  `--describe` from `drift_main` for free. `bin/doc-to-pdf` (node) carries its
+  own `SPEC` object that renders both its `--help` and `--describe`.
+- **Contract** (a superset of the MCP's): `{ ok, schema_version, name,
+  description, global_options:[<opt>], positionals:[<arg>],
+  commands:[{name, summary, args:[<arg>]}] }`. `desc_env`/`desc_example`/
+  `desc_para` are human-help only and never enter the JSON. Output is
+  byte-deterministic (no timestamps) so guards can diff it.
+- **`tools describe`** is the orchestrator: it federates every `bin/*`
+  `--describe` into one document (`--pretty` to read, `--repos` to fold in
+  sibling repos like the MCP, `tools describe <tool>` for one). `tools doctor`
+  gates that every tool self-describes.
+- `lib/describe.sh` is written to run under **bash and zsh** (no numeric array
+  indexing, no `read -ra`) so the lone zsh tool (`dns-test`) self-describes from
+  the same engine. `tests/describe.bats` asserts the round-trip invariant and
+  bash/zsh byte-parity.
+
+## Active work — next branch: `tools describe --tui`
+
+The command-surface contract above is already the data model for an interactive
+browser. The next branch builds **`tools describe --tui`**: a full-screen
+Node/Ink explorer that reads the same `tools describe` JSON, sharing the
+`site manage` look + polish bar (see `[[feedback_tui_polish]]`).
+
+- **Scope: aggregate only.** Full-screen tabs/nav earn their keep across 17
+  tools / ~90 commands; a single tool stays the clean wrapped `-h` (no per-tool
+  mini-TUIs). The three tiers stay cleanly separated: `-h` (clean text) ·
+  `--describe` (JSON) · `--tui` (this).
+- **Layout.** Left pane: tool list (Tab / ↑↓ to switch). Right pane: the
+  selected tool's commands / options / args. `/` filters, Enter copies a
+  ready-to-paste invocation, Esc quits. Keep the interactive piece *purposeful*
+  (find-and-use a command), not decorative.
+- **Reuse, don't fork.** Build on `lib/site/manage-tui.mjs` patterns and the
+  `{ok}`/`{error}` envelope; don't introduce a second visual language. Node is
+  already the TUI/JSON tool here.
+- Decision record (the "render-many" consumers):
+  `read_doc('report-emit-once-render-many')`.
+
 ## Repo conventions
 
 - **Solo-authored. Work on `main`.** No `Co-Authored-By` / "Claude" trailers in
@@ -98,8 +149,11 @@ it (installed fingerprint vs source).
 - New bash tools: scaffold with `tools new <name>` — it emits the canonical
   skeleton. Every tool sources `lib/init.sh`, uses `msg`/`die`/`header`/
   `footer` for output, and exits 0 (success/skips), 1 (failure), 2 (usage).
-- Every tool answers `-h`/`--help`.
-- `dns-test` is the lone zsh exception to the bash rule.
+- Every tool answers `-h`/`--help` and `--describe` (both from one
+  `describe_spec` — see the Command-surface contract above; `tools doctor`
+  gates it).
+- `dns-test` is the lone zsh exception to the bash rule (but it self-describes
+  from the same engine — `lib/describe.sh` is bash+zsh safe).
 - Node code is ESM (`.mjs`), deps pinned in the root `package.json`,
   resolved by upward `node_modules` lookup. **Node is the JSON tool in `bin/site`**
   (URL-encoding, payloads, MCP-output parsing); `jq` belongs to the drift

@@ -5,38 +5,25 @@ set -euo pipefail
 source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" crypt
 source "$TOOLS_HOME/lib/key.sh"
 
-usage() {
-    cat <<EOF
-Usage: decrypt [options] <file.age>...
-
-Decrypts .age files using your default age private key. If the key is an
-SSH key with a passphrase, decrypt unlocks it transparently using the
-passphrase cached via 'tools key cache' — one prompt up front, silent
-forever after. With no cached passphrase, it prompts (terminal or
-osascript dialog, whichever is appropriate).
-
-Options:
-  -f, --force         Overwrite existing decrypted output files
-  -k, --key <path>    Add another identity to try (repeatable). Bypasses
-                      the cached passphrase / unlock path for that key.
-  -p, --stdout        Write decrypted bytes to stdout, not to a file.
-                      Silent on success; status/errors go to stderr.
-                      Useful for piping or one-off viewing without leaving
-                      plaintext on disk: decrypt -p secret.age | less
-      --no-cache      Don't use the cached passphrase even if one exists.
-                      Lets age prompt directly (terminal only).
-  -h, --help          Show this help
-
-Environment:
-  KEYS_HOME           Read from ~/.zshrc; resolves AGE_KEY
-  AGE_KEY             Per-invocation override for the private key path
-
-Examples:
-  decrypt notes.md.age
-  decrypt -k ~/keys/oldkey notes.md.age
-  decrypt -f *.age
-  decrypt -p secret.age | less
-EOF
+describe_spec() {
+    desc_tool "decrypt" "Age-decrypt .age files with your private key; restore originals."
+    desc_synopsis "decrypt [options] <file.age>..."
+    desc_para "Decrypts .age files using your default age private key. If the key is an"
+    desc_para "SSH key with a passphrase, decrypt unlocks it transparently using the"
+    desc_para "passphrase cached via 'tools key cache' — one prompt up front, silent"
+    desc_para "forever after. With no cached passphrase, it prompts (terminal or"
+    desc_para "osascript dialog, whichever is appropriate)."
+    desc_opt -f --force            -- "Overwrite existing decrypted output files"
+    desc_opt -k --key PATH +repeat -- "Add another identity to try (repeatable). Bypasses the cached passphrase / unlock path for that key."
+    desc_opt -p --stdout           -- "Write decrypted bytes to stdout, not a file. Silent on success; status/errors go to stderr (e.g. decrypt -p secret.age | less)."
+    desc_opt --no-cache            -- "Don't use the cached passphrase even if one exists. Lets age prompt directly (terminal only)."
+    desc_pos file +variadic        -- "The .age file(s) to decrypt"
+    desc_env KEYS_HOME             -- "Read from ~/.zshrc; resolves AGE_KEY"
+    desc_env AGE_KEY               -- "Per-invocation override for the private key path"
+    desc_example "decrypt notes.md.age"
+    desc_example "decrypt -k ~/keys/oldkey notes.md.age"
+    desc_example "decrypt -f *.age"
+    desc_example "decrypt -p secret.age | less"
 }
 
 FORCE=0
@@ -45,6 +32,7 @@ NO_CACHE=0
 EXTRA_KEYS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --describe)  describe_emit "$@"; exit 0 ;;
         -h|--help)   usage; exit 0 ;;
         -f|--force)  FORCE=1; shift ;;
         -p|--stdout) STDOUT=1; shift ;;

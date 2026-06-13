@@ -203,17 +203,32 @@ drift_pull() {
     echo
 }
 
+# The standard drift-guard command surface (show/diff/pull), single-sourced so
+# every guard's describe_spec / -h render the same three commands. A guard's
+# describe_spec calls this after its own desc_tool / desc_synopsis, then adds
+# its config desc_env lines.
+drift_describe_commands() {
+    desc_cmd show -- "Fetch and print the live state (normalized, sorted JSON)."
+    desc_cmd diff -- "Diff live vs the vault mirror; exit 1 on drift."
+    desc_cmd pull -- "Regenerate the vault mirror block from live (accept drift)."
+}
+
 # Require the shared deps, then dispatch. Tools call this last with "$@".
 drift_main() {
+    # help and the machine surface render from the spec alone — answer them
+    # before the network-dep gate so they work without curl/jq/decrypt.
+    case "${1:-help}" in
+        --describe)  describe_emit "$@"; return 0 ;;
+        -h|help|'')  usage; return 0 ;;
+    esac
     local cmd
     for cmd in curl jq decrypt; do
         command -v "$cmd" >/dev/null || die "error" "missing required command: $cmd"
     done
-    case "${1:-help}" in
+    case "$1" in
         show)        fetch_live ;;
         diff)        drift_diff ;;
         pull)        drift_pull ;;
-        -h|help|'')  usage ;;
         *)           die "usage" "unknown command: $1 (try -h)" 2 ;;
     esac
 }

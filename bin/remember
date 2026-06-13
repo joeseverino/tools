@@ -4,45 +4,30 @@ set -euo pipefail
 
 source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" ""
 
-usage() {
-    cat <<EOF
-Usage:
-  remember <type> <slug> "<title>" [options]   < body
-  remember <type> <slug> "<title>" -b "body" [options]
-  remember --list
-  remember --forget <slug>
-  remember -h|--help
-
-Compress the two-step "write file + edit MEMORY.md" loop into one command.
-Body content is read from stdin unless --body is given. Frontmatter is
-generated from the args.
-
-Args:
-  type    user | feedback | project | reference
-  slug    kebab- or snake-case identifier
-          (becomes 'name:' in frontmatter; underscored in filename)
-  title   text shown as the link in MEMORY.md
-
-Options:
-  -d, --description STR   Frontmatter description    (default: title)
-  -k, --hook STR          MEMORY.md one-liner hook   (default: title)
-  -b, --body STR          Body text in lieu of stdin
-  -f, --body-file FILE    Body text from file
-  -F, --force             Overwrite an existing memory (update in place)
-      --dir PATH          Memory dir. Default: CLAUDE_MEMORY_DIR, else
-                          CLAUDE_PROJECT_DIR, else $PWD — encoded to
-                          ~/.claude/projects/<enc>/memory. No flag needed
-                          inside a Claude project.
-      --list              Show the MEMORY.md index
-      --forget <slug>     Delete the memory and its index entry
-  -h, --help              Show this help
-
-Examples:
-  echo "rule body here" | remember feedback use-rg-and-fd "Use rg and fd"
-  remember feedback use-rg-and-fd "Use rg and fd" -F < updated-body   # update
-  remember --list
-  remember --forget use-rg-and-fd
-EOF
+describe_spec() {
+    desc_tool "remember" "Write a Claude memory file + MEMORY.md index entry in one shot."
+    desc_synopsis "remember <type> <slug> \"<title>\" [options]   < body"
+    desc_synopsis "remember <type> <slug> \"<title>\" -b \"body\" [options]"
+    desc_synopsis "remember --list"
+    desc_synopsis "remember --forget <slug>"
+    desc_para "Compress the two-step \"write file + edit MEMORY.md\" loop into one command."
+    desc_para "Body content is read from stdin unless --body is given. Frontmatter is"
+    desc_para "generated from the args."
+    desc_pos type  -- "user | feedback | project | reference"
+    desc_pos slug  -- "kebab- or snake-case identifier (becomes 'name:' in frontmatter; underscored in filename)"
+    desc_pos title -- "text shown as the link in MEMORY.md"
+    desc_opt -d --description STR -- "Frontmatter description (default: title)"
+    desc_opt -k --hook STR        -- "MEMORY.md one-liner hook (default: title)"
+    desc_opt -b --body STR        -- "Body text in lieu of stdin"
+    desc_opt -f --body-file FILE  -- "Body text from file"
+    desc_opt -F --force           -- "Overwrite an existing memory (update in place)"
+    desc_opt --dir PATH           -- "Memory dir. Default: CLAUDE_MEMORY_DIR, else CLAUDE_PROJECT_DIR, else \$PWD — encoded to ~/.claude/projects/<enc>/memory. No flag needed inside a Claude project."
+    desc_opt --list               -- "Show the MEMORY.md index"
+    desc_opt --forget SLUG        -- "Delete the memory and its index entry"
+    desc_example "echo \"rule body here\" | remember feedback use-rg-and-fd \"Use rg and fd\""
+    desc_example "remember feedback use-rg-and-fd \"Use rg and fd\" -F < updated-body" -- "update"
+    desc_example "remember --list"
+    desc_example "remember --forget use-rg-and-fd"
 }
 
 # ---- arg parsing ------------------------------------------------------------
@@ -59,6 +44,7 @@ POSITIONAL=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --describe)         describe_emit "$@"; exit 0 ;;
         -h|--help)          usage; exit 0 ;;
         --list)             MODE="list"; shift ;;
         --forget)           MODE="forget"; FORGET_SLUG="${2:?--forget needs a slug}"; shift 2 ;;

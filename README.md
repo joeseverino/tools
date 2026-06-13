@@ -166,6 +166,7 @@ tools new <name> # scaffold a new tool with the house conventions
 tools install    # idempotent: create/refresh symlinks
 tools key        # cache / forget / test the age key passphrase
 tools watch      # opt-in: launchd auto-sync (off by default)
+tools describe   # emit every tool's command surface as one JSON document
 ```
 
 `tools status` is the daily health check; `tools doctor` is the
@@ -209,6 +210,44 @@ in the doc's own directory, and stamps `last_reviewed` via
 fails loudly when the section has no block (instead of comparing against
 nothing). Either way the loop is `<tool> diff` → reconcile the prose →
 `<tool> pull` → `hq sync`.
+
+#### tools describe — the command-surface contract
+
+Every tool emits its command surface as one structured JSON document, and
+three consumers render from that single source: an AI session reads it,
+a TUI can build a picker from it, and CI guards diff it. This is
+**emit-once, render-many** — a tool declares its surface once in a
+`describe_spec()` (the `desc_*` DSL in `lib/describe.sh`), and *both*
+`-h`/`--help` and `--describe` are derived from it, so the human help and
+the machine JSON can never drift (there is no prose to parse).
+
+```
+encrypt --describe            # one tool's contract (compact JSON)
+tools describe                # federated: every tool, one document
+tools describe --pretty       # indented, for reading
+tools describe encrypt        # just one tool
+tools describe --repos        # also fold in sibling repos (severino-vault-mcp)
+```
+
+The contract — a superset of what `severino-vault-mcp describe` emits:
+
+```jsonc
+{ "ok": true, "schema_version": 1, "name": "encrypt",
+  "description": "…",
+  "global_options": [ { "name": "--copy", "positional": false,
+                        "required": false, "help": "…",
+                        "flags": ["-c","--copy"], "takes_value": false } ],
+  "positionals":   [ { "name": "file", "positional": true,
+                       "required": true, "help": "…" } ],
+  "commands":      [ { "name": "…", "summary": "…", "args": [ … ] } ] }
+```
+
+Output is byte-deterministic (no timestamps), so a guard can diff it across
+runs. `tools doctor` gates that every tool answers `--describe` with a valid
+contract — and because both views render from the one `describe_spec`, that
+gate plus the round-trip test in `tests/describe.bats` keep the whole suite
+self-describing as it grows. `lib/describe.sh` runs under both bash and zsh,
+so the lone zsh tool (`dns-test`) self-describes from the same engine.
 
 #### tools key — passphrase cache
 

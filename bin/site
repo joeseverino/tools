@@ -15,88 +15,50 @@ if [[ -f "$TOOLS_HOME/config/site.sh" ]]; then
     source "$TOOLS_HOME/config/site.sh"
 fi
 
-usage() {
-    cat <<EOF
-Usage: site <command>
-
-Commands:
-  status              Show repo location, git state, and build-output state
-  sync                Sync public pages/writeups from the vault into the site repo
-  check               Run Astro diagnostics
-  contrast            Compute WCAG ratios for every text/background pair in base.css
-  parity              Assert vault Frontmatter Schema, Zod, and MCP agree on writeup fields
-  build               Run the full Astro build
-  publish [--no-push] THE ship command, no slug needed: gate every published
-                      writeup, hq sync, build + audits, auto-commit, push,
-                      then verify each affected writeup live. --no-push stops
-                      after the local build.
-  sign-security       Clear-sign public/.well-known/security.txt with the security@ key
-  check-security      Verify signature, required fields, Expires, and WKD file
-  scaffold-primer <title> [--tags a,b]
-                      Scaffold a new 04 Reference/ primer with slim frontmatter
-  scaffold-field --name X --description Y [--apply]
-                      Patch every layer needed for a new writeup field (dry-run by default)
-  draft-alt <slug>|--all [--apply]
-                      Use Claude API to draft cover_alt from the cover image
-  publish-all         Alias of publish.
-  release <version> [--ship]
-                      Bump package.json, run publish:check, commit + signed
-                      tag, push, and create the GitHub release. Dry-run by
-                      default; pass --ship to execute.
-  test [--visual|--ui|--update]
-                      Run the Playwright suite (full, visual-only, UI mode,
-                      or update visual baselines).
-  diagnose [--fast|--json]
-                      The collect-all gate: run every audit and report all
-                      failures in one pass (.validation-report.md on failure).
-  doctor              Pre-flight health check: CLI→npm script drift, vault-mcp
-                      install drift, security, contrast, parity, type check,
-                      npm audit, npm outdated. No build.
-  reinstall-mcp       Reinstall the severino-vault-mcp package from source.
-                      Use \`/mcp\` Reconnect afterward in Claude Code.
-  publish-writeup <slug>  Run the full publish flow with the named writeup
-                      highlighted. The authoritative all-published gate runs
-                      once before any sync, build, commit, or push.
-  new-writeup <slug>  Scaffold a new vault writeup folder from the template.
-                      Creates 05 Writeups/<slug>/ with index.md and images/.
-                      Starts as published: false so it stays out of the build
-                      until you flip it.
-  validate <slug> [--draft]
-                      Run the writeup publish gate standalone — report only,
-                      no build, no commit. --draft tolerates the published /
-                      published_at blockers while still drafting.
-  tech [query]        List technology slugs from the vault catalog, filtered
-                      by slug, label, or group when a query is given.
-  featured [<slug> <slot|up|down|top|bottom|off>]
-                      Show the home-page featured order — or move one writeup
-                      and renumber the list automatically.
-  manage              Interactive manager: every writeup on one screen — move
-                      the featured order, feature/unfeature across the line,
-                      publish/unpublish. Nothing written until you save.
-  verify <slug>       Post-publish live check: page status, OG image, tag
-                      pages, and home placement on the live site.
-  seo <url|path|slug>  Preview the Google-style search result snippet for built HTML.
-  dev                 Start the local Astro dev server (--drafts previews drafts)
-  open                Open the local dev URL in the browser
-  compare [path]       Open a resizable dev-vs-live browser comparison
-  og                  Regenerate the Open Graph social card (public/assets/og/)
-  -h, --help          Show this help
-
-Environment:
-  CODE_HOME       Defaults to ~/Documents/Code
-  SITE_HOME       Defaults to \$CODE_HOME/Projects/jseverino.com
-  NOTES_HOME      Defaults to \$CODE_HOME/Severino Labs (vault root)
-  SITE_DEV_HOST   Defaults to 127.0.0.1
-  SITE_DEV_PORT   Defaults to 4321
-  SITE_LIVE_URL   Defaults to https://jseverino.com
-  SITE_COMPARE_PORT  Defaults to 4178
-  SITE_COMPARE_BROWSER  Defaults to Safari on macOS
-  MCP_HOME        MCP source checkout used for install-drift comparison
-  SITE_MCP_AUTO_REINSTALL=1
-                  Repair MCP install drift without prompting
-  SITE_SKIP_MCP_DRIFT_CHECK=1
-                  Skip source/install comparison (tests or external installs)
-EOF
+describe_spec() {
+    desc_tool "site" "Public jseverino.com Astro site workflow."
+    desc_synopsis "site <command>"
+    desc_cmd status         -- "Show repo location, git state, and build-output state"
+    desc_cmd sync           -- "Sync public pages/writeups from the vault into the site repo"
+    desc_cmd check          -- "Run Astro diagnostics"
+    desc_cmd contrast       -- "Compute WCAG ratios for every text/background pair in base.css"
+    desc_cmd parity         -- "Assert vault Frontmatter Schema, Zod, and MCP agree on writeup fields"
+    desc_cmd build          -- "Run the full Astro build"
+    desc_cmd publish        -- "THE ship command, no slug needed: gate every published writeup, hq sync, build + audits, auto-commit, push, then verify each affected writeup live. --no-push stops after the local build."
+    desc_cmd sign-security  -- "Clear-sign public/.well-known/security.txt with the security@ key"
+    desc_cmd check-security -- "Verify signature, required fields, Expires, and WKD file"
+    desc_cmd scaffold-primer -- "scaffold-primer <title> [--tags a,b] — scaffold a new 04 Reference/ primer with slim frontmatter"
+    desc_cmd scaffold-field -- "scaffold-field --name X --description Y [--apply] — patch every layer needed for a new writeup field (dry-run by default)"
+    desc_cmd draft-alt      -- "draft-alt <slug>|--all [--apply] — use the Claude API to draft cover_alt from the cover image"
+    desc_cmd publish-all    -- "Alias of publish."
+    desc_cmd publish-writeup -- "publish-writeup <slug> — full publish flow with the named writeup highlighted. The all-published gate runs once before any sync, build, commit, or push."
+    desc_cmd validate       -- "validate <slug> [--draft] — run the writeup publish gate standalone (report only, no build/commit). --draft tolerates the published/published_at blockers."
+    desc_cmd tech           -- "tech [query] — list technology slugs from the vault catalog, filtered by slug/label/group when a query is given."
+    desc_cmd featured       -- "featured [<slug> <slot|up|down|top|bottom|off>] — show the home-page featured order, or move one writeup and renumber automatically."
+    desc_cmd manage         -- "Interactive manager: every writeup on one screen — reorder featured, feature/unfeature, publish/unpublish. Nothing written until you save."
+    desc_cmd verify         -- "verify <slug> — post-publish live check: page status, OG image, tag pages, and home placement on the live site."
+    desc_cmd diagnose       -- "diagnose [--fast|--json] — the collect-all gate: run every audit and report all failures in one pass (.validation-report.md on failure)."
+    desc_cmd release        -- "release <version> [--ship] — bump package.json, run publish:check, commit + signed tag, push, create the GitHub release. Dry-run by default."
+    desc_cmd test           -- "test [--visual|--ui|--update] — run the Playwright suite (full, visual-only, UI mode, or update visual baselines)."
+    desc_cmd doctor         -- "Pre-flight health check: CLI→npm script drift, vault-mcp install drift, security, contrast, parity, type check, npm audit/outdated. No build."
+    desc_cmd reinstall-mcp  -- "Reinstall the severino-vault-mcp package from source. Use \`/mcp\` Reconnect afterward in Claude Code."
+    desc_cmd new-writeup    -- "new-writeup <slug> — scaffold a new vault writeup folder from the template (05 Writeups/<slug>/ with index.md + images/). Starts published: false."
+    desc_cmd seo            -- "seo <url|path|slug> — preview the Google-style search result snippet for built HTML."
+    desc_cmd dev            -- "Start the local Astro dev server (--drafts previews drafts)"
+    desc_cmd open           -- "Open the local dev URL in the browser"
+    desc_cmd compare        -- "compare [path] — open a resizable dev-vs-live browser comparison"
+    desc_cmd og             -- "Regenerate the Open Graph social card (public/assets/og/)"
+    desc_env CODE_HOME      -- "Defaults to ~/Documents/Code"
+    desc_env SITE_HOME      -- "Defaults to \$CODE_HOME/Projects/jseverino.com"
+    desc_env NOTES_HOME     -- "Defaults to \$CODE_HOME/Severino Labs (vault root)"
+    desc_env SITE_DEV_HOST  -- "Defaults to 127.0.0.1"
+    desc_env SITE_DEV_PORT  -- "Defaults to 4321"
+    desc_env SITE_LIVE_URL  -- "Defaults to https://jseverino.com"
+    desc_env SITE_COMPARE_PORT    -- "Defaults to 4178"
+    desc_env SITE_COMPARE_BROWSER -- "Defaults to Safari on macOS"
+    desc_env MCP_HOME       -- "MCP source checkout used for install-drift comparison"
+    desc_env SITE_MCP_AUTO_REINSTALL    -- "=1 to repair MCP install drift without prompting"
+    desc_env SITE_SKIP_MCP_DRIFT_CHECK  -- "=1 to skip source/install comparison (tests or external installs)"
 }
 
 require_site() {
@@ -1470,6 +1432,7 @@ case "${1:-}" in
     open)           shift; cmd_open "$@" ;;
     compare)        shift; cmd_compare "$@" ;;
     og)             shift; run_npm make:og "$@" ;;
+    --describe)     describe_emit "$@"; exit 0 ;;
     -h|--help|"")   usage; exit 0 ;;
     *)              die "usage" "unknown command: $1 (try -h)" 2 ;;
 esac

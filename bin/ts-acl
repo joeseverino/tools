@@ -14,22 +14,13 @@ API="https://api.tailscale.com/api/v2"
 DRIFT_VAULT_DOC="$TS_ACL_VAULT_DOC"
 DRIFT_VAULT_HEADING="## Access Controls"
 
-usage() {
-    cat <<EOF
-Usage: ts-acl <command>
-
-Commands:
-  show        Fetch and print the live ACL policy (sorted JSON).
-  diff        Diff the live ACL against the vault mirror ($TS_ACL_VAULT_DOC).
-  pull        Regenerate the vault mirror block from the live ACL.
-  -h, help    Show this help.
-
-Config (config/ts-acl.sh, override via env):
-  TS_ACL_CREDS       age-encrypted env with either TS_API_TOKEN, or
-                     TS_OAUTH_CLIENT_ID + TS_OAUTH_CLIENT_SECRET
-  TS_TAILNET         tailnet to query (default "-": the credential's own)
-  TS_ACL_VAULT_DOC   vault doc whose \`\`\`json block is the stored mirror
-EOF
+describe_spec() {
+    desc_tool "ts-acl" "Fetch the live Tailscale ACL policy and diff it against the vault mirror."
+    desc_synopsis "ts-acl <command>"
+    drift_describe_commands
+    desc_env TS_ACL_CREDS     -- "age-encrypted env with either TS_API_TOKEN, or TS_OAUTH_CLIENT_ID + TS_OAUTH_CLIENT_SECRET"
+    desc_env TS_TAILNET       -- "tailnet to query (default \"-\": the credential's own)"
+    desc_env TS_ACL_VAULT_DOC -- "vault doc whose \`\`\`json block is the stored mirror"
 }
 
 # Resolve a Bearer token from the encrypted env and echo it. Supports either a

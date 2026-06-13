@@ -18,12 +18,22 @@ msg() {
     printf '  %s%-10s%s %s\n' "$1$BOLD" "$2" "$RESET" "$3"
 }
 
-# die <label> <body> [<exit-code>]
+# die <label> <body> [<exit-code>]   — the repo convention.
+# A single-argument call (die "<message>") is also supported: the message
+# becomes the body under a default "error" label. Without this, a lone-arg
+# call expands an unset $2 and crashes under `set -u` (bin/hq uses this form
+# throughout); 2-arg is always (label, body), never (body, code).
 die() {
+    local label body code
+    if (( $# >= 2 )); then
+        label="$1"; body="$2"; code="${3:-1}"
+    else
+        label="error"; body="${1:-}"; code=1
+    fi
     echo
-    msg "$RED" "$1" "$2"
+    msg "$RED" "$label" "$body"
     echo
-    exit "${3:-1}"
+    exit "$code"
 }
 
 # header <verb> <count>

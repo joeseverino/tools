@@ -23,6 +23,7 @@ _tools() {
         'install:create symlinks for every tool'
         'key:cache / forget / test the age key passphrase'
         'watch:manage the launchd auto-sync agent'
+        'describe:emit the command surface of every tool as JSON'
     )
     watch_subs=(
         'enable:install and load the auto-sync agent'
@@ -48,6 +49,7 @@ _tools() {
                 key)           _describe 'key subcommand'   key_subs ;;
                 status|doctor) _arguments '--json[machine-readable output]' ;;
                 check)         _arguments '--no-bench[skip the bench scripts]' ;;
+                describe)      _arguments '--pretty[indent the JSON]' '--repos[fold in sibling repos]' ;;
             esac
             ;;
     esac
