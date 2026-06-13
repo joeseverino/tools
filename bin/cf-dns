@@ -15,6 +15,7 @@ DRIFT_VAULT_HEADING="${CF_DNS_VAULT_HEADING:-}"
 
 describe_spec() {
     desc_tool "cf-dns" "Fetch the live Cloudflare DNS records and diff them against the vault mirror."
+    desc_inventory "Drift guards" 100
     desc_synopsis "cf-dns <command>"
     desc_para "Records are normalized to type/name/content/proxied (+ priority for MX);"
     desc_para "Cloudflare-internal fields (id, timestamps, meta) are dropped."

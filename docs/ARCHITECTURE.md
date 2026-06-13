@@ -10,9 +10,10 @@ the contract that ties them together. House rules for editing live in
 
 | Dir | What |
 |---|---|
-| `bin/` | Exactly one executable per tool, nothing else. `tools install`, the completions, `tools doctor`, and CI discover tools by globbing `bin/*`. |
+| `bin/` | Exactly one executable per tool, nothing else. `tools install`, `tools describe`, `tools doctor`, and CI discover tools by globbing `bin/*`. |
 | `lib/` | Shared helpers flat (`common.sh`, `init.sh`, `key.sh`, `describe.sh`, `drift.sh`, `doctor.sh`, `tui.mjs`); tool-specific support under `lib/<tool>/`. |
 | `config/` | Per-tool defaults from layout env vars. `*.example` are templates; their gitignored copies are user-specific. |
+| `schemas/` | Machine-enforced cross-tool contracts. Runtime verification inputs, not prose documentation. |
 | `tests/` | Hermetic bats suite — throwaway keys, tmpdirs, no Keychain. |
 | `bench/` | Every measured README claim has a script here; they run in CI. |
 | `docs/` | This map, the contract deep-dive, and `docs/diagrams/` (mermaid sources + rendered PNGs). |
@@ -34,8 +35,16 @@ self-describing the moment it defines `describe_spec` and puts
 only thing not derivable from the spec — pure command→action wiring — and
 `describe.bats` guards that the two sets can't drift.
 
-The v3 contract adds an **effect** to every command — a blast-radius class an
-agent risk-gates on before running. See
+`tools generate` consumes the federated JSON to regenerate the zsh completion
+file and README CLI reference/inventory. `tools check` validates every emitter against
+`schemas/describe-v4.schema.json` and fails when either generated artifact is
+stale. Generation fails closed if any tool did not emit a valid contract; it
+never silently drops a broken tool from the generated surfaces.
+
+The v4 contract also carries required, globally ordered inventory metadata.
+README, completions, and the TUI consume that one order; schema validation
+rejects missing metadata and duplicate positions. Every command also carries an
+**effect** — a blast-radius class an agent risk-gates on before running. See
 [`command-surface-contract.md`](command-surface-contract.md).
 
 ## Drift-guard family

@@ -16,6 +16,7 @@ DRIFT_VAULT_HEADING="## Access Controls"
 
 describe_spec() {
     desc_tool "ts-acl" "Fetch the live Tailscale ACL policy and diff it against the vault mirror."
+    desc_inventory "Drift guards" 90
     desc_synopsis "ts-acl <command>"
     drift_describe_commands
     desc_env TS_ACL_CREDS     -- "age-encrypted env with either TS_API_TOKEN, or TS_OAUTH_CLIENT_ID + TS_OAUTH_CLIENT_SECRET"

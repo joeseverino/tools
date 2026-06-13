@@ -16,6 +16,7 @@ DRIFT_VAULT_HEADING="${ADGUARD_VAULT_HEADING:-}"
 
 describe_spec() {
     desc_tool "adguard" "Fetch the live AdGuard Home DNS rewrites and diff them against the vault mirror."
+    desc_inventory "Drift guards" 110
     desc_synopsis "adguard <command>"
     desc_para "Rewrites are normalized to domain/answer, sorted by domain."
     drift_describe_commands

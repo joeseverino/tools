@@ -25,9 +25,9 @@
 #   describe_emit            the standard `--describe` handler: reset, run the
 #                            tool's describe_spec, print JSON, honor --pretty.
 #
-# The JSON contract (schema_version 3 — a superset of `severino-vault-mcp describe`):
+# The JSON contract (schema_version 4 — a superset of `severino-vault-mcp describe`):
 #
-#   { ok, schema_version, name, description,
+#   { ok, schema_version, name, description, group, order,
 #     effect, network?, interactive?,   # tool-level blast radius (leaf tools)
 #     global_options:[ <opt> ],   # flags valid everywhere (declared before any cmd)
 #     positionals:[ <arg> ],      # leaf-tool direct positionals
@@ -39,7 +39,7 @@
 #                  delegates?: "<owner>" } ] }    # delegates = flags owned elsewhere
 #
 #   <opt>/<arg> = { name, positional, required, help,
-#                   flags?, choices?, takes_value?, repeatable? }
+#                   flags?, choices?, takes_value?, repeatable?, variadic? }
 #   <example>   = { command, comment }
 #
 # v2 added paras / examples / delegates so an agent can read a command's intent,
@@ -51,6 +51,9 @@
 # one fact it can't derive from flags. effect is always emitted (default read);
 # network / interactive only when true. desc_env stays human-help only. desc_para
 # / desc_example / desc_effect are scoped to the current command, like desc_opt.
+# v4 adds required group / order inventory metadata and explicit metavar /
+# variadic fields. Aggregate renderers use order instead of inventing their own
+# sort, and validation rejects duplicate order values.
 #
 # Portability: this is sourced by every tool, including the one zsh tool
 # (dns-test). It is therefore written to run under bash AND zsh — no numeric
@@ -58,7 +61,7 @@
 # into single array elements with a control-char separator and unpacked with
 # IFS-`read`, which behaves the same in both shells.
 
-DESCRIBE_SCHEMA_VERSION=3
+DESCRIBE_SCHEMA_VERSION=4
 
 # Field separator for the encoded records below (a control char that can't
 # appear in option flags, help text, or names).
@@ -69,6 +72,8 @@ _DSEP=$'\037'
 describe_reset() {
     _D_NAME=""
     _D_DESC=""
+    _D_GROUP=""
+    _D_ORDER=""
     _D_CUR_CMD=""          # "" = top-level scope; else the open command name
     _D_SYNOPSIS=()
     _D_PARA=()             # scope <sep> paragraph
@@ -85,6 +90,14 @@ describe_reset() {
 desc_tool() {
     _D_NAME="$1"
     _D_DESC="${2:-}"
+}
+
+# desc_inventory <group> <order> — stable presentation metadata for aggregate
+# consumers. The order is global and unique across this repo; group preserves
+# the operator-facing information architecture instead of alphabetizing tools.
+desc_inventory() {
+    _D_GROUP="$1"
+    _D_ORDER="$2"
 }
 
 # desc_synopsis <usage line, sans the leading "Usage: ">
@@ -413,16 +426,40 @@ _describe_scope_has_args() {
     return 1
 }
 
+# _describe_wrap <text> <width> — print <text> word-wrapped to <width> columns,
+# one line per output row. Word-splitting is done by peeling (bash + zsh safe).
+# This is why a paragraph is stored as ONE unwrapped logical string in the
+# contract: every renderer (this -h, the README, the TUI) reflows it to its own
+# width, so no presentation line-breaks are baked into the source of truth.
+_describe_wrap() {
+    local rest="$1" width="$2" line="" word
+    (( width < 20 )) && width=20
+    while [[ -n "$rest" ]]; do
+        word="${rest%% *}"
+        rest="${rest#"$word"}"; rest="${rest## }"
+        if [[ -z "$line" ]]; then
+            line="$word"
+        elif (( ${#line} + 1 + ${#word} <= width )); then
+            line="$line $word"
+        else
+            printf '%s\n' "$line"; line="$word"
+        fi
+    done
+    [[ -n "$line" ]] && printf '%s\n' "$line"
+}
+
 # _describe_render_para_section <scope> — print the prose paragraphs declared for
-# a scope, each preceded by a blank line. Same scope-filter shape as the pos/opt
-# sections. Returns 0 if any printed, 1 if none (lets usage fall back to _D_DESC).
+# a scope, each preceded by a blank line and reflowed to the terminal width. Same
+# scope-filter shape as the pos/opt sections. Returns 0 if any printed, 1 if none
+# (lets usage fall back to _D_DESC).
 _describe_render_para_section() {
     local want="$1" rec scope text printed=0
     (( ${#_D_PARA[@]} )) || return 1
     for rec in "${_D_PARA[@]}"; do
         scope="${rec%%"$_DSEP"*}"; text="${rec#*"$_DSEP"}"
         [[ "$scope" == "$want" ]] || continue
-        printf '\n%s\n' "$text"
+        printf '\n'
+        _describe_wrap "$text" "${_D_WIDTH:-80}"
         printed=1
     done
     (( printed )) || return 1
@@ -570,10 +607,11 @@ _describe_choices_json() {
 }
 
 # _describe_arg_json <positional:0|1> <name> <required:0|1> <help> \
-#                    [short] [long] [metavar] [choices] [repeat]
+#                    [short] [long] [metavar] [choices] [repeat] [variadic]
 _describe_arg_json() {
     local positional="$1" name="$2" required="$3" help="$4"
     local short="${5:-}" long="${6:-}" metavar="${7:-}" choices="${8:-}" repeat="${9:-0}"
+    local variadic="${10:-0}"
     local out
     out=$(printf '{"name":"%s","positional":%s,"required":%s,"help":"%s"' \
         "$(json_escape "$name")" "$(json_bool "$positional")" \
@@ -588,9 +626,11 @@ _describe_arg_json() {
         else
             out+=',"takes_value":false'
         fi
+        [[ -n "$metavar" ]] && out+=',"metavar":"'"$(json_escape "$metavar")"'"'
     fi
     [[ -n "$choices" ]] && out+=$(_describe_choices_json "$choices")
     (( repeat )) && out+=',"repeatable":true'
+    (( variadic )) && out+=',"variadic":true'
     out+='}'
     printf '%s' "$out"
 }
@@ -603,7 +643,7 @@ _describe_args_for_scope() {
         for rec in "${_D_POS[@]}"; do
             IFS="$_DSEP" read -r scope name required variadic choices help <<<"$rec"
             [[ "$scope" == "$want" ]] || continue
-            item="$(_describe_arg_json 1 "$name" "$required" "$help" "" "" "" "$choices")"
+            item="$(_describe_arg_json 1 "$name" "$required" "$help" "" "" "" "$choices" 0 "$variadic")"
             items="${items:+$items,}$item"
         done
     fi
@@ -642,7 +682,7 @@ _describe_global_pos_json() {
     for rec in "${_D_POS[@]}"; do
         IFS="$_DSEP" read -r scope name required variadic choices help <<<"$rec"
         [[ -z "$scope" ]] || continue
-        item="$(_describe_arg_json 1 "$name" "$required" "$help" "" "" "" "$choices")"
+        item="$(_describe_arg_json 1 "$name" "$required" "$help" "" "" "" "$choices" 0 "$variadic")"
         items="${items:+$items,}$item"
     done
     printf '%s' "$items"
@@ -693,8 +733,9 @@ describe_render_json() {
     [[ "${1:-}" == "--pretty" ]] && pretty=1
 
     local out rec name summary cmds=""
-    out=$(printf '{"ok":true,"schema_version":%d,"name":"%s","description":"%s"' \
-        "$DESCRIBE_SCHEMA_VERSION" "$(json_escape "$_D_NAME")" "$(json_escape "$_D_DESC")")
+    out=$(printf '{"ok":true,"schema_version":%d,"name":"%s","description":"%s","group":"%s","order":%d' \
+        "$DESCRIBE_SCHEMA_VERSION" "$(json_escape "$_D_NAME")" "$(json_escape "$_D_DESC")" \
+        "$(json_escape "$_D_GROUP")" "${_D_ORDER:-0}")
     # Tool-level blast radius (meaningful for leaf tools; read for command tools).
     out+=$(_describe_effect_json "")
     out+=$(printf ',"global_options":[%s]' "$(_describe_global_opts_json)")

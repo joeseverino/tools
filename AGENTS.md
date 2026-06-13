@@ -29,13 +29,20 @@ Every tool emits its command surface as one structured JSON document — the
 - **Everything per-command is spec-derived — zero hand-written sub-help, zero
   help heredocs in the toolchain.** After a `desc_cmd`, declare its flags
   (`desc_opt`/`desc_pos`), prose (`desc_para`), and examples (`desc_example`);
-  all are **scoped to that command**, so the focused `-h`, the JSON (flags/args
-  only — prose/examples stay human-help), and `--tui` light up from the one
-  declaration. `desc_pos … "{a,b,c}"` gives a positional a fixed choice set.
+  all are **scoped to that command**, so the focused `-h`, JSON, and `--tui`
+  light up from the one declaration. `desc_pos … "{a,b,c}"` gives a positional
+  a fixed choice set; `+variadic` rides into JSON for completion consumers.
   Keep the data model honest: structured → structured primitives
   (flags`→desc_opt`, args`→desc_pos`, examples`→desc_example`), `desc_para` for
   genuine prose only; interactive UIs (the `site manage` / compare viewers)
   self-document their keymaps rather than restating them in CLI help.
+  **A `desc_para` call is ONE logical paragraph — a single unwrapped string, not
+  a hard-wrapped source line.** Every renderer (`-h`, the README, the `--tui`
+  expand pane) reflows it to its own width, so presentation line-breaks must
+  never be baked into the source of truth; declare multiple `desc_para`s for
+  multiple paragraphs (the renderers space them), never an empty `desc_para ""`
+  separator. The validator fails closed on a paragraph that ends mid-sentence or
+  is empty (`lib/tools/describe-schema.mjs`, guarded by `describe.bats`).
 - **Flags owned by another repo are pointed at, never restated.** `hq create`'s
   flags live in HQ's `manage.py`, and site's `scaffold-*`/`draft-alt`/`diagnose`
   flags live in the site repo's `package.json` scripts. Those commands declare
@@ -70,20 +77,26 @@ Every tool emits its command surface as one structured JSON document — the
   `drift_describe_commands` (show/diff read+network, pull vault_write+network),
   so all four inherit. This is what lets an agent risk-gate `hq restart`
   (`deploy`) vs `vault status` (`read`) before running either.
-- **Contract** (`schema_version 3`, a superset of the MCP's): `{ ok,
-  schema_version, name, description, effect, network?, interactive?,
+- **Contract** (`schema_version 4`, a superset of the MCP's): `{ ok,
+  schema_version, name, description, group, order, effect, network?, interactive?,
   global_options:[<opt>], positionals:[<arg>], paras:[<prose>],
   examples:[{command,comment}], commands:[{name, summary, args:[<opt>|<arg>],
   effect, network?, interactive?, paras:[<prose>], examples:[…],
-  delegates?:"<owner>"}] }`. v2 added per-scope `paras`/`examples` and
-  `delegates`; v3 added the **effect triple** (always emits `effect`; the lean
+  delegates?:"<owner>"}] }`, with option `metavar` and `variadic:true` on
+  variadic positionals. `desc_inventory "<group>" <order>` is required once
+  after `desc_tool`; `order` is globally unique and is the canonical workflow
+  order for every aggregate renderer (README, completions, TUI). v2 added
+  per-scope `paras`/`examples` and `delegates`; v3 added the **effect triple**
+  (always emits `effect`; the lean
   boolean tags only when true) so an agent reads a command's intent, usage,
   external flag-ownership, *and blast radius* from the JSON alone. `desc_para`,
   `desc_example`, and `desc_effect` are **scoped to the current command** (like
   `desc_opt`/`desc_pos`) — declare tool-level ones *before the first `desc_cmd`*
   or they attach to the last command. `desc_env` stays human-help only. Output
   is byte-deterministic (no timestamps) so guards can diff it; `describe.bats`
-  guards every emitted effect against the enum.
+  guards every emitted effect against the enum. v4 added required inventory
+  `group`/`order` plus explicit option metavariables and variadic positionals.
+  Schema validation rejects missing metadata and duplicate order values.
 - **`tools describe`** is the orchestrator: it federates every `bin/*`
   `--describe` into one document (`--pretty` to read, `--repos` to fold in
   sibling repos like the MCP, `tools describe <tool>` for one). **`tools describe
@@ -98,11 +111,13 @@ Every tool emits its command surface as one structured JSON document — the
 
 ## `tools describe --tui` — the human tier (shipped 2026-06-13)
 
-`tools describe --tui` is the interactive consumer of the contract above: a
-full-screen Node explorer over the same `tools describe` JSON
-(`lib/tools/describe-tui.mjs`), sharing the `site manage` look + polish bar (see
-`[[feedback_tui_polish]]`). The three tiers stay cleanly separated: `-h` (clean
-text) · `--describe` (JSON) · `--tui` (this).
+`tools describe --tui` (shorthand **`tools tui`**) is the interactive consumer of
+the contract above: a full-screen Node explorer over the same `tools describe`
+JSON (`lib/tools/describe-tui.mjs`), sharing the `site manage` look + polish bar
+(see `[[feedback_tui_polish]]`). The three tiers stay cleanly separated: `-h`
+(clean text) · `--describe` (JSON) · `--tui` (this). `tools tui` is a thin
+dispatch alias to `cmd_describe --tui` — the same renderer, one less thing to
+type; both stay in sync because there is only one implementation.
 
 - **Scope: aggregate only.** A single tool stays the clean wrapped `-h` (no
   per-tool mini-TUIs); `tools describe <tool> --tui` is a usage error.
@@ -111,6 +126,12 @@ text) · `--describe` (JSON) · `--tui` (this).
   commands across the whole toolchain, `Enter` copies a ready-to-paste
   invocation (pbcopy), `q`/Esc quits. Purposeful (find-and-use a command), not
   decorative.
+- **`e` expands the selected scope** into a full-screen, scrollable detail
+  overlay rendering everything the contract holds for that command (or leaf
+  tool): summary, effect, all args, the full reflowed `paras`, and `examples` —
+  instead of truncating to a `-h` pointer. `e`/Esc closes it, `Enter`/`c` copies.
+  This is the consumer that the one-logical-paragraph `desc_para` rule feeds:
+  the overlay reflows real paragraphs to the pane width.
 - **Reuse, don't fork — shared `lib/tui.mjs`.** The visual language and input
   plumbing (palette, grapheme-aware width/clip, `lineEditor`, `fitFrame`, the
   alt-screen/title polish bar, the escape-sequence input pump + replay key map)
@@ -152,6 +173,8 @@ text) · `--describe` (JSON) · `--tui` (this).
   healthy).
 - `config/` — per-tool defaults derived from layout env vars. Files ending
   `.example` are templates; their gitignored copies are user-specific.
+- `schemas/` — machine-enforced cross-tool contracts. Keep executable schemas
+  here rather than under `docs/`; prose explaining them stays in `docs/`.
 - `tests/` — bats suite. Hermetic: throwaway keys, tmpdirs, no Keychain.
 - `bench/` — every measured claim in the README has a script here that
   asserts it; they run in CI.
@@ -222,8 +245,9 @@ it (installed fingerprint vs source).
   resolved by upward `node_modules` lookup. **Node is the JSON tool in `bin/site`**
   (URL-encoding, payloads, MCP-output parsing); `jq` belongs to the drift
   guards in `lib/drift.sh`. Keep each file on one parser.
-- Adding a tool: drop it in `bin/`, add it to the `#compdef` line in
-  `completions/_tools-suite` (doctor flags drift), document it in README.
+- Adding a tool: drop it in `bin/`, then run `tools generate`. The generated
+  `completions/_tools-suite` and README CLI reference/inventory both consume
+  `--describe`; never hand-edit either generated block.
 
 ## Site visual comparison
 
@@ -242,7 +266,9 @@ unless the requested dev URL is already up.
 ## Verify (do this before claiming a change works)
 
 `tools check` runs everything CI runs: shebang-driven `bash -n`/`zsh -n`/
-`node --check`, shellcheck, the bats suite, and the bench assertions.
+`node --check`, shellcheck, JSON Schema validation for every describe
+contract, generated-surface drift checks, the bats suite, and the bench
+assertions.
 `--no-bench` skips the slow step. `tools status --json` / `tools doctor --json`
 give machine-readable state. `tools doctor --all` is the cross-system rollup
 (hq doctor, hq schema --check, site doctor); `--live` adds the drift guards

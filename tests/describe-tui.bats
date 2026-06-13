@@ -35,18 +35,18 @@ tui() { node "$TOOLS_HOME/lib/tools/describe-tui.mjs"; }
     export DESCRIBE_TUI_KEYS='down'
     run tui
     [ "$status" -eq 0 ]
-    # The second tool (backup) is now selected (bold + cursor), not adguard.
+    # The second tool in the contract-defined workflow is encrypt.
     selected="$(printf '%s\n' "$output" | grep -- '▸')"
-    [[ "$selected" != *"adguard"* ]]
+    [[ "$selected" == *"encrypt"* ]]
 }
 
 @test "replay: Tab crosses focus into the command pane" {
     export DESCRIBE_TUI_KEYS='tab'
     run tui
     [ "$status" -eq 0 ]
-    # adguard's first command (show) now carries the ▸ cursor in the right pane.
+    # tools' first command (status) now carries the ▸ cursor in the right pane.
     cursor_line="$(printf '%s\n' "$output" | grep -- '▸')"
-    [[ "$cursor_line" == *"show"* ]]
+    [[ "$cursor_line" == *"status"* ]]
 }
 
 @test "replay: / filters tools by a command name across the toolchain" {
@@ -71,11 +71,24 @@ tui() { node "$TOOLS_HOME/lib/tools/describe-tui.mjs"; }
     [[ "$output" == *"Machine-readable output"* ]]
 }
 
+@test "replay: selected command detail is separate from the stable command list" {
+    export DESCRIBE_TUI_COLUMNS=150
+    export DESCRIBE_TUI_ROWS=32
+    export DESCRIBE_TUI_KEYS='slash,s,i,t,e,enter,tab,down,down,down,down,down,down,down,down,down,down,down,down,down,down,down,down'
+    run tui
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"SELECTED"* ]]
+    [[ "$output" == *"featured"* ]]
+    [[ "$output" == *"effect"*"vault_write"* ]]
+    [[ "$output" == *"[slug]"* ]]
+    [[ "$output" == *"copy"*"site featured [<slug>] [<target>]"* ]]
+}
+
 @test "replay: Enter on a command copies a ready-to-paste invocation" {
     export DESCRIBE_TUI_KEYS='tab,enter'
     run tui
     [ "$status" -eq 0 ]
-    [[ "$output" == *"copied: adguard show"* ]]
+    [[ "$output" == *"copied: tools status"* ]]
 }
 
 @test "replay: Enter on a leaf tool copies the tool + positional placeholder" {
@@ -85,6 +98,29 @@ tui() { node "$TOOLS_HOME/lib/tools/describe-tui.mjs"; }
     run tui
     [ "$status" -eq 0 ]
     [[ "$output" == *"copied: decrypt <file>"* ]]
+}
+
+@test "replay: e expands the selected scope into a full-screen detail overlay" {
+    # The expand overlay surfaces the full prose + examples a command carries
+    # in the contract, instead of truncating to a "-h" pointer. tools describe
+    # carries examples (one of them the `tools tui` alias).
+    export DESCRIBE_TUI_COLUMNS=100
+    export DESCRIBE_TUI_ROWS=40
+    export DESCRIBE_TUI_KEYS='slash,t,o,o,l,s,enter,tab,down,down,down,down,down,down,down,e'
+    run tui
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"DETAIL"* ]]
+    [[ "$output" == *"tools describe"* ]]
+    [[ "$output" == *"EXAMPLES"* ]]
+    [[ "$output" == *"e/esc back"* ]]
+}
+
+@test "replay: e then e closes the overlay back to the two-pane explorer" {
+    export DESCRIBE_TUI_KEYS='tab,e,e'
+    run tui
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"DETAIL"* ]]
+    [[ "$output" == *"switch pane"* ]]
 }
 
 @test "replay: esc clears an active filter back to every tool" {
