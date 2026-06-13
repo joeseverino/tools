@@ -2,31 +2,32 @@
 # brand <command> — render Joe's brand kits via the branding-engine
 set -euo pipefail
 
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" ""
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 
 CODE_HOME="${CODE_HOME:-$HOME/Documents/Code}"
 BRAND_HOME="${BRAND_HOME:-$CODE_HOME/Assets/severino-brand}"
 ENGINE_HOME="${ENGINE_HOME:-$CODE_HOME/Projects/branding-engine}"
 
-usage() {
-    cat <<EOF
-Usage: brand <command>
-
-Commands:
-  build                       Rebuild every kit from brand/ + the social cards
-  kit <slug> <hex> <initials> ["Wordmark"] [--font f] [--only a,b] [--out d]
-                              Render a one-off kit into severino-brand/kits/<slug>
-  status                      Show engine + brand locations and git state
-  -h, --help                  Show this help
-
-Kits land in \$BRAND_HOME/kits. The engine lives in \$ENGINE_HOME and comes in as
-a dependency of the brand repo; see its README for all flags.
-
-Environment:
-  CODE_HOME     Defaults to ~/Documents/Code
-  BRAND_HOME    Defaults to \$CODE_HOME/Assets/severino-brand
-  ENGINE_HOME   Defaults to \$CODE_HOME/Projects/branding-engine
-EOF
+describe_spec() {
+    desc_tool "brand" "Render Joe's brand kits via the branding-engine."
+    desc_synopsis "brand <command>"
+    desc_para "Kits land in \$BRAND_HOME/kits. The engine lives in \$ENGINE_HOME and comes in"
+    desc_para "as a dependency of the brand repo; see its README for all flags."
+    desc_cmd build  -- "Rebuild every kit from brand/ + the social cards"
+    desc_effect local_write
+    desc_cmd kit    -- "Render a one-off kit into severino-brand/kits/<slug>"
+    desc_effect local_write
+    desc_pos slug              -- "Kit slug (output directory name)"
+    desc_pos hex               -- "Primary brand color (hex, no leading #)"
+    desc_pos initials          -- "Monogram initials"
+    desc_pos wordmark +optional -- "Wordmark text"
+    desc_opt --font FONT       -- "Font family"
+    desc_opt --only LIST       -- "Comma-separated subset (e.g. mark,wordmark)"
+    desc_opt --out DIR         -- "Output directory override"
+    desc_cmd status -- "Show engine + brand locations and git state"
+    desc_env CODE_HOME   -- "Defaults to ~/Documents/Code"
+    desc_env BRAND_HOME  -- "Defaults to \$CODE_HOME/Assets/severino-brand"
+    desc_env ENGINE_HOME -- "Defaults to \$CODE_HOME/Projects/branding-engine"
 }
 
 require_brand() {
@@ -43,16 +44,8 @@ cmd_build() {
 }
 
 cmd_kit() {
-    if [[ "$#" -lt 3 || "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-        cat <<HELP
-Usage: brand kit <slug> <hex> <initials> ["Wordmark"] [--font f] [--only a,b] [--out d]
-
-Render a one-off kit (mark, wordmark, sheet, web) into \$BRAND_HOME/kits/<slug>.
-
-Examples:
-  brand kit chris-blake 6D28D9 CB "Chris Blake"
-  brand kit acme ff5733 AC "Acme Corp" --only mark,wordmark
-HELP
+    if [[ "$#" -lt 3 ]]; then    # incomplete invocation → show the spec-derived help
+        usage_command kit
         return 0
     fi
     require_brand
@@ -79,10 +72,12 @@ cmd_status() {
     echo
 }
 
+# All help + the machine surface render from the one spec via the shared
+# intercept (main `-h`, `--describe`, focused `<cmd> -h`).
+desc_help_intercept "$@"
 case "${1:-}" in
     build)          shift; cmd_build "$@" ;;
     kit)            shift; cmd_kit "$@" ;;
     status)         shift; cmd_status "$@" ;;
-    -h|--help|"")   usage; exit 0 ;;
-    *)              die "usage" "unknown command: $1 (try -h)" 2 ;;
+    *)              die_unknown command "$1" ;;
 esac

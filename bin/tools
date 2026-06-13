@@ -2,7 +2,7 @@
 # tools <command> — umbrella command for the personal CLI tools
 set -euo pipefail
 
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" ""
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 
 # tools' subcommands read every config without having one of its own. Each
 # config asserts its layout env var with ${VAR:?…}, which in bash kills the
@@ -26,29 +26,49 @@ for file in "$TOOLS_HOME/bin"/*; do
 done
 INSTALL_DIR="${TOOLS_INSTALL_DIR:-$HOME/.local/bin}"
 
-usage() {
-    cat <<EOF
-Usage: tools <command>
+describe_spec() {
+    desc_tool "tools" "Umbrella command for the personal CLI toolchain."
+    desc_synopsis "tools <command> [options]"
 
-Commands:
-  status        One-screen health check across vault, inbox, backup, keys
-  doctor        Verify environment, deps, and installed symlinks.
-                --all adds every system's own gate (hq doctor, hq schema
-                --check, site doctor) — the one cross-system health rollup.
-                --live also runs the drift guards (cf-dns/adguard/ts-acl)
-  check         Run the full CI suite locally: lint, tests, bench
-  new <name>    Scaffold a new tool in bin/ with the house conventions
-  install       Create symlinks in $INSTALL_DIR for every tool
-  key           Cache / forget / test the age key passphrase in Keychain
-  watch         Manage the optional launchd auto-sync agent (off by default)
-  -h, --help    Show this help
+    desc_cmd status   -- "One-screen health check across vault, inbox, backup, keys"
+    desc_effect read +network
+    desc_opt --json   -- "Machine-readable output (one JSON object)"
 
-status and doctor accept --json for machine-readable output.
+    desc_cmd doctor   -- "Verify environment, deps, and installed symlinks"
+    desc_opt --all    -- "Cross-system rollup: also run hq doctor, hq schema --check, and site doctor (exit 1 if any gate fails)"
+    desc_opt --live   -- "Implies --all; additionally run the drift guards (cf-dns / adguard / ts-acl) — live API reads that need network + the age key"
+    desc_opt --json   -- "Machine-readable output (one object, \"checks\" array)"
 
-Environment:
-  TOOLS_HOME            Read from ~/.zshrc; root of this repo
-  TOOLS_INSTALL_DIR     Override install target (default: ~/.local/bin)
-EOF
+    desc_cmd check    -- "Run the full CI suite locally: lint, tests, bench"
+    desc_opt --no-bench -- "Skip the bench scripts (the slowest step)"
+
+    desc_cmd new      -- "Scaffold a new tool in bin/ with the house conventions"
+    desc_effect local_write
+    desc_pos name     -- "Name of the new tool (creates bin/<name>)"
+    desc_opt --drift  -- "Scaffold a drift-guard tool instead (show/diff/pull, with get_token/fetch_live/normalize + a config template)"
+
+    desc_cmd install  -- "Create symlinks in \$INSTALL_DIR for every tool"
+    desc_effect local_write
+
+    desc_cmd key      -- "Cache / forget / test the age key passphrase in Keychain"
+    desc_effect local_write +interactive
+    desc_pos action +optional "{cache,forget,status,test}" -- "Keychain action — cache (store), forget (clear), status (show, default), test (verify it still unlocks \$AGE_KEY)"
+
+    desc_cmd watch    -- "Manage the optional launchd auto-sync agent (off by default)"
+    desc_effect local_write
+    desc_pos action +optional "{enable,disable,status,run-now}" -- "Agent action — enable (install+load), disable (unload+remove), status (loaded? + log tail), run-now (one immediate vault sync)"
+
+    desc_cmd describe -- "Emit the command surface of every tool as one JSON document (the emit-once contract)"
+    desc_pos tool +optional -- "Describe just one tool (delegates to <tool> --describe)"
+    desc_pos command +optional -- "With a tool, project its contract to one command — the token-minimal AI path (tools describe hq restart)"
+    desc_opt --pretty -- "Indent the JSON for reading (default: compact, diff-stable)"
+    desc_opt --repos  -- "Also fold in sibling repos' emitters (severino-vault-mcp)"
+    desc_opt --tui    -- "Browse the whole toolchain in a full-screen explorer (aggregate only; / filters, Enter copies an invocation)"
+    desc_example "tools describe hq restart" -- "one command's contract — effect, args, examples"
+    desc_example "tools describe --tui" -- "interactive explorer over the whole toolchain"
+
+    desc_env TOOLS_HOME        -- "Read from ~/.zshrc; root of this repo"
+    desc_env TOOLS_INSTALL_DIR -- "Override install target (default: ~/.local/bin)"
 }
 
 # ---------- status ----------
@@ -156,24 +176,7 @@ cmd_doctor() {
             --json) DOCTOR_JSON=1 ;;
             --all)  run_all=1 ;;
             --live) run_all=1; run_live=1 ;;
-            -h|--help)
-                cat <<EOF
-Usage: tools doctor [--all] [--live] [--json]
-
-Verify environment, deps, completions, and installed symlinks.
-
-  --all     The cross-system health rollup: also run every system's own
-            gate — hq doctor (frontmatter validity + vault→HQ sync
-            freshness), hq schema --check (3-way contract parity), and
-            site doctor (seams, MCP install drift, security, contrast,
-            parity, types, audits). Exit 1 if any gate fails.
-  --live    Implies --all; additionally run the drift guards
-            (cf-dns / adguard / ts-acl diff) — live API reads that need
-            network and the age key.
-  --json    Machine-readable output (one object, "checks" array).
-EOF
-                return 0 ;;
-            *) die "usage" "unknown option: $1 (try -h)" 2 ;;
+            *) die_unknown option "$1" doctor ;;
         esac
         shift
     done
@@ -239,6 +242,28 @@ EOF
         check "completions cover bin/" 1 "${#TOOL_NAMES[@]} tools"
     else
         check "completions cover bin/" 0 "missing from #compdef: ${missing_comp% }" || fail=1
+    fi
+
+    # Command-surface contract — every tool must self-describe (the emit-once
+    # contract: -h and --describe both render from one describe_spec, so they
+    # can't drift; this catches a tool that forgot to wire --describe). Layout
+    # vars are defaulted for the probe so an unset env (reported separately
+    # above) doesn't masquerade as a missing contract.
+    local desc_missing="" dout
+    for name in "${TOOL_NAMES[@]}"; do
+        if dout=$(KEYS_HOME="${KEYS_HOME:-$TOOLS_HOME}" \
+                  NOTES_HOME="${NOTES_HOME:-$TOOLS_HOME}" \
+                  BACKUPS_HOME="${BACKUPS_HOME:-$TOOLS_HOME}" \
+                  "$TOOLS_HOME/bin/$name" --describe 2>/dev/null) \
+            && [[ "$dout" == '{"ok":true'* ]]; then
+            continue
+        fi
+        desc_missing+="$name "
+    done
+    if [[ -z "$desc_missing" ]]; then
+        check "tools self-describe" 1 "${#TOOL_NAMES[@]} tools emit --describe"
+    else
+        check "tools self-describe" 0 "no --describe contract: ${desc_missing% }" || fail=1
     fi
 
     # Symlinks in install dir (top-level tools + lib helpers)
@@ -326,18 +351,7 @@ cmd_check() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --no-bench) run_bench=0; shift ;;
-            -h|--help)
-                cat <<EOF
-Usage: tools check [--no-bench]
-
-Run everything CI runs, locally: bash -n / zsh -n / node --check by
-shebang over bin/, shellcheck over the tracked shell sources, the bats
-test suite, and the bench assertions. Exit 1 if anything fails.
-
-  --no-bench    Skip the bench scripts (the slowest step)
-EOF
-                return 0 ;;
-            *) die "usage" "unknown option: $1 (try -h)" 2 ;;
+            *) die_unknown option "$1" check ;;
         esac
     done
 
@@ -464,22 +478,8 @@ cmd_new() {
     local name="" drift=0
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -h|--help)
-                cat <<EOF
-Usage: tools new <name> [--drift]
-
-Scaffold bin/<name>: bash + set -euo pipefail, the lib/init.sh sourcing
-line, a usage() block, and arg parsing wired to die/msg. Prints the
-follow-ups (completions, install) when done.
-
-  --drift   Scaffold a drift-guard tool instead (the ts-acl / cf-dns shape):
-            show / diff / pull, with get_token / fetch_live / normalize /
-            vault_block already wired, plus a config/<name>.sh template.
-            Fill in the TODOs (endpoint, creds key, jq projection).
-EOF
-                return 0 ;;
             --drift)    drift=1; shift ;;
-            -*)         die "usage" "unknown option: $1 (try -h)" 2 ;;
+            -*)         die_unknown option "$1" new ;;
             *)          name="$1"; shift ;;
         esac
     done
@@ -500,24 +500,30 @@ EOF
 # __NAME__ <args> — one-line description
 set -euo pipefail
 
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" ""
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 
-usage() {
-    cat <<HELP
-Usage: __NAME__ [options] <args>
-
-Describe what __NAME__ does.
-
-Options:
-  -h, --help    Show this help
-HELP
+# The single source of truth for __NAME__'s surface: lib/describe.sh renders
+# both this tool's -h text and its --describe JSON from this one declaration.
+describe_spec() {
+    desc_tool "__NAME__" "One-line description of __NAME__."
+    desc_synopsis "__NAME__ [options] <args>"
+    # Declare blast radius if this tool does anything but read (default is read):
+    #   desc_effect local_write             # writes local files
+    #   desc_effect vault_write             # mutates the Obsidian vault
+    #   desc_effect remote_write +network   # mutates a remote system over the network
+    #   desc_effect deploy +network         # ships / restarts a service
+    # +interactive marks a command that blocks on a TTY. On a subcommand tool,
+    # put desc_effect right after each desc_cmd; here (leaf tool) it is the tool's.
+    # desc_opt -x --example METAVAR -- "what the flag does"
+    # desc_pos arg -- "what the positional is"
 }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --describe) describe_emit "$@"; exit 0 ;;
         -h|--help)  usage; exit 0 ;;
         --)         shift; break ;;
-        -*)         die "usage" "unknown option: $1 (try -h)" 2 ;;
+        -*)         die_unknown option "$1" ;;
         *)          break ;;
     esac
 done
@@ -548,7 +554,7 @@ new_drift() {
 # Drift-guard sibling of cf-dns / adguard; show / diff / pull live in lib/drift.sh.
 set -euo pipefail
 
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "__NAME__"
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "__NAME__" "$@"
 # shellcheck source=lib/drift.sh
 source "$TOOLS_HOME/lib/drift.sh"
 
@@ -560,21 +566,15 @@ DRIFT_VAULT_DOC="${__PREFIX___VAULT_DOC}"
 # shellcheck disable=SC2153
 DRIFT_VAULT_HEADING="${__PREFIX___VAULT_HEADING}"
 
-usage() {
-    cat <<HELP
-Usage: __NAME__ <command>
-
-Commands:
-  show        Fetch and print the live state (normalized, sorted JSON).
-  diff        Diff live vs the vault mirror; exit 1 on drift.
-  pull        Regenerate the vault mirror block from live.
-  -h, help    Show this help.
-
-Config (config/__NAME__.sh, override via env):
-  __PREFIX___CREDS         age-encrypted env holding the API credential
-  __PREFIX___VAULT_DOC     vault doc holding the mirror
-  __PREFIX___VAULT_HEADING heading whose fenced \`\`\`json block is the mirror
-HELP
+# show/diff/pull + -h + --describe are all served by drift_main from this one
+# declaration; drift_describe_commands emits the shared show/diff/pull surface.
+describe_spec() {
+    desc_tool "__NAME__" "Fetch live state from an API and diff it against the vault mirror."
+    desc_synopsis "__NAME__ <command>"
+    drift_describe_commands
+    desc_env __PREFIX___CREDS         -- "age-encrypted env holding the API credential"
+    desc_env __PREFIX___VAULT_DOC     -- "vault doc holding the mirror"
+    desc_env __PREFIX___VAULT_HEADING -- "heading whose fenced \`\`\`json block is the mirror"
 }
 
 # Decrypt the creds env and echo the secret. Stays in memory only.
@@ -656,21 +656,6 @@ WATCH_PLIST="$HOME/Library/LaunchAgents/$WATCH_LABEL.plist"
 WATCH_LOG_DIR="$TOOLS_HOME/.logs"
 WATCH_LOG="$WATCH_LOG_DIR/vault-sync.log"
 WATCH_INTERVAL="${TOOLS_WATCH_INTERVAL:-900}"  # 15 minutes
-
-watch_usage() {
-    cat <<EOF
-Usage: tools watch <enable|disable|status|run-now>
-
-Optional launchd agent that runs 'vault sync' on a timer (every 15 min).
-Off by default. The agent only fires its command when the timer triggers
-— it doesn't sit running between fires.
-
-  enable    Install and load $WATCH_PLIST.
-  disable   Unload and remove the plist. Vault stops auto-syncing.
-  status    Show whether the agent is loaded, plus the last few log lines.
-  run-now   Run a single 'vault sync' immediately (does not affect schedule).
-EOF
-}
 
 watch_enable() {
     mkdir -p "$(dirname "$WATCH_PLIST")" "$WATCH_LOG_DIR"
@@ -763,33 +748,13 @@ cmd_watch() {
         disable)     watch_disable ;;
         status)      watch_status ;;
         run-now)     "$TOOLS_HOME/bin/vault" sync ;;
-        -h|--help|"") watch_usage ;;
-        *)           die "usage" "unknown watch command: $1 (try -h)" 2 ;;
+        "")          usage_command watch ;;
+        *)           die_unknown "watch command" "$1" watch ;;
     esac
 }
 
 # ---------- key (SSH passphrase cached in macOS Keychain) ----------
 # Keychain + unlock logic lives in lib/key.sh; this is the user-facing CLI.
-
-key_usage() {
-    cat <<EOF
-Usage: tools key <cache|forget|status|test>
-
-Manage the cached SSH passphrase for your age private key. Once cached,
-'decrypt' and 'open-age' (and the Finder Quick Actions) run silently.
-
-  cache    Prompt for the passphrase and store it in the login Keychain.
-           Uses an osascript dialog if not on a TTY, terminal prompt if it is.
-           The passphrase is validated against \$AGE_KEY before being stored.
-  forget   Remove the cached passphrase. Next decrypt will prompt again.
-  status   Show whether a passphrase is cached.
-  test     Fetch the cached passphrase and attempt a no-op key unlock to
-           verify it still matches \$AGE_KEY. Doesn't decrypt any data.
-
-Storage: macOS login Keychain (service "$KEY_SERVICE"). Same mechanism
-git-credential-osxkeychain uses for HTTPS credentials.
-EOF
-}
 
 cmd_key() {
     [[ -n "${AGE_KEY:-}" ]] || die "error" "AGE_KEY not set (KEYS_HOME missing?)"
@@ -842,19 +807,130 @@ cmd_key() {
             fi
             echo
             ;;
-        -h|--help) key_usage ;;
-        *)         die "usage" "unknown key command: $1 (try -h)" 2 ;;
+        "")        usage_command key ;;
+        *)         die_unknown "key command" "$1" key ;;
     esac
 }
 
+# ---------- describe (the cross-repo command-surface aggregator) ----------
+# Each tool emits its own surface via `<tool> --describe` (rendered from its
+# describe_spec by lib/describe.sh — see the contract there). `tools describe`
+# is the orchestrator: it federates every tool's emitter into one deterministic
+# JSON document, so AI sessions, a TUI, and CI guards all read one source. The
+# `tools describe -h` text is itself derived from describe_spec (usage_command).
+
+cmd_describe() {
+    local pretty=0 repos=0 tui=0 only="" only_cmd=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --pretty)   pretty=1; shift ;;
+            --repos)    repos=1; shift ;;
+            --tui)      tui=1; shift ;;
+            -*)         die_unknown option "$1" describe ;;
+            *)          if [[ -z "$only" ]]; then only="$1"; else only_cmd="$1"; fi; shift ;;
+        esac
+    done
+
+    # --tui: the interactive explorer over the federated document. Aggregate
+    # only — a single tool stays the clean `<tool> -h`, never a mini-TUI. The
+    # TUI shells back out to `tools describe` for its data, so it renders the
+    # same emit-once contract every other consumer reads.
+    if (( tui )); then
+        [[ -z "$only" ]] || die "usage" "--tui describes the whole toolchain; drop the tool name ('$only' stays '$only -h')" 2
+        if (( repos )); then
+            exec node "$TOOLS_HOME/lib/tools/describe-tui.mjs" --repos
+        else
+            exec node "$TOOLS_HOME/lib/tools/describe-tui.mjs"
+        fi
+    fi
+
+    # Single tool, single command: the token-minimal AI path. Project the tool's
+    # contract down to one command object (lifting the tool name/effect context
+    # in) so an agent fetches just the scope it's about to act on, not the whole
+    # surface. `tools describe hq restart` → {tool, name, effect, args, …}.
+    if [[ -n "$only" && -n "$only_cmd" ]]; then
+        [[ -x "$TOOLS_HOME/bin/$only" ]] || die "error" "no such tool: $only"
+        # NB: the embedded python uses only double-quoted strings so it survives
+        # this single-quoted shell block.
+        "$TOOLS_HOME/bin/$only" --describe \
+            | TOOLS_DESC_CMD="$only_cmd" TOOLS_DESC_PRETTY="$pretty" python3 -c '
+import json, os, sys
+want = os.environ["TOOLS_DESC_CMD"]
+doc = json.load(sys.stdin)
+cmd = next((c for c in doc.get("commands", []) if c["name"] == want), None)
+if cmd is None:
+    names = ", ".join(c["name"] for c in doc.get("commands", [])) or "(none)"
+    print(json.dumps({"ok": False,
+        "error": "%s has no command %r; commands: %s" % (doc.get("name"), want, names)}))
+    sys.exit(1)
+out = {"ok": True, "schema_version": doc.get("schema_version"), "tool": doc.get("name")}
+out.update(cmd)
+print(json.dumps(out, indent=2) if os.environ["TOOLS_DESC_PRETTY"] == "1" else json.dumps(out))
+'
+        return "${PIPESTATUS[1]}"
+    fi
+
+    # Single-tool: hand straight to that tool's own emitter.
+    if [[ -n "$only" ]]; then
+        [[ -x "$TOOLS_HOME/bin/$only" ]] || die "error" "no such tool: $only"
+        if (( pretty )); then
+            "$TOOLS_HOME/bin/$only" --describe --pretty
+        else
+            "$TOOLS_HOME/bin/$only" --describe
+        fi
+        return $?
+    fi
+
+    # Federate: run every tool's --describe; pack the one-line objects into an
+    # array. A tool that errors or doesn't emit JSON becomes an error object so
+    # the aggregate is always well-formed (robust for automations).
+    local objs=() name out
+    for name in "${TOOL_NAMES[@]}"; do
+        if out=$("$TOOLS_HOME/bin/$name" --describe 2>/dev/null) && [[ "$out" == \{* ]]; then
+            objs+=("$out")
+        else
+            objs+=("$(printf '{"ok":false,"name":"%s","error":"%s"}' \
+                "$(json_escape "$name")" "tool did not emit a describe contract")")
+        fi
+    done
+
+    local siblings=""
+    if (( repos )); then
+        # Sibling repos that emit the same `describe` contract. Extend this list
+        # as more repos grow a `describe` subcommand (the P2 federation).
+        local sib_bins=(severino-vault-mcp) sib_objs=() bin
+        for bin in "${sib_bins[@]}"; do
+            if command -v "$bin" >/dev/null 2>&1 \
+                && out=$("$bin" describe 2>/dev/null) && [[ "$out" == \{* ]]; then
+                sib_objs+=("$out")
+            fi
+        done
+        siblings=$(printf ',"siblings":[%s]' "$(json_join "${sib_objs[@]:-}")")
+    fi
+
+    local body
+    body=$(printf '{"ok":true,"schema_version":%d,"repo":"tools","tools":[%s]%s}' \
+        "$DESCRIBE_SCHEMA_VERSION" "$(json_join "${objs[@]}")" "$siblings")
+
+    if (( pretty )) && command -v python3 >/dev/null 2>&1; then
+        printf '%s\n' "$body" | python3 -m json.tool
+    else
+        printf '%s\n' "$body"
+    fi
+}
+
+# All help + the machine surface render from the one spec via the shared
+# intercept (main `-h`, `--describe`, focused `<cmd> -h`) — so even
+# `tools status -h` / `tools install -h` render help instead of acting.
+desc_help_intercept "$@"
 case "${1:-}" in
-    status)        shift; cmd_status  "$@" ;;
-    doctor)        shift; cmd_doctor  "$@" ;;
-    check)         shift; cmd_check   "$@" ;;
-    new)           shift; cmd_new     "$@" ;;
-    install)       shift; cmd_install "$@" ;;
-    watch)         shift; cmd_watch   "$@" ;;
-    key)           shift; cmd_key     "$@" ;;
-    -h|--help|"")  usage; exit 0 ;;
-    *)             die "usage" "unknown command: $1 (try -h)" 2 ;;
+    status)        shift; cmd_status   "$@" ;;
+    doctor)        shift; cmd_doctor   "$@" ;;
+    check)         shift; cmd_check    "$@" ;;
+    new)           shift; cmd_new      "$@" ;;
+    install)       shift; cmd_install  "$@" ;;
+    watch)         shift; cmd_watch    "$@" ;;
+    key)           shift; cmd_key      "$@" ;;
+    describe)      shift; cmd_describe "$@" ;;
+    *)             die_unknown command "$1" ;;
 esac

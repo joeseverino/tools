@@ -2,33 +2,28 @@
 # encrypt <file>... — age-encrypt files to your public key, remove originals
 set -euo pipefail
 
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" crypt
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" crypt "$@"
 
-usage() {
-    cat <<EOF
-Usage: encrypt [options] <file>...
-
-Encrypts files to your default age public key (and any extras passed
-with -k). The original file is removed on success unless -c is given.
-
-Options:
-  -c, --copy          Keep the original file (encrypt a copy)
-  -f, --force         Overwrite existing .age output files
-  -k, --key <path>    Add another public key as a recipient (repeatable)
-  -h, --help          Show this help
-
-Environment:
-  KEYS_HOME           Read from ~/.zshrc; resolves AGE_PUBKEY
-  AGE_PUBKEY          Per-invocation override for the public key path
-
-Examples:
-  encrypt notes.md                          # original removed
-  encrypt -c ~/.ssh/id_ed25519              # original kept (backup pattern)
-  encrypt -k ~/keys/coworker.pub notes.md
-  encrypt -k a.pub -k b.pub *.md
-  encrypt -f *.txt
-  encrypt -- -starts-with-dash.md
-EOF
+# The single source of truth for encrypt's surface (lib/describe.sh renders
+# both this -h text and the --describe JSON from it).
+describe_spec() {
+    desc_tool "encrypt" "Age-encrypt files to your public key; remove originals."
+    desc_effect local_write
+    desc_synopsis "encrypt [options] <file>..."
+    desc_para "Encrypts files to your default age public key (and any extras passed"
+    desc_para "with -k). The original file is removed on success unless -c is given."
+    desc_opt -c --copy             -- "Keep the original file (encrypt a copy)"
+    desc_opt -f --force            -- "Overwrite existing .age output files"
+    desc_opt -k --key PATH +repeat -- "Add another public key as a recipient (repeatable)"
+    desc_pos file +variadic        -- "File(s) to encrypt"
+    desc_env KEYS_HOME             -- "Read from ~/.zshrc; resolves AGE_PUBKEY"
+    desc_env AGE_PUBKEY            -- "Per-invocation override for the public key path"
+    desc_example "encrypt notes.md"               -- "original removed"
+    desc_example "encrypt -c ~/.ssh/id_ed25519"   -- "original kept (backup pattern)"
+    desc_example "encrypt -k ~/keys/coworker.pub notes.md"
+    desc_example "encrypt -k a.pub -k b.pub *.md"
+    desc_example "encrypt -f *.txt"
+    desc_example "encrypt -- -starts-with-dash.md"
 }
 
 FORCE=0
@@ -36,6 +31,7 @@ COPY=0
 EXTRA_KEYS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --describe) describe_emit "$@"; exit 0 ;;
         -h|--help)  usage; exit 0 ;;
         -c|--copy)  COPY=1; shift ;;
         -f|--force) FORCE=1; shift ;;
@@ -43,7 +39,7 @@ while [[ $# -gt 0 ]]; do
             [[ -n "${2:-}" ]] || die "usage" "-k requires a key path" 2
             EXTRA_KEYS+=("$2"); shift 2 ;;
         --)         shift; break ;;
-        -*)         die "usage" "unknown option: $1 (try -h)" 2 ;;
+        -*)         die_unknown option "$1" ;;
         *)          break ;;
     esac
 done
