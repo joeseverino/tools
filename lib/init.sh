@@ -12,6 +12,11 @@
 
 # shellcheck source=lib/common.sh
 source "$TOOLS_HOME/lib/common.sh"
+# Emit-once command-surface contract: the generic usage() + the --describe JSON
+# renderer over a tool's describe_spec. Sourced for every tool, so defining
+# describe_spec is all a tool needs to self-describe.
+# shellcheck source=lib/describe.sh
+source "$TOOLS_HOME/lib/describe.sh"
 
 if [[ ${1-} ]]; then
     # shellcheck source=/dev/null

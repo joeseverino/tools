@@ -8,25 +8,24 @@ CODE_HOME="${CODE_HOME:-$HOME/Documents/Code}"
 BRAND_HOME="${BRAND_HOME:-$CODE_HOME/Assets/severino-brand}"
 ENGINE_HOME="${ENGINE_HOME:-$CODE_HOME/Projects/branding-engine}"
 
-usage() {
-    cat <<EOF
-Usage: brand <command>
-
-Commands:
-  build                       Rebuild every kit from brand/ + the social cards
-  kit <slug> <hex> <initials> ["Wordmark"] [--font f] [--only a,b] [--out d]
-                              Render a one-off kit into severino-brand/kits/<slug>
-  status                      Show engine + brand locations and git state
-  -h, --help                  Show this help
-
-Kits land in \$BRAND_HOME/kits. The engine lives in \$ENGINE_HOME and comes in as
-a dependency of the brand repo; see its README for all flags.
-
-Environment:
-  CODE_HOME     Defaults to ~/Documents/Code
-  BRAND_HOME    Defaults to \$CODE_HOME/Assets/severino-brand
-  ENGINE_HOME   Defaults to \$CODE_HOME/Projects/branding-engine
-EOF
+describe_spec() {
+    desc_tool "brand" "Render Joe's brand kits via the branding-engine."
+    desc_synopsis "brand <command>"
+    desc_para "Kits land in \$BRAND_HOME/kits. The engine lives in \$ENGINE_HOME and comes in"
+    desc_para "as a dependency of the brand repo; see its README for all flags."
+    desc_cmd build  -- "Rebuild every kit from brand/ + the social cards"
+    desc_cmd kit    -- "Render a one-off kit into severino-brand/kits/<slug>"
+    desc_pos slug              -- "Kit slug (output directory name)"
+    desc_pos hex               -- "Primary brand color (hex, no leading #)"
+    desc_pos initials          -- "Monogram initials"
+    desc_pos wordmark +optional -- "Wordmark text"
+    desc_opt --font FONT       -- "Font family"
+    desc_opt --only LIST       -- "Comma-separated subset (e.g. mark,wordmark)"
+    desc_opt --out DIR         -- "Output directory override"
+    desc_cmd status -- "Show engine + brand locations and git state"
+    desc_env CODE_HOME   -- "Defaults to ~/Documents/Code"
+    desc_env BRAND_HOME  -- "Defaults to \$CODE_HOME/Assets/severino-brand"
+    desc_env ENGINE_HOME -- "Defaults to \$CODE_HOME/Projects/branding-engine"
 }
 
 require_brand() {
@@ -83,6 +82,7 @@ case "${1:-}" in
     build)          shift; cmd_build "$@" ;;
     kit)            shift; cmd_kit "$@" ;;
     status)         shift; cmd_status "$@" ;;
+    --describe)     describe_emit "$@"; exit 0 ;;
     -h|--help|"")   usage; exit 0 ;;
     *)              die "usage" "unknown command: $1 (try -h)" 2 ;;
 esac

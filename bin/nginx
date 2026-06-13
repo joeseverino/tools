@@ -14,25 +14,16 @@ DRIFT_VAULT_DOC="${NGINX_VAULT_DOC}"
 # shellcheck disable=SC2153
 DRIFT_VAULT_HEADING="${NGINX_VAULT_HEADING}"
 
-usage() {
-    cat <<HELP
-Usage: nginx <command>
-
-Commands:
-  show        Fetch and print the live proxy hosts (normalized, sorted JSON).
-  diff        Diff live vs the vault mirror; exit 1 on drift.
-  pull        Regenerate the vault mirror block from the live proxy hosts.
-  -h, help    Show this help.
-
-Config (config/nginx.sh, override via env):
-  NGINX_CREDS         age-encrypted env holding NGINX_EMAIL + NGINX_PASSWORD
-  NGINX_URL           Nginx Proxy Manager API base (e.g. http://host:81/api)
-  NGINX_VAULT_DOC     vault doc holding the mirror
-  NGINX_VAULT_HEADING heading whose fenced \`\`\`json block is the mirror
-
-Proxy hosts are normalized to domain_names / forward_scheme / forward_host /
-forward_port / enabled, sorted by domain.
-HELP
+describe_spec() {
+    desc_tool "nginx" "Fetch the live Nginx Proxy Manager proxy hosts and diff them against the vault mirror."
+    desc_synopsis "nginx <command>"
+    desc_para "Proxy hosts are normalized to domain_names / forward_scheme / forward_host /"
+    desc_para "forward_port / enabled, sorted by domain."
+    drift_describe_commands
+    desc_env NGINX_CREDS         -- "age-encrypted env holding NGINX_EMAIL + NGINX_PASSWORD"
+    desc_env NGINX_URL           -- "Nginx Proxy Manager API base (e.g. http://host:81/api)"
+    desc_env NGINX_VAULT_DOC     -- "vault doc holding the mirror"
+    desc_env NGINX_VAULT_HEADING -- "heading whose fenced \`\`\`json block is the mirror"
 }
 
 # Decrypt the creds env and echo "email<TAB>secret". In memory only, never on disk.
