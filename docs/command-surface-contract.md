@@ -158,7 +158,16 @@ installed, `--repos` simply folds in nothing.)
 `tools generate` is another render-many consumer: it derives zsh completions
 and the README CLI reference/inventory from the local aggregate. CI validates
 every tool *and folded-in sibling* document against
-`schemas/describe-v4.schema.json` and checks those generated files for drift.
+`schemas/describe-v4.schema.json` and checks those generated files for drift. So
+the docs ship from the same emitter that answers `-h` — the prose, the
+completions, and the JSON cannot disagree.
+
+`severino-vault-mcp` closes the loop on both ends: it is a sibling emitter
+folded into the federated document via `--repos`, **and** the channel
+(`describe_commands`) through which an AI session reads the contract — including
+the `effect` it risk-gates on (above). That is what makes this toolchain safe
+for an agent to drive: it learns each command's blast radius from the contract
+before it runs anything, instead of guessing from flags or reading handlers.
 
 ## How it can't drift
 
