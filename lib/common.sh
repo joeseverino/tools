@@ -18,12 +18,39 @@ msg() {
     printf '  %s%-10s%s %s\n' "$1$BOLD" "$2" "$RESET" "$3"
 }
 
-# die <label> <body> [<exit-code>]
+# die <label> <body> [<exit-code>]   — the repo convention.
+# A single-argument call (die "<message>") is also supported: the message
+# becomes the body under a default "error" label. Without this, a lone-arg
+# call expands an unset $2 and crashes under `set -u` (bin/hq uses this form
+# throughout); 2-arg is always (label, body), never (body, code).
 die() {
+    local label body code
+    if (( $# >= 2 )); then
+        label="$1"; body="$2"; code="${3:-1}"
+    else
+        label="error"; body="${1:-}"; code=1
+    fi
     echo
-    msg "$RED" "$1" "$2"
+    msg "$RED" "$label" "$body"
     echo
-    exit "${3:-1}"
+    exit "$code"
+}
+
+# die_unknown <kind> <token> [<subcommand>] — the uniform usage error for an
+# unrecognized flag / command / value. Instead of a dead-end "try -h" pointer it
+# SHOWS the valid surface, rendered from the one describe_spec: the command list
+# for a bad command, or that command's own options/args for a bad flag. So the
+# fix is on screen, nothing is hand-written, and it can't drift. Exits 2.
+#
+#   die_unknown command "$1"          -> error + the tool's command list
+#   die_unknown flag "$1" sync        -> error + `sync`'s options/args
+#   die_unknown "test mode" "$1" test -> error + `test`'s options
+die_unknown() {
+    local kind="$1" token="$2" sub="${3:-}"
+    echo
+    msg "$RED" "usage" "unknown $kind: $token"
+    if [[ -n "$sub" ]]; then usage_command "$sub"; else usage; fi
+    exit 2
 }
 
 # header <verb> <count>

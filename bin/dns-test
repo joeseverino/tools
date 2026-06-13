@@ -2,32 +2,36 @@
 # dns-test — compare DNS resolver latency across paths
 set -euo pipefail
 
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" ""
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 
 ADGUARD_IP="${ADGUARD_IP:-192.168.1.233}"
 DOMAIN="google.com"
 RUNS=20
 BASELINE="AdGuard LAN"
 
-usage() {
-    cat <<EOF
-Usage: dns-test [-d domain] [-n runs] [-a adguard_ip] [-b baseline] [-h]
-
-Measures DNS latency across System DNS, a LAN AdGuard resolver,
-Cloudflare 1.1.1.1, and Cloudflare DoH. Reports avg/min/p50/p95/max and
-the delta of each path against a chosen baseline.
-
-The AdGuard IP defaults to an example LAN address; set ADGUARD_IP in your
-environment (or pass -a) to point at your own resolver.
-
-Options:
-  -d domain     Domain to query (default: $DOMAIN)
-  -n runs       Queries per path (default: $RUNS)
-  -a ip         AdGuard LAN IP (default: $ADGUARD_IP, env ADGUARD_IP)
-  -b label      Path label to use as delta baseline (default: "$BASELINE")
-  -h            Show this help
-EOF
+# describe_spec / usage() / --describe all come from lib/describe.sh (sourced
+# via init.sh). It is written to run under zsh too, so this lone zsh tool
+# self-describes from the same one declaration as the bash tools.
+describe_spec() {
+    desc_tool "dns-test" "Compare DNS resolver latency across paths."
+    desc_effect read +network
+    desc_synopsis "dns-test [-d domain] [-n runs] [-a adguard_ip] [-b baseline] [-h]"
+    desc_para "Measures DNS latency across System DNS, a LAN AdGuard resolver,"
+    desc_para "Cloudflare 1.1.1.1, and Cloudflare DoH. Reports avg/min/p50/p95/max and"
+    desc_para "the delta of each path against a chosen baseline."
+    desc_para ""
+    desc_para "The AdGuard IP defaults to an example LAN address; set ADGUARD_IP in your"
+    desc_para "environment (or pass -a) to point at your own resolver."
+    desc_opt -d domain -- "Domain to query (default: $DOMAIN)"
+    desc_opt -n runs   -- "Queries per path (default: $RUNS)"
+    desc_opt -a ip     -- "AdGuard LAN IP (default: $ADGUARD_IP, env ADGUARD_IP)"
+    desc_opt -b label  -- "Path label to use as delta baseline (default: \"$BASELINE\")"
+    desc_env ADGUARD_IP -- "AdGuard LAN resolver IP (overridden by -a)"
 }
+
+# getopts doesn't see long options; intercept --describe / --help before the loop.
+[[ "${1:-}" == "--describe" ]] && { describe_emit "$@"; exit 0; }
+[[ "${1:-}" == "--help" ]] && { usage; exit 0; }
 
 while getopts ":d:n:a:b:h" opt; do
     case $opt in
@@ -36,7 +40,7 @@ while getopts ":d:n:a:b:h" opt; do
         a)  ADGUARD_IP=$OPTARG ;;
         b)  BASELINE=$OPTARG ;;
         h)  usage; exit 0 ;;
-        \?) die "usage" "unknown option: -$OPTARG (try -h)" 2 ;;
+        \?) die_unknown option "-$OPTARG" ;;
         :)  die "usage" "-$OPTARG requires an argument (try -h)" 2 ;;
     esac
 done

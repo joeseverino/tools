@@ -7,6 +7,121 @@ from the code every session.
 
 Small bash/zsh/node tools that share one look and feel.
 
+## Command-surface contract (`describe`)
+
+Every tool emits its command surface as one structured JSON document — the
+**emit-once, render-many** standard (vault decision record
+`read_doc('report-emit-once-render-many')`; the `.py` reference impl lives in
+`severino-vault-mcp` as `cli_introspect.describe_parser`).
+
+- **One source, one dispatch line.** A tool defines a single `describe_spec()`
+  (the `desc_*` DSL in `lib/describe.sh`) and calls **`desc_help_intercept "$@"`**
+  first in its dispatch. That one line renders the whole help + machine surface
+  from the spec: bare `-h`/`--help`/no-args → the git-style main screen
+  (`usage()`, a scannable command list + a `Run '<tool> <cmd> -h'` pointer);
+  `--describe` → the JSON; and **`<tool> <cmd> -h` → that command's focused
+  screen** (`usage_command`). No tool hand-routes help, and a help flag can never
+  fall through to run an action (`hq restart -h`, `adguard pull -h`, `site doctor
+  -h` all *render*, never execute). The `case` after it is pure command→action
+  wiring — the only thing not derivable from the spec (`cmd_*` vs `run_npm` vs
+  aliases); `describe.bats` guards that every declared command has a dispatch arm
+  so the two sets can't drift. New tools get the leaf-tool form from `tools new`.
+- **Everything per-command is spec-derived — zero hand-written sub-help, zero
+  help heredocs in the toolchain.** After a `desc_cmd`, declare its flags
+  (`desc_opt`/`desc_pos`), prose (`desc_para`), and examples (`desc_example`);
+  all are **scoped to that command**, so the focused `-h`, the JSON (flags/args
+  only — prose/examples stay human-help), and `--tui` light up from the one
+  declaration. `desc_pos … "{a,b,c}"` gives a positional a fixed choice set.
+  Keep the data model honest: structured → structured primitives
+  (flags`→desc_opt`, args`→desc_pos`, examples`→desc_example`), `desc_para` for
+  genuine prose only; interactive UIs (the `site manage` / compare viewers)
+  self-document their keymaps rather than restating them in CLI help.
+- **Flags owned by another repo are pointed at, never restated.** `hq create`'s
+  flags live in HQ's `manage.py`, and site's `scaffold-*`/`draft-alt`/`diagnose`
+  flags live in the site repo's `package.json` scripts. Those commands declare
+  **`desc_delegate "<owner>"`** (after the `desc_cmd`) instead of enumerating
+  flags — a *structured* ownership marker that renders in the focused `-h`
+  ("Flags are owned elsewhere: …") **and** rides into the JSON as `delegates`, so
+  an agent sees ownership without reading handlers. `hq create <kind> -h` also
+  falls through to `manage.py` (the help flag isn't the *2nd* arg, so the
+  intercept skips it) — the owner renders its own live list.
+- **Unknown input is self-service and derived — `die_unknown`.** `die_unknown
+  <kind> <token> [<cmd>]` (in `common.sh`) replaces every hand-written
+  "unknown … (try `tool -h`)": it prints the error and then *shows* the valid
+  surface from the spec — the command list for a bad command, a command's own
+  options for a bad flag — deriving the tool name from `$0`. No "(try -h)"
+  strings to drift between `-h`/`--help`.
+- **Wiring.** Source `lib/init.sh` (it sources `lib/describe.sh`), define
+  `describe_spec`, and put `desc_help_intercept "$@"` above the dispatch `case`.
+  Drift guards get show/diff/pull from `drift_describe_commands` and the whole
+  surface from `drift_main` (it calls the intercept) for free. `bin/doc-to-pdf`
+  (node) carries its own `SPEC` object that renders both its `--help` and
+  `--describe`.
+- **Effect = the risk signal an agent can't read off the flags — `desc_effect`.**
+  Every command (and every leaf tool) carries a *blast-radius* class:
+  `read | local_write | vault_write | remote_write | deploy` (escalating), plus
+  the boolean tags `+network` (reaches off-box) and `+interactive` (blocks on a
+  TTY). One line — `desc_effect deploy +network` after a `desc_cmd`, or after
+  `desc_tool` for a leaf — scoped like `desc_opt`. It renders a terse `Effect:`
+  line in the focused `-h` (only when non-trivial), a colored chip in `--tui`,
+  and rides into the JSON as `effect` / `network` / `interactive`. **Default is
+  `read`** (no mutation, no reach) — declare it on anything that mutates, hits
+  the network, or needs a TTY. The drift guards declare theirs **once** in
+  `drift_describe_commands` (show/diff read+network, pull vault_write+network),
+  so all four inherit. This is what lets an agent risk-gate `hq restart`
+  (`deploy`) vs `vault status` (`read`) before running either.
+- **Contract** (`schema_version 3`, a superset of the MCP's): `{ ok,
+  schema_version, name, description, effect, network?, interactive?,
+  global_options:[<opt>], positionals:[<arg>], paras:[<prose>],
+  examples:[{command,comment}], commands:[{name, summary, args:[<opt>|<arg>],
+  effect, network?, interactive?, paras:[<prose>], examples:[…],
+  delegates?:"<owner>"}] }`. v2 added per-scope `paras`/`examples` and
+  `delegates`; v3 added the **effect triple** (always emits `effect`; the lean
+  boolean tags only when true) so an agent reads a command's intent, usage,
+  external flag-ownership, *and blast radius* from the JSON alone. `desc_para`,
+  `desc_example`, and `desc_effect` are **scoped to the current command** (like
+  `desc_opt`/`desc_pos`) — declare tool-level ones *before the first `desc_cmd`*
+  or they attach to the last command. `desc_env` stays human-help only. Output
+  is byte-deterministic (no timestamps) so guards can diff it; `describe.bats`
+  guards every emitted effect against the enum.
+- **`tools describe`** is the orchestrator: it federates every `bin/*`
+  `--describe` into one document (`--pretty` to read, `--repos` to fold in
+  sibling repos like the MCP, `tools describe <tool>` for one). **`tools describe
+  <tool> <command>`** projects the contract down to a single command object
+  (lifting in `tool` + `effect`) — the token-minimal path an agent fetches before
+  acting, instead of reading the whole surface. `tools doctor` gates that every
+  tool self-describes.
+- `lib/describe.sh` is written to run under **bash and zsh** (no numeric array
+  indexing, no `read -ra`) so the lone zsh tool (`dns-test`) self-describes from
+  the same engine. `tests/describe.bats` asserts the round-trip invariant and
+  bash/zsh byte-parity.
+
+## `tools describe --tui` — the human tier (shipped 2026-06-13)
+
+`tools describe --tui` is the interactive consumer of the contract above: a
+full-screen Node explorer over the same `tools describe` JSON
+(`lib/tools/describe-tui.mjs`), sharing the `site manage` look + polish bar (see
+`[[feedback_tui_polish]]`). The three tiers stay cleanly separated: `-h` (clean
+text) · `--describe` (JSON) · `--tui` (this).
+
+- **Scope: aggregate only.** A single tool stays the clean wrapped `-h` (no
+  per-tool mini-TUIs); `tools describe <tool> --tui` is a usage error.
+- **Layout.** Left pane: tool list. Right pane: the selected tool's commands /
+  options / args. `Tab`/`←→` switch panes, `↑↓` move, `/` filters tools *and*
+  commands across the whole toolchain, `Enter` copies a ready-to-paste
+  invocation (pbcopy), `q`/Esc quits. Purposeful (find-and-use a command), not
+  decorative.
+- **Reuse, don't fork — shared `lib/tui.mjs`.** The visual language and input
+  plumbing (palette, grapheme-aware width/clip, `lineEditor`, `fitFrame`, the
+  alt-screen/title polish bar, the escape-sequence input pump + replay key map)
+  live in **`lib/tui.mjs`**, imported by both `manage-tui.mjs` and
+  `describe-tui.mjs` — one implementation of the look, not two that drift. A new
+  Node TUI imports it; it does **not** copy these helpers. `tests/describe-tui.bats`
+  mirrors `site-manage.bats`'s `*_SMOKE` (static frame) / `*_KEYS` (replay)
+  harness; `site-manage.bats` is the regression net for changes to `lib/tui.mjs`.
+- Decision record (the "render-many" consumers):
+  `read_doc('report-emit-once-render-many')`.
+
 ## Repo conventions
 
 - **Solo-authored. Work on `main`.** No `Co-Authored-By` / "Claude" trailers in
@@ -98,8 +213,11 @@ it (installed fingerprint vs source).
 - New bash tools: scaffold with `tools new <name>` — it emits the canonical
   skeleton. Every tool sources `lib/init.sh`, uses `msg`/`die`/`header`/
   `footer` for output, and exits 0 (success/skips), 1 (failure), 2 (usage).
-- Every tool answers `-h`/`--help`.
-- `dns-test` is the lone zsh exception to the bash rule.
+- Every tool answers `-h`/`--help` and `--describe` (both from one
+  `describe_spec` — see the Command-surface contract above; `tools doctor`
+  gates it).
+- `dns-test` is the lone zsh exception to the bash rule (but it self-describes
+  from the same engine — `lib/describe.sh` is bash+zsh safe).
 - Node code is ESM (`.mjs`), deps pinned in the root `package.json`,
   resolved by upward `node_modules` lookup. **Node is the JSON tool in `bin/site`**
   (URL-encoding, payloads, MCP-output parsing); `jq` belongs to the drift

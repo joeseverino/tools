@@ -1,0 +1,31 @@
+%%{init: {'flowchart': {'rankSpacing': 65, 'nodeSpacing': 45}}}%%
+flowchart TB
+    decl["desc_effect &lt;class&gt; [+network] [+interactive]<br/>one line per command — default is read<br/>(drift guards declare once in drift_describe_commands)"]
+
+    subgraph ladder["effect — escalating blast radius"]
+        direction LR
+        r["read"] --> lw["local_write"] --> vw["vault_write"] --> rw["remote_write"] --> dep["deploy"]
+    end
+
+    decl ==> ladder
+
+    subgraph surfaces["Renders four ways from the one declaration"]
+        h["focused -h<br/>Effect: deploy · network"]
+        j["--describe JSON<br/>effect / network? / interactive?"]
+        chip["--tui chip<br/>colored by risk"]
+        scoped["tools describe &lt;tool&gt; &lt;cmd&gt;<br/>token-minimal projection"]
+    end
+
+    ladder --> h
+    ladder --> j
+    ladder --> chip
+    ladder --> scoped
+
+    gate{{"AI reads effect<br/>and risk-gates before running"}}
+    j --> gate
+    scoped --> gate
+    gate -->|"read"| free["run freely"]
+    gate -->|"vault_write · remote_write · deploy"| confirm["confirm / dry-run first"]
+
+    enum["describe.bats<br/>guards every effect against the enum"]
+    enum -.->|"keeps the hand-declared data honest"| j

@@ -40,6 +40,7 @@ JSON
 #!/usr/bin/env bash
 set -euo pipefail
 source "$TOOLS_HOME/lib/common.sh"
+source "$TOOLS_HOME/lib/describe.sh"
 source "$TOOLS_HOME/lib/drift.sh"
 DRIFT_VAULT_DOC="\${DRIFT_VAULT_DOC:-$VAULT_DOC}"
 DRIFT_VAULT_HEADING="## Mirror"

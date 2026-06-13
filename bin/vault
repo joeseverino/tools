@@ -2,24 +2,19 @@
 # vault <command> — operations on the vault repo
 set -euo pipefail
 
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" vault
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" vault "$@"
 
-usage() {
-    cat <<EOF
-Usage: vault <command>
-
-Commands:
-  sync          Pull and push the vault repo
-  status        Working tree, inbox count, remote sync state, and whether
-                doc metadata changed since the last hq sync
-  inbox         List notes currently in the inbox
-  -h, --help    Show this help
-
-Environment:
-  NOTES_HOME    Read from ~/.zshrc; resolves VAULT
-  VAULT         Per-invocation override for the vault path
-  INBOX_DIR     Per-invocation override for the inbox folder
-EOF
+describe_spec() {
+    desc_tool "vault" "Operations on the vault git repo."
+    desc_synopsis "vault <command>"
+    desc_cmd sync   -- "Pull and push the vault repo"
+    desc_effect remote_write +network
+    desc_cmd status -- "Working tree, inbox count, remote sync state, and whether doc metadata changed since the last hq sync"
+    desc_effect read +network
+    desc_cmd inbox  -- "List notes currently in the inbox"
+    desc_env NOTES_HOME -- "Read from ~/.zshrc; resolves VAULT"
+    desc_env VAULT      -- "Per-invocation override for the vault path"
+    desc_env INBOX_DIR  -- "Per-invocation override for the inbox folder"
 }
 
 require_vault() {
@@ -111,10 +106,12 @@ vault_inbox() {
     echo
 }
 
+# All help + the machine surface render from the one spec via the shared
+# intercept (main `-h`, `--describe`, focused `<cmd> -h`).
+desc_help_intercept "$@"
 case "${1:-}" in
     sync)              shift; vault_sync   "$@" ;;
     status)            shift; vault_status "$@" ;;
     inbox)             shift; vault_inbox  "$@" ;;
-    -h|--help|"")      usage; exit 0 ;;
-    *)                 die "usage" "unknown command: $1 (try -h)" 2 ;;
+    *)                 die_unknown command "$1" ;;
 esac

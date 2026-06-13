@@ -2,45 +2,36 @@
 # inbox [text...] — quick-capture a note into the vault inbox
 set -euo pipefail
 
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" vault
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" vault "$@"
 
-usage() {
-    cat <<EOF
-Usage: inbox [options] [text...]
-       cmd | inbox [options]
-
-Capture a quick note into your vault inbox folder. The filename is
-"YYYY-MM-DD HHMMSS <first words>.md" and the body is the captured text.
-
-Options:
-  -e, --edit    Open the captured note in \$EDITOR after writing.
-                With no text/stdin, creates an empty note, opens the
-                editor, then renames the file from its first non-empty
-                content line on save.
-  -h, --help    Show this help
-
-Environment:
-  NOTES_HOME    Read from ~/.zshrc; resolves VAULT
-  VAULT         Per-invocation override for the vault path
-  INBOX_DIR     Per-invocation override for the inbox folder
-  EDITOR        Used by -e (defaults to nano)
-
-Examples:
-  inbox "remember to update the homelab certs"
-  pbpaste | inbox
-  echo "lookup later" | inbox
-  inbox -e                                  # blank note, opens editor
-  inbox -e "draft: post-mortem template"    # seed + open editor
-EOF
+describe_spec() {
+    desc_tool "inbox" "Quick-capture a note into the vault inbox."
+    desc_effect vault_write
+    desc_synopsis "inbox [options] [text...]"
+    desc_synopsis "cmd | inbox [options]"
+    desc_para "Capture a quick note into your vault inbox folder. The filename is"
+    desc_para "\"YYYY-MM-DD HHMMSS <first words>.md\" and the body is the captured text."
+    desc_opt -e --edit -- "Open the captured note in \$EDITOR after writing. With no text/stdin, creates an empty note, opens the editor, then renames the file from its first non-empty content line on save."
+    desc_pos text +optional +variadic -- "Note text (joined). Omitted when piping stdin."
+    desc_env NOTES_HOME -- "Read from ~/.zshrc; resolves VAULT"
+    desc_env VAULT      -- "Per-invocation override for the vault path"
+    desc_env INBOX_DIR  -- "Per-invocation override for the inbox folder"
+    desc_env EDITOR     -- "Used by -e (defaults to nano)"
+    desc_example "inbox \"remember to update the homelab certs\""
+    desc_example "pbpaste | inbox"
+    desc_example "echo \"lookup later\" | inbox"
+    desc_example "inbox -e"                                -- "blank note, opens editor"
+    desc_example "inbox -e \"draft: post-mortem template\"" -- "seed + open editor"
 }
 
 EDIT=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --describe) describe_emit "$@"; exit 0 ;;
         -h|--help) usage; exit 0 ;;
         -e|--edit) EDIT=1; shift ;;
         --)        shift; break ;;
-        -*)        die "usage" "unknown option: $1 (try -h)" 2 ;;
+        -*)        die_unknown option "$1" ;;
         *)         break ;;
     esac
 done

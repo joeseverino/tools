@@ -5,6 +5,11 @@ colored output, aligned status lines, meaningful exit codes, and `-h`
 help on every command. Cohesive enough to feel like one program even
 though each tool is a standalone script.
 
+**Design docs:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (the repo map)
+and [`docs/command-surface-contract.md`](docs/command-surface-contract.md) (the
+emit-once `describe` contract + the v3 effect model, with diagrams). House rules
+for editing are in [`AGENTS.md`](AGENTS.md).
+
 **Platform:** macOS only. The crypt tools rely on `/usr/bin/security`
 (Keychain), `osascript` (passphrase dialogs), and `open -W`. The
 `tools watch` agent uses `launchctl`. None of this has Linux/WSL
@@ -166,6 +171,7 @@ tools new <name> # scaffold a new tool with the house conventions
 tools install    # idempotent: create/refresh symlinks
 tools key        # cache / forget / test the age key passphrase
 tools watch      # opt-in: launchd auto-sync (off by default)
+tools describe   # emit every tool's command surface as one JSON document
 ```
 
 `tools status` is the daily health check; `tools doctor` is the
@@ -209,6 +215,66 @@ in the doc's own directory, and stamps `last_reviewed` via
 fails loudly when the section has no block (instead of comparing against
 nothing). Either way the loop is `<tool> diff` → reconcile the prose →
 `<tool> pull` → `hq sync`.
+
+#### tools describe — the command-surface contract
+
+Every tool emits its command surface as one structured JSON document, and
+three consumers render from that single source: an AI session reads it,
+the `--tui` explorer builds a picker from it, and CI guards diff it. This is
+**emit-once, render-many** — a tool declares its surface once in a
+`describe_spec()` (the `desc_*` DSL in `lib/describe.sh`), and *both*
+`-h`/`--help` and `--describe` are derived from it, so the human help and
+the machine JSON can never drift (there is no prose to parse).
+
+```
+encrypt --describe            # one tool's contract (compact JSON)
+tools describe                # federated: every tool, one document
+tools describe --pretty       # indented, for reading
+tools describe encrypt        # just one tool
+tools describe hq restart     # just one command — the token-minimal AI path
+tools describe --repos        # also fold in sibling repos (severino-vault-mcp)
+tools describe --tui          # full-screen explorer: browse + copy invocations
+```
+
+Every command (and leaf tool) also declares its **effect** — a blast-radius
+class (`read | local_write | vault_write | remote_write | deploy`) plus
+`network` / `interactive` tags — via one `desc_effect` line. It's the signal an
+agent risk-gates on before running a command (a `deploy` vs a `read`), shown in
+the focused `-h`, colored in `--tui`, and carried in the JSON.
+
+`--tui` is the human tier of the contract: a two-pane explorer (tools | the
+selected tool's commands/options/args) over the same federated document.
+`Tab`/`←→` switch panes, `↑/↓` move, `/` filters tools *and* commands across the
+whole toolchain, `Enter` copies a ready-to-paste invocation, `q` quits.
+Aggregate only — a single tool stays the clean `<tool> -h`. It shares the
+`site manage` look via the common TUI library (`lib/tui.mjs`).
+
+The contract — a superset of what `severino-vault-mcp describe` emits:
+
+```jsonc
+{ "ok": true, "schema_version": 3, "name": "encrypt",
+  "description": "…",
+  "effect": "local_write",
+  "global_options": [ { "name": "--copy", "positional": false,
+                        "required": false, "help": "…",
+                        "flags": ["-c","--copy"], "takes_value": false } ],
+  "positionals":   [ { "name": "file", "positional": true,
+                       "required": true, "help": "…" } ],
+  "commands":      [ { "name": "…", "summary": "…", "args": [ … ],
+                       "effect": "deploy", "network": true } ] }
+```
+
+Output is byte-deterministic (no timestamps), so a guard can diff it across
+runs. `tools doctor` gates that every tool answers `--describe` with a valid
+contract — and because both views render from the one `describe_spec`, that
+gate plus the round-trip test in `tests/describe.bats` keep the whole suite
+self-describing as it grows. `lib/describe.sh` runs under both bash and zsh,
+so the lone zsh tool (`dns-test`) self-describes from the same engine.
+
+For the full design — the DSL, the `schema_version 3` shape, the effect model,
+scoped lookup, federation, and the diagrams — see
+[`docs/command-surface-contract.md`](docs/command-surface-contract.md). The
+repo map is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 #### tools key — passphrase cache
 

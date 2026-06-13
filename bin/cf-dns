@@ -5,35 +5,25 @@
 # streamed via decrypt -p — no plaintext on disk) is least-privilege.
 set -euo pipefail
 
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "cf-dns"
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "cf-dns" "$@"
 # shellcheck source=lib/drift.sh
 source "$TOOLS_HOME/lib/drift.sh"
 
 API="https://api.cloudflare.com/client/v4"
-DRIFT_VAULT_DOC="$CF_DNS_VAULT_DOC"
-DRIFT_VAULT_HEADING="$CF_DNS_VAULT_HEADING"
+DRIFT_VAULT_DOC="${CF_DNS_VAULT_DOC:-}"
+DRIFT_VAULT_HEADING="${CF_DNS_VAULT_HEADING:-}"
 
-usage() {
-    cat <<EOF
-Usage: cf-dns <command>
-
-Commands:
-  show        Fetch and print the live DNS records (normalized, sorted JSON).
-  diff        Diff the live records against the vault mirror
-              (\`\`\`json block under "$CF_DNS_VAULT_HEADING" in the vault doc).
-  pull        Regenerate that block from the live zone (accept drift).
-  -h, help    Show this help.
-
-Config (config/cf-dns.sh, override via env):
-  CF_DNS_CREDS         age-encrypted env holding CF_API_TOKEN
-  CF_ZONE              zone name to query (resolved to an id via the API)
-  CF_ZONE_ID           pin the zone id and skip name resolution
-  CF_DNS_VAULT_DOC     vault doc holding the mirror
-  CF_DNS_VAULT_HEADING heading whose fenced \`\`\`json block is the mirror
-
-Records are normalized to type/name/content/proxied (+ priority for MX);
-Cloudflare-internal fields (id, timestamps, meta) are dropped.
-EOF
+describe_spec() {
+    desc_tool "cf-dns" "Fetch the live Cloudflare DNS records and diff them against the vault mirror."
+    desc_synopsis "cf-dns <command>"
+    desc_para "Records are normalized to type/name/content/proxied (+ priority for MX);"
+    desc_para "Cloudflare-internal fields (id, timestamps, meta) are dropped."
+    drift_describe_commands
+    desc_env CF_DNS_CREDS         -- "age-encrypted env holding CF_API_TOKEN"
+    desc_env CF_ZONE              -- "zone name to query (resolved to an id via the API)"
+    desc_env CF_ZONE_ID           -- "pin the zone id and skip name resolution"
+    desc_env CF_DNS_VAULT_DOC     -- "vault doc holding the mirror"
+    desc_env CF_DNS_VAULT_HEADING -- "heading whose fenced \`\`\`json block is the mirror"
 }
 
 # Decrypt the creds env and echo CF_API_TOKEN. The secret stays in memory for
