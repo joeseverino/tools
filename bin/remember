@@ -2,7 +2,7 @@
 # remember — write a Claude memory file + index entry in one shot.
 set -euo pipefail
 
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" ""
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 
 describe_spec() {
     desc_tool "remember" "Write a Claude memory file + MEMORY.md index entry in one shot."

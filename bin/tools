@@ -2,7 +2,7 @@
 # tools <command> — umbrella command for the personal CLI tools
 set -euo pipefail
 
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" ""
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 
 # tools' subcommands read every config without having one of its own. Each
 # config asserts its layout env var with ${VAR:?…}, which in bash kills the
@@ -500,7 +500,7 @@ cmd_new() {
 # __NAME__ <args> — one-line description
 set -euo pipefail
 
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" ""
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 
 # The single source of truth for __NAME__'s surface: lib/describe.sh renders
 # both this tool's -h text and its --describe JSON from this one declaration.
@@ -554,7 +554,7 @@ new_drift() {
 # Drift-guard sibling of cf-dns / adguard; show / diff / pull live in lib/drift.sh.
 set -euo pipefail
 
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "__NAME__"
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "__NAME__" "$@"
 # shellcheck source=lib/drift.sh
 source "$TOOLS_HOME/lib/drift.sh"
 

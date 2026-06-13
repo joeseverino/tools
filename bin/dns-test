@@ -2,7 +2,7 @@
 # dns-test — compare DNS resolver latency across paths
 set -euo pipefail
 
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" ""
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 
 ADGUARD_IP="${ADGUARD_IP:-192.168.1.233}"
 DOMAIN="google.com"

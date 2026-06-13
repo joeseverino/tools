@@ -2,7 +2,7 @@
 # decrypt <file.age>... — age-decrypt with your private key, restore original
 set -euo pipefail
 
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" crypt
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" crypt "$@"
 source "$TOOLS_HOME/lib/key.sh"
 
 describe_spec() {

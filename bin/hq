@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" hq
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" hq "$@"
 
 describe_spec() {
     desc_tool "hq" "Sync vault frontmatter to Severino HQ, plus routine HQ deployment ops."

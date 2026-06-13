@@ -2,7 +2,7 @@
 # brand <command> — render Joe's brand kits via the branding-engine
 set -euo pipefail
 
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" ""
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 
 CODE_HOME="${CODE_HOME:-$HOME/Documents/Code}"
 BRAND_HOME="${BRAND_HOME:-$CODE_HOME/Assets/severino-brand}"

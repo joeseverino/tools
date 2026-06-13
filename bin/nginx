@@ -5,14 +5,14 @@
 # credentials (age-encrypted at $NGINX_CREDS) for a short-lived Bearer per call.
 set -euo pipefail
 
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "nginx"
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "nginx" "$@"
 # shellcheck source=lib/drift.sh
 source "$TOOLS_HOME/lib/drift.sh"
 
-# shellcheck disable=SC2153  # ${NGINX_VAULT_DOC} comes from config/nginx.sh
-DRIFT_VAULT_DOC="${NGINX_VAULT_DOC}"
-# shellcheck disable=SC2153
-DRIFT_VAULT_HEADING="${NGINX_VAULT_HEADING}"
+# :- defaults so `-h`/`--describe` work in a bare env (init.sh skips config on
+# those paths); show/diff/pull source config and get the real values.
+DRIFT_VAULT_DOC="${NGINX_VAULT_DOC:-}"
+DRIFT_VAULT_HEADING="${NGINX_VAULT_HEADING:-}"
 
 describe_spec() {
     desc_tool "nginx" "Fetch the live Nginx Proxy Manager proxy hosts and diff them against the vault mirror."

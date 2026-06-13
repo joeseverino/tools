@@ -2,7 +2,7 @@
 # inbox [text...] — quick-capture a note into the vault inbox
 set -euo pipefail
 
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" vault
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" vault "$@"
 
 describe_spec() {
     desc_tool "inbox" "Quick-capture a note into the vault inbox."

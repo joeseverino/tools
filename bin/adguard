@@ -4,12 +4,15 @@
 # mechanics live in lib/drift.sh.
 set -euo pipefail
 
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "adguard"
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "adguard" "$@"
 # shellcheck source=lib/drift.sh
 source "$TOOLS_HOME/lib/drift.sh"
 
-DRIFT_VAULT_DOC="$ADGUARD_VAULT_DOC"
-DRIFT_VAULT_HEADING="$ADGUARD_VAULT_HEADING"
+# :- defaults so `-h`/`--describe` work in a bare env: init.sh skips sourcing
+# config on those paths (the surface needs none of it), leaving these unset
+# under set -u. show/diff/pull source config and get the real values.
+DRIFT_VAULT_DOC="${ADGUARD_VAULT_DOC:-}"
+DRIFT_VAULT_HEADING="${ADGUARD_VAULT_HEADING:-}"
 
 describe_spec() {
     desc_tool "adguard" "Fetch the live AdGuard Home DNS rewrites and diff them against the vault mirror."

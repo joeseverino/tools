@@ -6,12 +6,12 @@
 # streams it).
 set -euo pipefail
 
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "ts-acl"
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "ts-acl" "$@"
 # shellcheck source=lib/drift.sh
 source "$TOOLS_HOME/lib/drift.sh"
 
 API="https://api.tailscale.com/api/v2"
-DRIFT_VAULT_DOC="$TS_ACL_VAULT_DOC"
+DRIFT_VAULT_DOC="${TS_ACL_VAULT_DOC:-}"
 DRIFT_VAULT_HEADING="## Access Controls"
 
 describe_spec() {
