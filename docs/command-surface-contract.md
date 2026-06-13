@@ -148,19 +148,19 @@ about to act on instead of the whole surface. An unknown command returns
 
 `tools describe` federates every `bin/*` emitter into one document; `--repos`
 folds in sibling repos that emit the same contract — today
-`severino-vault-mcp describe`, which emits the **same v4 shape verbatim**. This
-repo owns `schemas/describe-v4.schema.json` and is the single validator: `tools
-check` runs `tools describe --repos` through it, so a drifted sibling emitter
-fails *here* (the cross-repo drift guard). One schema, one validator, both repos
-checked — no copy of the contract lives in the sibling. (When the sibling isn't
-installed, `--repos` simply folds in nothing.)
+`severino-vault-mcp describe`, which emits the **same v4 shape verbatim**. The
+contract itself is the [**Cordon** spec](https://github.com/joeseverino/cordon);
+`schemas/cordon-v4.json` here is a copy vendored verbatim from it (kept
+byte-identical, so it can be diff-checked). `tools` is one conformant emitter,
+and `tools check` runs `tools describe --repos` through that schema, so a drifted
+sibling emitter fails *here* (the cross-repo drift guard). One schema, both repos
+checked. (When the sibling isn't installed, `--repos` simply folds in nothing.)
 
 `tools generate` is another render-many consumer: it derives zsh completions
 and the README CLI reference/inventory from the local aggregate. CI validates
-every tool *and folded-in sibling* document against
-`schemas/describe-v4.schema.json` and checks those generated files for drift. So
-the docs ship from the same emitter that answers `-h` — the prose, the
-completions, and the JSON cannot disagree.
+every tool *and folded-in sibling* document against `schemas/cordon-v4.json` and
+checks those generated files for drift. So the docs ship from the same emitter
+that answers `-h` — the prose, the completions, and the JSON cannot disagree.
 
 `severino-vault-mcp` closes the loop on both ends: it is a sibling emitter
 folded into the federated document via `--repos`, **and** the channel

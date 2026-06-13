@@ -41,7 +41,8 @@ generate` is another render-many consumer that regenerates both from the same
 federated JSON. The same emitter that answers `-h` writes the documentation, so
 the prose a human reads, the completions a shell offers, and the JSON an agent
 parses are three views of one declaration and cannot drift. `tools check`
-validates every emitter against `schemas/describe-v4.schema.json` and fails when
+validates every emitter against `schemas/cordon-v4.json` (vendored from the
+[Cordon](https://github.com/joeseverino/cordon) spec) and fails when
 either generated artifact is stale. Generation fails closed if any tool did not
 emit a valid contract; it never silently drops a broken tool from the generated
 surfaces.
