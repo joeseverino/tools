@@ -430,10 +430,12 @@ cmd_check() {
     fi
 
     # Contract schema + generated consumers. The validator checks every real
-    # emitter against schemas/describe-v4.schema.json; the generator check makes
-    # completions and the README reference/inventory reproducible build artifacts.
+    # emitter against schemas/describe-v4.schema.json — including sibling repos'
+    # emitters via --repos, so a drifted `severino-vault-mcp describe` fails here
+    # (the cross-repo drift guard). When the sibling isn't installed, --repos just
+    # folds in nothing. The generator check keeps completions + README current.
     if command -v node >/dev/null && [[ -d "$TOOLS_HOME/node_modules/ajv" ]]; then
-        if err=$("$TOOLS_HOME/bin/tools" describe | node "$TOOLS_HOME/lib/tools/validate-describe.mjs" 2>&1); then
+        if err=$("$TOOLS_HOME/bin/tools" describe --repos | node "$TOOLS_HOME/lib/tools/validate-describe.mjs" 2>&1); then
             check "describe schema" 1 "$err"
         else
             printf '%s\n' "$err" | sed 's/^/    /'

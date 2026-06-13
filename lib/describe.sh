@@ -804,7 +804,8 @@ describe_emit() {
 #   (no args | -h | --help | help)  -> usage              (main screen)
 #   --describe [--pretty]           -> describe_emit       (JSON contract)
 #   <cmd> (-h | --help)             -> usage_command <cmd> (focused screen)
-# Otherwise it returns, and the caller dispatches the real command.
+# Otherwise it runs the blast-radius gate for the resolved command and returns,
+# letting the caller dispatch the real command.
 desc_help_intercept() {
     case "${1:-}" in
         ''|-h|--help|help) usage; exit 0 ;;
@@ -812,5 +813,40 @@ desc_help_intercept() {
     esac
     case "${2:-}" in
         -h|--help)         usage_command "$1"; exit 0 ;;
+    esac
+    desc_guard_effect "${1:-}"
+}
+
+# desc_guard_effect <command> — the runtime renderer of the effect contract: the
+# warning, derived from the same `desc_effect` line that feeds -h / the README /
+# the agent JSON, never hand-wired per command. A `deploy` (the top of the
+# read→deploy ladder — it ships to prod) requires an explicit confirmation, so a
+# stray `hq ship` / `site deploy` can't fire by accident, by hand OR by an agent.
+# Bypass with TOOLS_ASSUME_YES=1 (intentional automation / CI); a non-interactive
+# shell without it fails closed rather than deploying blind. Every tool inherits
+# this for free — it runs from the one intercept they already call, so a new
+# deploy command is gated the moment it declares its effect, with zero wiring.
+desc_guard_effect() {
+    local cmd="$1"
+    [[ -n "$cmd" ]] || return 0
+    # No spec means no declared effect (defaults to read) — nothing to gate. Also
+    # keeps lib/drift.sh's hermetic test harness, which overrides usage() and
+    # never declares describe_spec, working unchanged.
+    declare -F describe_spec >/dev/null || return 0
+    describe_reset
+    describe_spec
+    local eff; eff="$(_describe_effect_for "$cmd")"; eff="${eff%%"$_DSEP"*}"
+    [[ "$eff" == deploy ]] || return 0
+    [[ -n "${TOOLS_ASSUME_YES:-}" ]] && return 0
+    if [[ ! -t 0 || ! -t 1 ]]; then
+        die "blocked" "'$_D_NAME $cmd' is a deploy — set TOOLS_ASSUME_YES=1 to run non-interactively" 2
+    fi
+    local reply
+    printf '  %s%-10s%s %s deploys to prod (%s %s). Continue? [y/N] ' \
+        "$YELLOW$BOLD" "confirm" "$RESET" "$_D_NAME" "$_D_NAME" "$cmd" > /dev/tty
+    read -r reply < /dev/tty || reply=""
+    case "$reply" in
+        y|Y|yes|YES) ;;
+        *) die "aborted" "deploy cancelled" 130 ;;
     esac
 }
