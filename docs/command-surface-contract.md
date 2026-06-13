@@ -109,10 +109,23 @@ desc_effect local_write              # … or after desc_tool, for a leaf tool
   network is too).
 - **`+interactive`** — blocks on a TTY (prompts, `ssh -t`, a full-screen UI).
 
-It renders four ways from the one line: a terse `Effect:` line in the focused
+It renders five ways from the one line: a terse `Effect:` line in the focused
 `-h` (only when non-trivial), `effect` / `network?` / `interactive?` in the JSON
 (`effect` always emitted; the boolean tags only when true, to stay lean), a
-color-coded chip in `--tui`, and the field in the scoped lookup below.
+color-coded chip in `--tui`, the field in the scoped lookup below, and — the
+load-bearing one — the **runtime gate**.
+
+**The runtime gate (`desc_guard_effect`).** A `deploy` (the top of the ladder —
+it ships to prod) requires an explicit confirmation before it runs. The gate is
+derived from the same `desc_effect` line, so the warning can't disagree with the
+contract, and it lives in the one intercept every tool already calls
+(`desc_help_intercept`) — a new deploy command is gated the moment it declares
+its effect, with zero per-tool wiring. At a TTY it prompts `[y/N]`;
+non-interactive it **fails closed** unless `TOOLS_ASSUME_YES=1` is set (the
+bypass CI and intentional automation use), so a stray `hq ship` / `site publish`
+can't fire by accident, by hand or by an agent. A tool with no `describe_spec`
+declares no effect (defaults to `read`) and is never gated. Covered by
+`site-mcp.bats`.
 
 **Declared once where it's shared:** the drift guards declare their effects a
 single time in `drift_describe_commands` (show/diff `read +network`, pull
@@ -135,13 +148,17 @@ about to act on instead of the whole surface. An unknown command returns
 
 `tools describe` federates every `bin/*` emitter into one document; `--repos`
 folds in sibling repos that emit the same contract — today
-`severino-vault-mcp describe`. Federation accepts sibling contract versions;
-the local v4 schema governs the tools rendered into this repo's generated files.
+`severino-vault-mcp describe`, which emits the **same v4 shape verbatim**. This
+repo owns `schemas/describe-v4.schema.json` and is the single validator: `tools
+check` runs `tools describe --repos` through it, so a drifted sibling emitter
+fails *here* (the cross-repo drift guard). One schema, one validator, both repos
+checked — no copy of the contract lives in the sibling. (When the sibling isn't
+installed, `--repos` simply folds in nothing.)
 
 `tools generate` is another render-many consumer: it derives zsh completions
 and the README CLI reference/inventory from the local aggregate. CI validates
-every tool document against `schemas/describe-v4.schema.json` and checks those
-generated files for drift.
+every tool *and folded-in sibling* document against
+`schemas/describe-v4.schema.json` and checks those generated files for drift.
 
 ## How it can't drift
 
@@ -149,7 +166,8 @@ generated files for drift.
   vice versa (`describe.bats`).
 - **effect enum** — every emitted `effect` is a valid class; `network` /
   `interactive` only ever appear as `true` (`describe.bats`).
-- **JSON Schema** — every real tool validates against the committed v4 schema.
+- **JSON Schema** — every real tool *and folded-in sibling* validates against
+  the committed v4 schema (`tools check` runs `describe --repos` through it).
 - **inventory order** — every tool has a group and globally unique order;
   duplicate positions fail validation before any surface is rendered.
 - **generated consumers** — completions and the README reference/inventory must match
