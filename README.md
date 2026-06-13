@@ -21,7 +21,8 @@ equivalents in-tree.
   `site manage`, `site compare`). Run `npm ci` once to fetch their
   pinned deps.
 - `shellcheck` + `bats-core` — only to run `tools check` (the CI suite)
-  locally.
+  locally. The macOS system `/usr/bin/expect` runs the real-PTY coverage for
+  `site manage`.
 
 ## What's in the box
 
@@ -50,7 +51,7 @@ tools/
     init.sh              # shared: bootstrap sourced by every tool
     key.sh               # shared: SSH passphrase + age-key unlock
     drift.sh             # shared: show/diff/pull core for ts-acl/cf-dns/adguard/nginx
-    hq/                  # hq implementation (frontmatter → manifest JSON)
+    doctor.sh            # shared: check/gate plumbing + the cross-system gate registry
     site/                # site implementation (the `site manage` TUI)
     doc-to-pdf/          # doc-to-pdf implementation (markdown-it + mermaid)
   config/
@@ -159,6 +160,7 @@ Umbrella command for managing the suite itself.
 ```
 tools status     # vault + inbox + backup + keys, one screen
 tools doctor     # verify env vars, deps, key paths, symlinks, completions
+                 #   --all adds every system's own gate; --live adds drift guards
 tools check      # run the full CI suite locally: lint, tests, bench
 tools new <name> # scaffold a new tool with the house conventions
 tools install    # idempotent: create/refresh symlinks
@@ -167,9 +169,17 @@ tools watch      # opt-in: launchd auto-sync (off by default)
 ```
 
 `tools status` is the daily health check; `tools doctor` is the
-new-machine smoke test. Both take `--json` for machine-readable output
-(useful for agents and cron). `TOOLS_INSTALL_DIR` overrides the install
-target.
+new-machine smoke test. `tools doctor --all` is the cross-system rollup:
+after the local checks it runs every system's own gate — `hq doctor`
+(frontmatter validity + vault→HQ sync freshness), `hq schema --check`
+(contract parity), `site doctor` (seams, install drift, security, types,
+audits) — each timed, with a failing gate's output tail inlined, and one
+verdict / exit code at the end. `--live` also runs the drift guards
+(`cf-dns` / `adguard` / `ts-acl` diff): live API reads that need network
+and the age key. The gate registry lives in `lib/doctor.sh`; a gate's
+only contract is "exit 0 when healthy", so adding one is one line. Both
+commands take `--json` for machine-readable output (useful for agents
+and cron). `TOOLS_INSTALL_DIR` overrides the install target.
 
 `tools check` is the same command CI runs — the definition of "passing"
 lives in one place. It discovers scripts by shebang (`bash -n`, `zsh -n`,
@@ -184,16 +194,21 @@ instead (the `ts-acl` / `cf-dns` / `adguard` / `nginx` shape): `show` /
 the TODOs (endpoint, creds key, jq projection) and seed the vault block
 with `<name> pull`.
 
-A successful `pull` also stamps the mirror doc's `last_reviewed` to today
-— a pull is a review. It does this through the
+A successful `pull` writes the regenerated block through the
 [`severino-vault-mcp`](https://github.com/joeseverino/severino-vault-mcp)
-console script (`severino-vault-mcp touch-reviewed <vault-relative-path>`,
-which wraps the MCP's schema-validated `update_frontmatter` and reloads
-the vault cache), never a raw YAML edit. The step is best-effort: it's
-skipped silently if the MCP binary isn't on `PATH` or the doc lives
-outside `$NOTES_HOME`. So the loop is `<tool> diff` → reconcile the prose
-→ `<tool> pull` (regenerates the block **and** bumps `last_reviewed`) →
-`hq sync`.
+console script (`severino-vault-mcp update-mirror-block
+<vault-relative-path> --heading <h> --touch-reviewed`, JSON on stdin) —
+never a raw file write. The replacement is scoped to the mirror's own
+heading section (a second mirror in the same doc can never be matched or
+clobbered), validated to parse as JSON, and lands in **one** atomic write
+that also stamps the doc's `last_reviewed` to today — a pull is a review.
+When the MCP CLI isn't installed or the doc lives outside `$NOTES_HOME`,
+`pull` falls back to an awk rewrite with the same section scoping, staged
+in the doc's own directory, and stamps `last_reviewed` via
+`touch-reviewed`, best-effort. `diff` reads with the same scoping and
+fails loudly when the section has no block (instead of comparing against
+nothing). Either way the loop is `<tool> diff` → reconcile the prose →
+`<tool> pull` → `hq sync`.
 
 #### tools key — passphrase cache
 
@@ -361,7 +376,8 @@ Operations on the vault repo.
 
 ```
 vault sync       # git pull --rebase, then git push
-vault status     # working tree, inbox count, remote sync state
+vault status     # working tree, inbox count, remote sync state,
+                 #   and whether doc metadata changed since the last hq sync
 vault inbox      # list pending notes in the inbox
 ```
 
@@ -380,7 +396,7 @@ frontmatter from every `.md` under `01 Projects/`, `02 Infrastructure/`,
 
 ```
 hq sync          # walk vault → push manifest → HQ upserts by doc_id
-hq doctor        # report docs missing or with invalid frontmatter
+hq doctor        # docs missing/invalid frontmatter + sync freshness vs HQ
 hq validate      # report registry Projects/Assets no doc references (orphans/dups)
 hq manifest      # print the manifest JSON to stdout (inspect / pipe)
 hq create <kind> <slug> [flags]   # upsert a Project or Asset record
@@ -407,7 +423,12 @@ export HQ_URL=https://hq.example.com             # URL where HQ is served
 
 `sync` pipes the manifest through `ssh "$HQ_SSH_HOST"` and runs
 `docker compose exec -T app python manage.py import_docs_manifest -` on the
-target container. `deploy` / `logs` / `restart` wrap the equivalent
+target container. A successful sync also records the shipped manifest's
+hash (plus the vault HEAD and the exact dirs) at
+`~/.local/state/severino-tools/hq-sync.json`, so `vault status` and
+`hq doctor` can report *exactly* when doc metadata has changed since the
+last sync — the hash covers only the frontmatter manifest HQ imports, so
+prose-only edits never flag. `deploy` / `logs` / `restart` wrap the equivalent
 `docker compose` calls; they assume `severino-hq`'s repo layout but are easy
 to adapt if you fork.
 
@@ -504,6 +525,38 @@ list and publish-readiness results. Saving sends one JSON plan to
 `apply-writeup-plan`; scalar edits and the complete featured order are staged
 and committed as one locked transaction, with rollback if any replacement
 fails.
+
+#### `site manage`: publishing control plane
+
+The TUI is an operator surface over the publishing system, not a second
+implementation of its rules:
+
+- **Read model:** one dashboard call returns writeup summaries and validation
+  from the same cached vault snapshot, so displayed state and gate results
+  cannot disagree because of separate scans.
+- **Staging model:** feature order, publish flips, and editable scalar fields
+  remain in memory until save. The UI can show the complete pending change
+  without partially mutating the vault.
+- **Commit boundary:** save submits one structured plan to the MCP. Schema
+  validation, sequential featured ordering, format-preserving YAML updates,
+  locking, and rollback stay in the owner service.
+- **Operational surface:** the Site tab composes server state, git state,
+  build artifacts, security checks, live reachability, and the existing
+  doctor/diagnose/build/test/publish commands instead of duplicating them.
+- **Terminal contract:** raw input is decoded as a stream, including split
+  escape sequences and bracketed paste. Editing is grapheme-aware, long fields
+  scroll horizontally with the cursor, and frames use Unicode terminal-cell
+  widths plus vertical viewports for small or resized panes.
+- **Verification:** hermetic replay tests cover model transitions and MCP
+  payloads; a real pseudo-terminal test runs the interactive branch at a small
+  window size and verifies paste, arrow decoding, alternate-screen behavior,
+  and terminal-mode restoration.
+
+The failure boundary is deliberate: loading fails closed if the dashboard is
+unavailable, saving is all-or-nothing through the MCP, and external commands
+temporarily leave the alternate screen so their native output and exit status
+remain visible. Quitting with staged changes requires an explicit save or
+discard decision.
 
 Before any MCP-backed site command runs, `site` compares the installed
 package fingerprint with the local MCP source checkout. Interactive commands

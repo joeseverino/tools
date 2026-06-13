@@ -16,6 +16,7 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" ""
 # shellcheck source=config/crypt.sh
 [[ -n "${KEYS_HOME-}"    ]] && source "$TOOLS_HOME/config/crypt.sh"
 source "$TOOLS_HOME/lib/key.sh"
+source "$TOOLS_HOME/lib/doctor.sh"
 
 TOOL_NAMES=()
 for file in "$TOOLS_HOME/bin"/*; do
@@ -31,7 +32,10 @@ Usage: tools <command>
 
 Commands:
   status        One-screen health check across vault, inbox, backup, keys
-  doctor        Verify environment, deps, and installed symlinks
+  doctor        Verify environment, deps, and installed symlinks.
+                --all adds every system's own gate (hq doctor, hq schema
+                --check, site doctor) — the one cross-system health rollup.
+                --live also runs the drift guards (cf-dns/adguard/ts-acl)
   check         Run the full CI suite locally: lint, tests, bench
   new <name>    Scaffold a new tool in bin/ with the house conventions
   install       Create symlinks in $INSTALL_DIR for every tool
@@ -140,41 +144,39 @@ cmd_status() {
 }
 
 # ---------- doctor ----------
-
-# check / check_warn collect into DOCTOR_CHECKS when --json is active,
-# print colored lines otherwise. A warn never fails the run.
-DOCTOR_JSON=0
-DOCTOR_CHECKS=()
-
-check() {
-    local label="$1" ok="$2" detail="${3:-}"
-    if (( DOCTOR_JSON )); then
-        DOCTOR_CHECKS+=("{\"label\":\"$(json_escape "$label")\",\"ok\":$(json_bool "$ok"),\"detail\":\"$(json_escape "$detail")\"}")
-        (( ok )) && return 0 || return 1
-    fi
-    if (( ok )); then
-        msg "$GREEN" "ok" "$label${detail:+ ${DIM}($detail)${RESET}}"
-        return 0
-    else
-        msg "$RED" "missing" "$label${detail:+ ${DIM}($detail)${RESET}}"
-        return 1
-    fi
-}
-
-check_warn() {
-    local label="$1" detail="${2:-}"
-    if (( DOCTOR_JSON )); then
-        DOCTOR_CHECKS+=("{\"label\":\"$(json_escape "$label")\",\"ok\":true,\"warning\":true,\"detail\":\"$(json_escape "$detail")\"}")
-        return 0
-    fi
-    msg "$YELLOW" "warn" "$label${detail:+ ${DIM}($detail)${RESET}}"
-}
+# check/check_warn/gate/doctor_finish live in lib/doctor.sh (shared plumbing
+# + the cross-system gate registry behind --all).
 
 cmd_doctor() {
-    local fail=0
+    local fail=0 run_all=0 run_live=0
     DOCTOR_JSON=0
     DOCTOR_CHECKS=()
-    [[ "${1:-}" == "--json" ]] && DOCTOR_JSON=1
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --json) DOCTOR_JSON=1 ;;
+            --all)  run_all=1 ;;
+            --live) run_all=1; run_live=1 ;;
+            -h|--help)
+                cat <<EOF
+Usage: tools doctor [--all] [--live] [--json]
+
+Verify environment, deps, completions, and installed symlinks.
+
+  --all     The cross-system health rollup: also run every system's own
+            gate — hq doctor (frontmatter validity + vault→HQ sync
+            freshness), hq schema --check (3-way contract parity), and
+            site doctor (seams, MCP install drift, security, contrast,
+            parity, types, audits). Exit 1 if any gate fails.
+  --live    Implies --all; additionally run the drift guards
+            (cf-dns / adguard / ts-acl diff) — live API reads that need
+            network and the age key.
+  --json    Machine-readable output (one object, "checks" array).
+EOF
+                return 0 ;;
+            *) die "usage" "unknown option: $1 (try -h)" 2 ;;
+        esac
+        shift
+    done
     (( DOCTOR_JSON )) || echo
 
     # Layout env vars
@@ -257,19 +259,22 @@ cmd_doctor() {
         fi
     done
 
-    if (( DOCTOR_JSON )); then
-        local ok=1; (( fail )) && ok=0
-        printf '{"ok":%s,"checks":[%s]}\n' "$(json_bool "$ok")" "$(json_join "${DOCTOR_CHECKS[@]}")"
-        return "$fail"
+    # The cross-system rollup: each system's own gate, from the registry in
+    # lib/doctor.sh. Exit codes are the contract; detail stays in each tool.
+    if (( run_all )); then
+        if (( ! DOCTOR_JSON )); then
+            echo
+            printf '  %ssystems%s\n' "$BOLD" "$RESET"
+        fi
+        doctor_gates || fail=1
+        if (( run_live )); then
+            doctor_live_gates || fail=1
+        else
+            check_warn "drift guards" "skipped — live API reads (network + age key); rerun with --live"
+        fi
     fi
 
-    echo
-    if (( fail )); then
-        printf '  %sdoctor%s    one or more checks failed\n\n' "$BOLD$RED" "$RESET"
-        return 1
-    else
-        printf '  %sdoctor%s    all checks passed\n\n' "$BOLD$GREEN" "$RESET"
-    fi
+    doctor_finish "$fail"
 }
 
 # ---------- install ----------

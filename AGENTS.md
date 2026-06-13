@@ -11,7 +11,11 @@ Small bash/zsh/node tools that share one look and feel.
 
 - **Solo-authored. Work on `main`.** No `Co-Authored-By` / "Claude" trailers in
   commits, no AI attribution in messages. Commit/push only when asked.
-- After meaningful vault-affecting work, the operator runs `hq sync`.
+- After meaningful vault-affecting work, the operator runs `hq sync`. This is
+  checked, not remembered: `hq sync` records the shipped manifest hash at
+  `${XDG_STATE_HOME:-~/.local/state}/severino-tools/hq-sync.json`, and
+  `vault status` / `hq doctor` report staleness from it (exact — prose-only
+  edits never flag).
 
 ## Layout
 
@@ -19,12 +23,18 @@ Small bash/zsh/node tools that share one look and feel.
   the completions, `tools doctor`, and CI all discover tools by globbing
   `bin/*`.
 - `lib/` — shared helpers flat (`common.sh`, `init.sh`, `key.sh`,
-  `drift.sh`); tool-specific support files under `lib/<tool>/` (e.g.
-  `lib/hq/`, `lib/site/`, `lib/doc-to-pdf/`). `drift.sh` is the shared core
-  for the drift-guard tools (`ts-acl`, `cf-dns`, `adguard`, `nginx`): they
+  `drift.sh`, `doctor.sh`); tool-specific support files under `lib/<tool>/`
+  (e.g. `lib/site/`, `lib/doc-to-pdf/`). `drift.sh` is the shared core for
+  the drift-guard tools (`ts-acl`, `cf-dns`, `adguard`, `nginx`): they
   provide `get_token`/`fetch_live`/`normalize` + config and call `drift_main`.
-  On a successful `pull`, `drift.sh` stamps the vault doc's `last_reviewed`
-  through the MCP (see below) — a pull is a review.
+  All block parsing is scoped to the mirror's own heading section. A
+  successful `pull` writes through the MCP's `update-mirror-block` — one
+  atomic write that replaces the block *and* stamps `last_reviewed` (a pull
+  is a review); it falls back to a scoped awk rewrite + `touch-reviewed` when
+  the MCP CLI or `$NOTES_HOME` isn't available. `doctor.sh` owns the
+  `check`/`check_warn`/`gate`/`doctor_finish` plumbing and the gate registry
+  behind `tools doctor --all` / `--live` (a gate's only contract: exit 0 when
+  healthy).
 - `config/` — per-tool defaults derived from layout env vars. Files ending
   `.example` are templates; their gitignored copies are user-specific.
 - `tests/` — bats suite. Hermetic: throwaway keys, tmpdirs, no Keychain.
@@ -49,11 +59,14 @@ Add new call sites through `svmc`, never inline — an inline call that forgets
 `SVMC_VAULT_PATH` silently falls back to the MCP's own configured default vault.
 
 The console script is on PATH (`uv tool install`). Existing subcommands:
-`touch-reviewed <relative-path>` (set `last_reviewed` to today — used by
-`drift.sh`; **fast path: skips the vault-cache rebuild the other writers pay
-for**), `prepare-writeup-publish`, `list-writeups`, `technology-catalog`,
-`validate-all-writeups`, `reorder-featured`, `update-writeup`, `hq-manifest`,
-`schema`, `doctor`. Each wraps the same-named tool in `server.py`, prints JSON,
+`touch-reviewed <relative-path>` (set `last_reviewed` to today) and
+`update-mirror-block <relative-path> --heading <h> [--touch-reviewed]`
+(stdin JSON → replace a fenced ```json mirror block, section-scoped, one
+atomic write — the drift guards' pull writer; **both are CLI-only fast paths:
+no MCP tool, no vault-cache rebuild**), plus `prepare-writeup-publish`,
+`list-writeups`, `technology-catalog`, `validate-all-writeups`,
+`reorder-featured`, `update-writeup`, `writeup-dashboard`,
+`apply-writeup-plan`, `hq-manifest`, `schema`, `doctor`. Each prints JSON and
 exits 0/1 on `ok`. `bin/site` is the reference caller; `lib/drift.sh:drift_touch_reviewed`
 is the minimal one (overridable via `$DRIFT_REVIEW_BIN` so bats can stub it).
 
@@ -113,7 +126,9 @@ unless the requested dev URL is already up.
 `tools check` runs everything CI runs: shebang-driven `bash -n`/`zsh -n`/
 `node --check`, shellcheck, the bats suite, and the bench assertions.
 `--no-bench` skips the slow step. `tools status --json` / `tools doctor --json`
-give machine-readable state.
+give machine-readable state. `tools doctor --all` is the cross-system rollup
+(hq doctor, hq schema --check, site doctor); `--live` adds the drift guards
+(network + age key).
 
 For a fast inner loop while editing one area:
 - `bats tests/<file>.bats` — hermetic, ~seconds. Run it after editing `bin/site`
@@ -133,6 +148,16 @@ For a fast inner loop while editing one area:
   the last statement in trap handlers under `set -e`.
 - `config/backup.sh` and `config/site.sh` are user-local; never commit or lint
   them in CI (non-reproducible).
+- **`die` (common.sh) prints to stdout** — called inside `$( )` the message is
+  captured, not shown. Redirect the call `>&2` when a function runs in command
+  substitution (see `drift_vault_block`).
+- **`${FLAG:+x}` is wrong for 0/1 flags** — `"0"` is non-empty, so it always
+  substitutes. This bypassed the decrypt Keychain cache on every call for
+  weeks. Use `if (( FLAG ))`. Related: `if ! cmd; then case $? in` is dead
+  code — `!` negates `$?` to 0; capture with `|| rc=$?` instead.
+- Keychain access in `lib/key.sh` goes through `$KEY_SECURITY_BIN`
+  (default `/usr/bin/security`) so bats can stub it — keep new call sites on
+  the variable.
 - Don't vendor external projects into `lib/` — tools that outgrow a script live
   in their own repo and are launched by path.
 - The tools repo often carries a large in-flight changeset. Don't bundle an

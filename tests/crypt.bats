@@ -85,3 +85,61 @@ setup() {
     [ "$status" -eq 0 ]
     [ "$output" = "the quick brown fox" ]
 }
+
+@test "decrypt uses the cached passphrase silently (regression: cache was bypassed)" {
+    # A passphrased key plus a stubbed Keychain that serves the passphrase.
+    # osascript is stubbed to fail, so if decrypt falls through to the prompt
+    # path — the ${NO_CACHE:+1} bug that always bypassed the cache — the
+    # unlock dies instead of hanging a dialog.
+    rm -f "$KEYS_HOME/file_key/file_key" "$KEYS_HOME/file_key/file_key.pub"
+    ssh-keygen -q -t ed25519 -N "sekret" -C "tools-test" \
+        -f "$KEYS_HOME/file_key/file_key"
+
+    local stubs="$BATS_TEST_TMPDIR/stubs"
+    mkdir -p "$stubs"
+    cat > "$stubs/security" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+    *find-generic-password*-w*) echo "sekret" ;;
+    *find-generic-password*)    : ;;
+esac
+STUB
+    printf '#!/usr/bin/env bash\nexit 1\n' > "$stubs/osascript"
+    chmod +x "$stubs/security" "$stubs/osascript"
+    export KEY_SECURITY_BIN="$stubs/security"
+    export PATH="$stubs:$PATH"
+
+    encrypt_bin note.md
+    run decrypt_bin note.md.age
+    [ "$status" -eq 0 ]
+    [ "$(cat note.md)" = "the quick brown fox" ]
+}
+
+@test "decrypt --no-cache skips the keychain and fails without a prompt source" {
+    # Inverse guard: with --no-cache the stubbed Keychain must NOT be asked,
+    # and with the prompt unavailable the unlock fails per-cause (exit 1,
+    # "no passphrase" — the case $? branches used to be unreachable).
+    rm -f "$KEYS_HOME/file_key/file_key" "$KEYS_HOME/file_key/file_key.pub"
+    ssh-keygen -q -t ed25519 -N "sekret" -C "tools-test" \
+        -f "$KEYS_HOME/file_key/file_key"
+
+    local stubs="$BATS_TEST_TMPDIR/stubs"
+    mkdir -p "$stubs"
+    cat > "$stubs/security" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+    *find-generic-password*-w*) echo "sekret"; echo "asked" >> "${SECURITY_LOG:?}" ;;
+esac
+STUB
+    printf '#!/usr/bin/env bash\nexit 1\n' > "$stubs/osascript"
+    chmod +x "$stubs/security" "$stubs/osascript"
+    export KEY_SECURITY_BIN="$stubs/security"
+    export SECURITY_LOG="$BATS_TEST_TMPDIR/security.log"
+    export PATH="$stubs:$PATH"
+
+    encrypt_bin note.md
+    run decrypt_bin --no-cache note.md.age
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"no passphrase provided"* ]]
+    [ ! -f "$SECURITY_LOG" ]
+}

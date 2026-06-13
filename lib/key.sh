@@ -26,21 +26,25 @@
 KEY_SERVICE="age-key-passphrase"
 KEY_ACCOUNT="${USER}"
 
+# Overridable so the bats suite can stub the Keychain (the regression where
+# decrypt silently bypassed the cache was untestable against the real one).
+KEY_SECURITY_BIN="${KEY_SECURITY_BIN:-/usr/bin/security}"
+
 UNLOCKED_KEY=""
 AGE_IDENTITY=""
 
 key_has() {
-    /usr/bin/security find-generic-password \
+    "$KEY_SECURITY_BIN" find-generic-password \
         -a "$KEY_ACCOUNT" -s "$KEY_SERVICE" >/dev/null 2>&1
 }
 
 key_get() {
-    /usr/bin/security find-generic-password \
+    "$KEY_SECURITY_BIN" find-generic-password \
         -a "$KEY_ACCOUNT" -s "$KEY_SERVICE" -w 2>/dev/null
 }
 
 key_store() {
-    /usr/bin/security add-generic-password \
+    "$KEY_SECURITY_BIN" add-generic-password \
         -a "$KEY_ACCOUNT" -s "$KEY_SERVICE" \
         -l "age key passphrase ($KEY_ACCOUNT)" \
         -j "SSH passphrase for age private key (managed by tools/key)" \
@@ -48,7 +52,7 @@ key_store() {
 }
 
 key_forget() {
-    /usr/bin/security delete-generic-password \
+    "$KEY_SECURITY_BIN" delete-generic-password \
         -a "$KEY_ACCOUNT" -s "$KEY_SERVICE" >/dev/null 2>&1
 }
 
