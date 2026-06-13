@@ -92,6 +92,9 @@ site_bin() {
 @test "publish-writeup runs the authoritative batch gate once" {
     export SITE_SKIP_MCP_DRIFT_CHECK=1
     export HQ_TEST_EXIT=1
+    # publish-writeup is a deploy; this test exercises the publish flow, so it
+    # takes the documented non-interactive bypass (the same one CI uses).
+    export TOOLS_ASSUME_YES=1
     mkdir -p "$NOTES_HOME/05 Writeups/example"
 
     run site_bin publish-writeup example
@@ -100,4 +103,19 @@ site_bin() {
     [ "$(grep -c '^validate-all-writeups$' "$MCP_CALL_LOG")" -eq 1 ]
     ! grep -q '^prepare-writeup-publish$' "$MCP_CALL_LOG"
     [[ "$output" == *"all published writeups pass (including example)"* ]]
+}
+
+@test "deploy command is gated non-interactively without TOOLS_ASSUME_YES" {
+    # The blast-radius gate: a deploy (publish-writeup) must fail closed when run
+    # non-interactively without the explicit bypass — before any flow runs, so
+    # the MCP batch gate is never even reached.
+    export SITE_SKIP_MCP_DRIFT_CHECK=1
+    mkdir -p "$NOTES_HOME/05 Writeups/example"
+
+    run site_bin publish-writeup example
+
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"deploy"* ]]
+    [[ "$output" == *"TOOLS_ASSUME_YES=1"* ]]
+    [ ! -f "$MCP_CALL_LOG" ]
 }
