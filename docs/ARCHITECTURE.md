@@ -10,7 +10,7 @@ the contract that ties them together. House rules for editing live in
 
 | Dir | What |
 |---|---|
-| `bin/` | Exactly one executable per tool, nothing else. `tools install`, the completions, `tools doctor`, and CI discover tools by globbing `bin/*`. |
+| `bin/` | Exactly one executable per tool, nothing else. `tools install`, `tools describe`, `tools doctor`, and CI discover tools by globbing `bin/*`. |
 | `lib/` | Shared helpers flat (`common.sh`, `init.sh`, `key.sh`, `describe.sh`, `drift.sh`, `doctor.sh`, `tui.mjs`); tool-specific support under `lib/<tool>/`. |
 | `config/` | Per-tool defaults from layout env vars. `*.example` are templates; their gitignored copies are user-specific. |
 | `tests/` | Hermetic bats suite — throwaway keys, tmpdirs, no Keychain. |
@@ -33,6 +33,10 @@ self-describing the moment it defines `describe_spec` and puts
 `desc_help_intercept "$@"` above its dispatch `case`. The `case` after it is the
 only thing not derivable from the spec — pure command→action wiring — and
 `describe.bats` guards that the two sets can't drift.
+
+`tools generate` consumes the federated JSON to regenerate the zsh completion
+file and README command index. `tools check` validates every emitter against
+`docs/describe.schema.json` and fails when either generated artifact is stale.
 
 The v3 contract adds an **effect** to every command — a blast-radius class an
 agent risk-gates on before running. See

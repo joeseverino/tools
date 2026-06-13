@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jseverino.com/schemas/tools-describe-v3.json",
+  "title": "Severino tools describe contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ok",
+    "schema_version",
+    "name",
+    "description",
+    "effect",
+    "global_options",
+    "positionals",
+    "paras",
+    "examples",
+    "commands"
+  ],
+  "properties": {
+    "ok": { "const": true },
+    "schema_version": { "const": 3 },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "effect": { "$ref": "#/$defs/effect" },
+    "network": { "const": true },
+    "interactive": { "const": true },
+    "global_options": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/option" }
+    },
+    "positionals": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/positional" }
+    },
+    "paras": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "examples": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/example" }
+    },
+    "commands": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/command" }
+    }
+  },
+  "$defs": {
+    "effect": {
+      "enum": ["read", "local_write", "vault_write", "remote_write", "deploy"]
+    },
+    "flags": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^-"
+      }
+    },
+    "choices": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "option": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "positional", "required", "help", "flags", "takes_value"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^-" },
+        "positional": { "const": false },
+        "required": { "const": false },
+        "help": { "type": "string" },
+        "flags": { "$ref": "#/$defs/flags" },
+        "takes_value": { "type": "boolean" },
+        "repeatable": { "const": true },
+        "choices": { "$ref": "#/$defs/choices" }
+      }
+    },
+    "positional": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "positional", "required", "help"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "positional": { "const": true },
+        "required": { "type": "boolean" },
+        "help": { "type": "string" },
+        "variadic": { "const": true },
+        "repeatable": { "const": true },
+        "choices": { "$ref": "#/$defs/choices" }
+      }
+    },
+    "example": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "comment"],
+      "properties": {
+        "command": { "type": "string", "minLength": 1 },
+        "comment": { "type": "string" }
+      }
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "summary", "args", "effect", "paras", "examples"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "summary": { "type": "string" },
+        "args": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              { "$ref": "#/$defs/option" },
+              { "$ref": "#/$defs/positional" }
+            ]
+          }
+        },
+        "effect": { "$ref": "#/$defs/effect" },
+        "network": { "const": true },
+        "interactive": { "const": true },
+        "paras": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "examples": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/example" }
+        },
+        "delegates": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

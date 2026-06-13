@@ -71,7 +71,7 @@ command's options, args, prose, examples, and effect line.
 ```
 
 `<opt>`/`<arg>` = `{ name, positional, required, help, flags?, choices?,
-takes_value?, repeatable? }`. Output is byte-deterministic (no timestamps), so a
+takes_value?, repeatable?, variadic? }`. Output is byte-deterministic (no timestamps), so a
 guard can diff it. v2 added per-scope `paras` / `examples` / `delegates`; v3 added
 the effect triple below.
 
@@ -126,12 +126,20 @@ folds in sibling repos that emit the same contract — today
 `severino-vault-mcp describe`, which carries the shared `schema_version` and a
 per-command `effect` (its vault writers are `vault_write`, the rest `read`).
 
+`tools generate` is another render-many consumer: it derives zsh completions
+and the README command index from the federated document. CI validates every
+tool document against `docs/describe.schema.json` and checks those generated
+files for drift.
+
 ## How it can't drift
 
 - **spec ↔ dispatch parity** — every declared command has a dispatch arm and
   vice versa (`describe.bats`).
 - **effect enum** — every emitted `effect` is a valid class; `network` /
   `interactive` only ever appear as `true` (`describe.bats`).
+- **JSON Schema** — every real tool validates against the committed v3 schema.
+- **generated consumers** — completions and the README command index must match
+  the current aggregate (`tools generate --check`).
 - **round-trip** — every JSON option/command appears in some help view.
 - **bash/zsh byte-parity** — `lib/describe.sh` runs identically under both
   (no numeric array indexing, no `read -ra`), so the lone zsh tool (`dns-test`)

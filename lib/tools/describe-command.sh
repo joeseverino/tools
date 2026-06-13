@@ -1,0 +1,86 @@
+# shellcheck shell=bash
+# Cross-repo command-surface aggregation for `tools describe`.
+
+cmd_describe() {
+    local pretty=0 repos=0 tui=0 only="" only_cmd=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --pretty)   pretty=1; shift ;;
+            --repos)    repos=1; shift ;;
+            --tui)      tui=1; shift ;;
+            -*)         die_unknown option "$1" describe ;;
+            *)          if [[ -z "$only" ]]; then only="$1"; else only_cmd="$1"; fi; shift ;;
+        esac
+    done
+
+    if (( tui )); then
+        [[ -z "$only" ]] || die "usage" "--tui describes the whole toolchain; drop the tool name ('$only' stays '$only -h')" 2
+        if (( repos )); then
+            exec node "$TOOLS_HOME/lib/tools/describe-tui.mjs" --repos
+        else
+            exec node "$TOOLS_HOME/lib/tools/describe-tui.mjs"
+        fi
+    fi
+
+    if [[ -n "$only" && -n "$only_cmd" ]]; then
+        [[ -x "$TOOLS_HOME/bin/$only" ]] || die "error" "no such tool: $only"
+        "$TOOLS_HOME/bin/$only" --describe \
+            | TOOLS_DESC_CMD="$only_cmd" TOOLS_DESC_PRETTY="$pretty" python3 -c '
+import json, os, sys
+want = os.environ["TOOLS_DESC_CMD"]
+doc = json.load(sys.stdin)
+cmd = next((c for c in doc.get("commands", []) if c["name"] == want), None)
+if cmd is None:
+    names = ", ".join(c["name"] for c in doc.get("commands", [])) or "(none)"
+    print(json.dumps({"ok": False,
+        "error": "%s has no command %r; commands: %s" % (doc.get("name"), want, names)}))
+    sys.exit(1)
+out = {"ok": True, "schema_version": doc.get("schema_version"), "tool": doc.get("name")}
+out.update(cmd)
+print(json.dumps(out, indent=2) if os.environ["TOOLS_DESC_PRETTY"] == "1" else json.dumps(out))
+'
+        return "${PIPESTATUS[1]}"
+    fi
+
+    if [[ -n "$only" ]]; then
+        [[ -x "$TOOLS_HOME/bin/$only" ]] || die "error" "no such tool: $only"
+        if (( pretty )); then
+            "$TOOLS_HOME/bin/$only" --describe --pretty
+        else
+            "$TOOLS_HOME/bin/$only" --describe
+        fi
+        return $?
+    fi
+
+    local objs=() name out
+    for name in "${TOOL_NAMES[@]}"; do
+        if out=$("$TOOLS_HOME/bin/$name" --describe 2>/dev/null) && [[ "$out" == \{* ]]; then
+            objs+=("$out")
+        else
+            objs+=("$(printf '{"ok":false,"name":"%s","error":"%s"}' \
+                "$(json_escape "$name")" "tool did not emit a describe contract")")
+        fi
+    done
+
+    local siblings=""
+    if (( repos )); then
+        local sib_bins=(severino-vault-mcp) sib_objs=() bin
+        for bin in "${sib_bins[@]}"; do
+            if command -v "$bin" >/dev/null 2>&1 \
+                && out=$("$bin" describe 2>/dev/null) && [[ "$out" == \{* ]]; then
+                sib_objs+=("$out")
+            fi
+        done
+        siblings=$(printf ',"siblings":[%s]' "$(json_join "${sib_objs[@]:-}")")
+    fi
+
+    local body
+    body=$(printf '{"ok":true,"schema_version":%d,"repo":"tools","tools":[%s]%s}' \
+        "$DESCRIBE_SCHEMA_VERSION" "$(json_join "${objs[@]}")" "$siblings")
+
+    if (( pretty )) && command -v python3 >/dev/null 2>&1; then
+        printf '%s\n' "$body" | python3 -m json.tool
+    else
+        printf '%s\n' "$body"
+    fi
+}

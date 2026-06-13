@@ -29,9 +29,9 @@ Every tool emits its command surface as one structured JSON document — the
 - **Everything per-command is spec-derived — zero hand-written sub-help, zero
   help heredocs in the toolchain.** After a `desc_cmd`, declare its flags
   (`desc_opt`/`desc_pos`), prose (`desc_para`), and examples (`desc_example`);
-  all are **scoped to that command**, so the focused `-h`, the JSON (flags/args
-  only — prose/examples stay human-help), and `--tui` light up from the one
-  declaration. `desc_pos … "{a,b,c}"` gives a positional a fixed choice set.
+  all are **scoped to that command**, so the focused `-h`, JSON, and `--tui`
+  light up from the one declaration. `desc_pos … "{a,b,c}"` gives a positional
+  a fixed choice set; `+variadic` rides into JSON for completion consumers.
   Keep the data model honest: structured → structured primitives
   (flags`→desc_opt`, args`→desc_pos`, examples`→desc_example`), `desc_para` for
   genuine prose only; interactive UIs (the `site manage` / compare viewers)
@@ -75,7 +75,8 @@ Every tool emits its command surface as one structured JSON document — the
   global_options:[<opt>], positionals:[<arg>], paras:[<prose>],
   examples:[{command,comment}], commands:[{name, summary, args:[<opt>|<arg>],
   effect, network?, interactive?, paras:[<prose>], examples:[…],
-  delegates?:"<owner>"}] }`. v2 added per-scope `paras`/`examples` and
+  delegates?:"<owner>"}] }`, with `variadic:true` on variadic positionals. v2
+  added per-scope `paras`/`examples` and
   `delegates`; v3 added the **effect triple** (always emits `effect`; the lean
   boolean tags only when true) so an agent reads a command's intent, usage,
   external flag-ownership, *and blast radius* from the JSON alone. `desc_para`,
@@ -222,8 +223,9 @@ it (installed fingerprint vs source).
   resolved by upward `node_modules` lookup. **Node is the JSON tool in `bin/site`**
   (URL-encoding, payloads, MCP-output parsing); `jq` belongs to the drift
   guards in `lib/drift.sh`. Keep each file on one parser.
-- Adding a tool: drop it in `bin/`, add it to the `#compdef` line in
-  `completions/_tools-suite` (doctor flags drift), document it in README.
+- Adding a tool: drop it in `bin/`, then run `tools generate`. The generated
+  `completions/_tools-suite` and README command index both consume
+  `--describe`; never hand-edit either generated block.
 
 ## Site visual comparison
 
@@ -242,7 +244,9 @@ unless the requested dev URL is already up.
 ## Verify (do this before claiming a change works)
 
 `tools check` runs everything CI runs: shebang-driven `bash -n`/`zsh -n`/
-`node --check`, shellcheck, the bats suite, and the bench assertions.
+`node --check`, shellcheck, JSON Schema validation for every describe
+contract, generated-surface drift checks, the bats suite, and the bench
+assertions.
 `--no-bench` skips the slow step. `tools status --json` / `tools doctor --json`
 give machine-readable state. `tools doctor --all` is the cross-system rollup
 (hq doctor, hq schema --check, site doctor); `--live` adds the drift guards

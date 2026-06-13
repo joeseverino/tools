@@ -39,7 +39,7 @@
 #                  delegates?: "<owner>" } ] }    # delegates = flags owned elsewhere
 #
 #   <opt>/<arg> = { name, positional, required, help,
-#                   flags?, choices?, takes_value?, repeatable? }
+#                   flags?, choices?, takes_value?, repeatable?, variadic? }
 #   <example>   = { command, comment }
 #
 # v2 added paras / examples / delegates so an agent can read a command's intent,
@@ -570,10 +570,11 @@ _describe_choices_json() {
 }
 
 # _describe_arg_json <positional:0|1> <name> <required:0|1> <help> \
-#                    [short] [long] [metavar] [choices] [repeat]
+#                    [short] [long] [metavar] [choices] [repeat] [variadic]
 _describe_arg_json() {
     local positional="$1" name="$2" required="$3" help="$4"
     local short="${5:-}" long="${6:-}" metavar="${7:-}" choices="${8:-}" repeat="${9:-0}"
+    local variadic="${10:-0}"
     local out
     out=$(printf '{"name":"%s","positional":%s,"required":%s,"help":"%s"' \
         "$(json_escape "$name")" "$(json_bool "$positional")" \
@@ -591,6 +592,7 @@ _describe_arg_json() {
     fi
     [[ -n "$choices" ]] && out+=$(_describe_choices_json "$choices")
     (( repeat )) && out+=',"repeatable":true'
+    (( variadic )) && out+=',"variadic":true'
     out+='}'
     printf '%s' "$out"
 }
@@ -603,7 +605,7 @@ _describe_args_for_scope() {
         for rec in "${_D_POS[@]}"; do
             IFS="$_DSEP" read -r scope name required variadic choices help <<<"$rec"
             [[ "$scope" == "$want" ]] || continue
-            item="$(_describe_arg_json 1 "$name" "$required" "$help" "" "" "" "$choices")"
+            item="$(_describe_arg_json 1 "$name" "$required" "$help" "" "" "" "$choices" 0 "$variadic")"
             items="${items:+$items,}$item"
         done
     fi
@@ -642,7 +644,7 @@ _describe_global_pos_json() {
     for rec in "${_D_POS[@]}"; do
         IFS="$_DSEP" read -r scope name required variadic choices help <<<"$rec"
         [[ -z "$scope" ]] || continue
-        item="$(_describe_arg_json 1 "$name" "$required" "$help" "" "" "" "$choices")"
+        item="$(_describe_arg_json 1 "$name" "$required" "$help" "" "" "" "$choices" 0 "$variadic")"
         items="${items:+$items,}$item"
     done
     printf '%s' "$items"

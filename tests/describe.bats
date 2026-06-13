@@ -132,6 +132,7 @@ o=json.load(sys.stdin)
 # top-level positional
 p={x["name"]:x for x in o["positionals"]}
 assert p["file"]["positional"] is True and p["file"]["required"] is True
+assert p["file"]["variadic"] is True
 # command + its scoped args
 cmd={c["name"]:c for c in o["commands"]}
 assert "run" in cmd
@@ -275,6 +276,17 @@ for c in o.get("commands",[]):
     done
 }
 
+@test "every real tool validates against the committed JSON Schema" {
+    run bash -c '"$TOOLS_HOME/bin/tools" describe | node "$TOOLS_HOME/lib/tools/validate-describe.mjs"'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"valid describe contracts: 17"* ]]
+}
+
+@test "contract-derived completions and README command index are current" {
+    run "$TOOLS_HOME/bin/tools" generate --check
+    [ "$status" -eq 0 ]
+}
+
 @test "tools describe <tool> <command> projects one command's contract (token-minimal AI path)" {
     run "$TOOLS_HOME/bin/tools" describe hq restart
     [ "$status" -eq 0 ]
@@ -367,7 +379,7 @@ path = sys.argv[1]
 src = open(path).read()
 spec = {c["name"] for c in
         json.loads(subprocess.run([path, "--describe"], capture_output=True, text=True).stdout)["commands"]}
-block = src[src.index('desc_help_intercept "$@"'):].split("\nesac", 1)[0]
+block = src[src.rindex('desc_help_intercept "$@"'):].split("\nesac", 1)[0]
 arms = set(re.findall(r'^\s*([a-z][a-z0-9-]*)\)\s', block, re.M))
 if spec != arms:
     print(f"{os.path.basename(path)}: spec-only={sorted(spec-arms)} arm-only={sorted(arms-spec)}")
