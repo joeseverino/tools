@@ -189,7 +189,7 @@ before it runs anything, instead of guessing from flags or reading handlers.
 
 ## Re-rendering the diagrams
 
-The `.mmd` sources in `docs/diagrams/` render to committed PNGs via
-`docs/diagrams/render.sh` (pre-rendered because GitHub's live mermaid clips node
-text in Safari). Same renderer as the canonical one in Joe's profile repo:
-<https://github.com/joeseverino/joeseverino/blob/main/diagrams/render.sh>.
+The `.mmd` sources in `docs/diagrams/` render to committed PNGs with
+`diagram docs/diagrams/` (pre-rendered because GitHub's live Mermaid clips node
+text in Safari). The renderer is the Cordon-conformant `diagram` command in this
+toolchain.

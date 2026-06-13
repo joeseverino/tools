@@ -61,6 +61,7 @@ tools/
     # Authoring
     remember    # Write a Claude memory file + MEMORY.md index entry in one shot.
     doc-to-pdf  # Render a Markdown file (with Mermaid) to PDF via the system Chrome, offline.
+    diagram     # Render Mermaid .mmd sources to neighboring PNG files.
   .github/               # CI workflows and repository automation
   archive/               # retired scripts kept for reference
   bench/                 # measured claims asserted in CI
@@ -577,6 +578,29 @@ Usage: `doc-to-pdf <input.md> [output.pdf]`
 | `[output.pdf]` | Output path (default: <input>.pdf beside the input). |
 
 Effect: `local_write`
+
+#### `diagram`
+
+Render Mermaid .mmd sources to neighboring PNG files.
+
+Each path may be an .mmd file or a directory. Directories render their top-level .mmd files.
+
+Rendering uses Mermaid CLI 11.15.0 with the toolchain's established settings: PNG output, 1100px width, 2x scale, and a white background.
+
+Usage: `diagram <path>...`
+
+| Argument | Description |
+|---|---|
+| `<path>...` | Mermaid source file or directory |
+
+Effect: `local_write + network`
+
+**Examples**
+
+```sh
+diagram docs/diagrams/
+diagram docs/diagrams/architecture.mmd
+```
 <!-- END GENERATED CLI REFERENCE -->
 
 ### tools
