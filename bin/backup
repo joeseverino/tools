@@ -6,19 +6,15 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" backup "$@"
 
 describe_spec() {
     desc_tool "backup" "Mirror the items in config/backup.sh into \$BACKUPS_HOME."
+    desc_inventory "Backup" 70
     desc_effect local_write
     desc_synopsis "backup [options]"
-    desc_para "Mirror each tracked file into \$BACKUPS_HOME using the mapping in"
-    desc_para "config/backup.sh. Uses rsync, so permissions, xattrs, and timestamps"
-    desc_para "are preserved and unchanged files are skipped at the byte level."
-    desc_para ""
-    desc_para "If \$BACKUPS_HOME is a git repo, an auto-commit is made after the copy"
-    desc_para "so each backup run leaves a point-in-time entry in the local history."
+    desc_para "Mirror each tracked file into \$BACKUPS_HOME using the mapping in config/backup.sh. Uses rsync, so permissions, xattrs, and timestamps are preserved and unchanged files are skipped at the byte level."
+    desc_para "If \$BACKUPS_HOME is a git repo, an auto-commit is made after the copy so each backup run leaves a point-in-time entry in the local history."
+    desc_para "Add or remove items by editing tools/config/backup.sh."
     desc_opt -n --dry-run -- "Show what would be copied; do not write"
     desc_opt --no-commit  -- "Skip the auto-commit step"
     desc_env BACKUPS_HOME -- "Read from ~/.zshrc; backup destination root"
-    desc_para ""
-    desc_para "Add or remove items by editing tools/config/backup.sh."
 }
 
 DRY=0

@@ -16,6 +16,7 @@ the machine JSON, so they can never drift (there is no prose to parse). See
 ```bash
 describe_spec() {
     desc_tool "hq" "Sync vault docs into Severino HQ and operate the deploy."
+    desc_inventory "Integrations" 130       # aggregate group + workflow order
     desc_synopsis "hq <command>"
 
     desc_cmd restart -- "docker compose restart app — no rebuild, no migrations"
@@ -31,6 +32,7 @@ describe_spec() {
 | Helper | Declares | Scope |
 |---|---|---|
 | `desc_tool` / `desc_synopsis` | name, one-liner, usage line | tool |
+| `desc_inventory` | aggregate group + globally unique workflow order | tool |
 | `desc_cmd` | a subcommand (opens its scope) | — |
 | `desc_opt` / `desc_pos` | a flag / a positional (`+repeat`, `+optional`, `+variadic`, `"{a,b,c}"`) | current command |
 | `desc_effect` | blast radius + `+network` / `+interactive` | current command |
@@ -43,22 +45,31 @@ prose/examples/effect *before the first `desc_cmd`*. One dispatch line —
 `desc_help_intercept "$@"` — renders the whole help + machine surface; the `case`
 after it is pure wiring.
 
+A `desc_para` is **one logical paragraph stored as a single unwrapped string** —
+never a hard-wrapped source line. Every renderer (`-h`, README, the `--tui`
+expand pane) reflows it to its own width, so no presentation line-breaks are
+baked into the source of truth; declare one `desc_para` per paragraph (renderers
+space them) rather than an empty `desc_para ""` separator. Validation fails
+closed on a paragraph that ends mid-sentence or is empty, so the data stays
+reflowable as the repo scales.
+
 ## Three tiers, cleanly separated
 
 | Tier | Command | For |
 |---|---|---|
 | `-h` | `<tool> -h`, `<tool> <cmd> -h` | humans — clean wrapped text |
 | `--describe` | `<tool> --describe`, `tools describe [<tool> [<cmd>]]` | agents / guards — JSON |
-| `--tui` | `tools describe --tui` | humans — interactive explorer |
+| `--tui` | `tools describe --tui` (alias `tools tui`) | humans — interactive explorer; `e` expands a command's full prose + examples |
 
 The main `-h` stays a scannable git-style command list with a
 `Run '<tool> <cmd> -h'` pointer; the focused `<cmd> -h` renders that one
 command's options, args, prose, examples, and effect line.
 
-## The JSON contract (`schema_version 3`)
+## The JSON contract (`schema_version 4`)
 
 ```jsonc
-{ "ok": true, "schema_version": 3, "name": "hq", "description": "…",
+{ "ok": true, "schema_version": 4, "name": "hq", "description": "…",
+  "group": "Integrations", "order": 130,
   "effect": "read",                         // tool-level (meaningful for leaf tools)
   "global_options": [ <opt> ],
   "positionals":    [ <arg> ],
@@ -70,10 +81,11 @@ command's options, args, prose, examples, and effect line.
                    "delegates": "<owner>" } ] }
 ```
 
-`<opt>`/`<arg>` = `{ name, positional, required, help, flags?, choices?,
-takes_value?, repeatable? }`. Output is byte-deterministic (no timestamps), so a
-guard can diff it. v2 added per-scope `paras` / `examples` / `delegates`; v3 added
-the effect triple below.
+`<opt>`/`<arg>` = `{ name, positional, required, help, flags?, metavar?,
+choices?, takes_value?, repeatable?, variadic? }`. Output is byte-deterministic (no timestamps), so a
+guard can diff it. v2 added per-scope `paras` / `examples` / `delegates`; v3
+added the effect triple below; v4 added required inventory `group` / `order`
+plus explicit option metavariables and variadic positionals.
 
 ## v3 — effect: the risk signal an agent can't read off the flags
 
@@ -110,7 +122,7 @@ single time in `drift_describe_commands` (show/diff `read +network`, pull
 
 ```console
 $ tools describe hq restart
-{"ok":true,"schema_version":3,"tool":"hq","name":"restart","args":[],
+{"ok":true,"schema_version":4,"tool":"hq","name":"restart","args":[],
  "effect":"deploy","network":true,"paras":[],"examples":[]}
 ```
 
@@ -123,8 +135,13 @@ about to act on instead of the whole surface. An unknown command returns
 
 `tools describe` federates every `bin/*` emitter into one document; `--repos`
 folds in sibling repos that emit the same contract — today
-`severino-vault-mcp describe`, which carries the shared `schema_version` and a
-per-command `effect` (its vault writers are `vault_write`, the rest `read`).
+`severino-vault-mcp describe`. Federation accepts sibling contract versions;
+the local v4 schema governs the tools rendered into this repo's generated files.
+
+`tools generate` is another render-many consumer: it derives zsh completions
+and the README CLI reference/inventory from the local aggregate. CI validates
+every tool document against `schemas/describe-v4.schema.json` and checks those
+generated files for drift.
 
 ## How it can't drift
 
@@ -132,6 +149,11 @@ per-command `effect` (its vault writers are `vault_write`, the rest `read`).
   vice versa (`describe.bats`).
 - **effect enum** — every emitted `effect` is a valid class; `network` /
   `interactive` only ever appear as `true` (`describe.bats`).
+- **JSON Schema** — every real tool validates against the committed v4 schema.
+- **inventory order** — every tool has a group and globally unique order;
+  duplicate positions fail validation before any surface is rendered.
+- **generated consumers** — completions and the README reference/inventory must match
+  the current aggregate (`tools generate --check`).
 - **round-trip** — every JSON option/command appears in some help view.
 - **bash/zsh byte-parity** — `lib/describe.sh` runs identically under both
   (no numeric array indexing, no `read -ra`), so the lone zsh tool (`dns-test`)

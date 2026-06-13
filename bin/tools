@@ -17,6 +17,8 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 [[ -n "${KEYS_HOME-}"    ]] && source "$TOOLS_HOME/config/crypt.sh"
 source "$TOOLS_HOME/lib/key.sh"
 source "$TOOLS_HOME/lib/doctor.sh"
+# shellcheck source=lib/tools/describe.sh
+source "$TOOLS_HOME/lib/tools/describe.sh"
 
 TOOL_NAMES=()
 for file in "$TOOLS_HOME/bin"/*; do
@@ -28,6 +30,7 @@ INSTALL_DIR="${TOOLS_INSTALL_DIR:-$HOME/.local/bin}"
 
 describe_spec() {
     desc_tool "tools" "Umbrella command for the personal CLI toolchain."
+    desc_inventory "Core" 10
     desc_synopsis "tools <command> [options]"
 
     desc_cmd status   -- "One-screen health check across vault, inbox, backup, keys"
@@ -63,9 +66,19 @@ describe_spec() {
     desc_pos command +optional -- "With a tool, project its contract to one command — the token-minimal AI path (tools describe hq restart)"
     desc_opt --pretty -- "Indent the JSON for reading (default: compact, diff-stable)"
     desc_opt --repos  -- "Also fold in sibling repos' emitters (severino-vault-mcp)"
-    desc_opt --tui    -- "Browse the whole toolchain in a full-screen explorer (aggregate only; / filters, Enter copies an invocation)"
+    desc_opt --tui    -- "Browse the whole toolchain in a full-screen explorer (aggregate only; / filters, Enter copies an invocation). Shorthand: 'tools tui'"
     desc_example "tools describe hq restart" -- "one command's contract — effect, args, examples"
-    desc_example "tools describe --tui" -- "interactive explorer over the whole toolchain"
+    desc_example "tools tui" -- "interactive explorer over the whole toolchain (alias of describe --tui)"
+
+    desc_cmd tui -- "Open the full-screen command-surface explorer (shorthand for 'describe --tui')"
+    desc_effect read +interactive
+    desc_opt --repos -- "Also fold in sibling repos' emitters (severino-vault-mcp)"
+    desc_para "The human tier of the emit-once contract: a two-pane explorer over every tool and command, with / to filter, e to expand the selected command's full prose + examples, and Enter to copy a ready-to-paste invocation."
+
+    desc_cmd generate -- "Regenerate contract-derived completions and README reference/inventory"
+    desc_effect local_write
+    desc_pos target +optional "{all,completions,readme}" -- "Generated surface (default: all)"
+    desc_opt --check -- "Fail when generated files are stale; do not write"
 
     desc_env TOOLS_HOME        -- "Read from ~/.zshrc; root of this repo"
     desc_env TOOLS_INSTALL_DIR -- "Override install target (default: ~/.local/bin)"
@@ -232,18 +245,6 @@ cmd_doctor() {
         check_warn "node" "not installed — doc-to-pdf and site manage/compare need it"
     fi
 
-    # Completions drift — every tool in bin/ should be on the #compdef line.
-    local compdef missing_comp=""
-    compdef="$(head -1 "$TOOLS_HOME/completions/_tools-suite" 2>/dev/null || echo "")"
-    for name in "${TOOL_NAMES[@]}"; do
-        [[ " ${compdef#\#compdef } " == *" $name "* ]] || missing_comp+="$name "
-    done
-    if [[ -z "$missing_comp" ]]; then
-        check "completions cover bin/" 1 "${#TOOL_NAMES[@]} tools"
-    else
-        check "completions cover bin/" 0 "missing from #compdef: ${missing_comp% }" || fail=1
-    fi
-
     # Command-surface contract — every tool must self-describe (the emit-once
     # contract: -h and --describe both render from one describe_spec, so they
     # can't drift; this catches a tool that forgot to wire --describe). Layout
@@ -341,6 +342,22 @@ cmd_install() {
     esac
 }
 
+cmd_generate() {
+    local target="all" check_only=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --check) check_only=1 ;;
+            all|completions|readme) target="$1" ;;
+            -*) die_unknown option "$1" generate ;;
+            *) die_unknown target "$1" generate ;;
+        esac
+        shift
+    done
+    local args=("$target")
+    (( check_only )) && args+=(--check)
+    node "$TOOLS_HOME/lib/tools/generate-surfaces.mjs" "${args[@]}"
+}
+
 # ---------- check (the CI suite, runnable locally) ----------
 # CI calls `tools check` so the definition of "passing" lives in exactly
 # one place. Tools are discovered by shebang — adding a file to bin/ adds
@@ -412,6 +429,26 @@ cmd_check() {
         check "node --check" 0 "node not installed" || fail=1
     fi
 
+    # Contract schema + generated consumers. The validator checks every real
+    # emitter against schemas/describe-v4.schema.json; the generator check makes
+    # completions and the README reference/inventory reproducible build artifacts.
+    if command -v node >/dev/null && [[ -d "$TOOLS_HOME/node_modules/ajv" ]]; then
+        if err=$("$TOOLS_HOME/bin/tools" describe | node "$TOOLS_HOME/lib/tools/validate-describe.mjs" 2>&1); then
+            check "describe schema" 1 "$err"
+        else
+            printf '%s\n' "$err" | sed 's/^/    /'
+            check "describe schema" 0 "validation errors above" || fail=1
+        fi
+        if err=$("$TOOLS_HOME/bin/tools" generate --check 2>&1); then
+            check "generated surfaces" 1 "completions + README current"
+        else
+            printf '%s\n' "$err" | sed 's/^/    /'
+            check "generated surfaces" 0 "run: tools generate" || fail=1
+        fi
+    else
+        check "describe schema" 0 "run npm ci (Ajv is required)" || fail=1
+    fi
+
     # Lint tracked shell sources only; local config/*.sh copies are
     # user-specific and would make the check non-reproducible.
     if command -v shellcheck >/dev/null; then
@@ -425,7 +462,7 @@ cmd_check() {
         # New files (a new lib helper or config/<tool>.sh) are covered
         # automatically — no hand-editing here.
         while IFS= read -r f; do
-            sc_targets+=("$f")
+            [[ -f "$f" ]] && sc_targets+=("$f")
         done < <(git ls-files --cached --others --exclude-standard \
                      'lib/*.sh' 'config/*.sh' 'config/*.sh.example')
         if err=$(shellcheck -x "${sc_targets[@]}" 2>&1); then
@@ -489,9 +526,20 @@ cmd_new() {
     [[ -e "$target" ]] && die "error" "bin/$name already exists"
     # Env-var prefix for config vars: cf-dns → CF_DNS, adguard → ADGUARD.
     local prefix; prefix=$(printf '%s' "$name" | tr '[:lower:]-' '[:upper:]_')
+    local order
+    order=$("$TOOLS_HOME/bin/tools" describe | node -e '
+let input = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", chunk => input += chunk);
+process.stdin.on("end", () => {
+  const tools = JSON.parse(input).tools || [];
+  const max = Math.max(0, ...tools.map(tool => Number(tool.order) || 0));
+  process.stdout.write(String(Math.ceil(max / 10) * 10 + 10));
+});
+')
 
     if (( drift )); then
-        new_drift "$name" "$prefix" "$target"
+        new_drift "$name" "$prefix" "$target" "$order"
         return 0
     fi
 
@@ -506,6 +554,7 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 # both this tool's -h text and its --describe JSON from this one declaration.
 describe_spec() {
     desc_tool "__NAME__" "One-line description of __NAME__."
+    desc_inventory "Other" __ORDER__
     desc_synopsis "__NAME__ [options] <args>"
     # Declare blast radius if this tool does anything but read (default is read):
     #   desc_effect local_write             # writes local files
@@ -516,37 +565,32 @@ describe_spec() {
     # put desc_effect right after each desc_cmd; here (leaf tool) it is the tool's.
     # desc_opt -x --example METAVAR -- "what the flag does"
     # desc_pos arg -- "what the positional is"
+    # desc_para "One logical paragraph as a single unwrapped string; renderers
+    #            reflow it. One desc_para per paragraph — never split a sentence."
 }
 
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --describe) describe_emit "$@"; exit 0 ;;
-        -h|--help)  usage; exit 0 ;;
-        --)         shift; break ;;
-        -*)         die_unknown option "$1" ;;
-        *)          break ;;
-    esac
-done
+desc_help_intercept "$@"
 
 echo
 msg "$GREEN" "todo" "implement __NAME__"
 echo
 EOF
     sed -i '' "s/__NAME__/$name/g" "$target"
+    sed -i '' "s/__ORDER__/$order/g" "$target"
     chmod +x "$target"
 
     echo
     msg "$GREEN" "created" "bin/$name"
     msg "$DIM"   "next"    "1. implement it (tool-specific files go in lib/$name/)"
-    msg "$DIM"   "next"    "2. add $name to the #compdef line in completions/_tools-suite"
-    msg "$DIM"   "next"    "3. tools install && tools check"
+    msg "$DIM"   "next"    "2. tools generate && tools install"
+    msg "$DIM"   "next"    "3. tools check"
     echo
 }
 
 # Scaffold a drift-guard tool + its config. __NAME__ / __PREFIX__ are filled in
 # after the heredocs are written (the heredocs are quoted, so nothing expands).
 new_drift() {
-    local name="$1" prefix="$2" target="$3"
+    local name="$1" prefix="$2" target="$3" order="$4"
 
     cat > "$target" <<'EOF'
 #!/usr/bin/env bash
@@ -570,6 +614,7 @@ DRIFT_VAULT_HEADING="${__PREFIX___VAULT_HEADING}"
 # declaration; drift_describe_commands emits the shared show/diff/pull surface.
 describe_spec() {
     desc_tool "__NAME__" "Fetch live state from an API and diff it against the vault mirror."
+    desc_inventory "Drift guards" __ORDER__
     desc_synopsis "__NAME__ <command>"
     drift_describe_commands
     desc_env __PREFIX___CREDS         -- "age-encrypted env holding the API credential"
@@ -613,7 +658,8 @@ normalize() {
 # lib/drift.sh provides show / diff / pull / dispatch over DRIFT_VAULT_DOC.
 drift_main "$@"
 EOF
-    sed -i '' -e "s/__NAME__/$name/g" -e "s/__PREFIX__/$prefix/g" "$target"
+    sed -i '' -e "s/__NAME__/$name/g" -e "s/__PREFIX__/$prefix/g" \
+        -e "s/__ORDER__/$order/g" "$target"
     chmod +x "$target"
 
     local cfg="$TOOLS_HOME/config/$name.sh"
@@ -644,7 +690,7 @@ EOF
     msg "$GREEN" "created" "bin/$name (drift guard) + config/$name.sh"
     msg "$DIM"   "next"    "1. fill the TODOs: API base, get_token keys, fetch_live endpoint, normalize jq"
     msg "$DIM"   "next"    "2. set CREDS / VAULT_DOC / VAULT_HEADING in config/$name.sh"
-    msg "$DIM"   "next"    "3. add $name to #compdef + a _${name//-/_} completion; seed the vault block via: $name pull"
+    msg "$DIM"   "next"    "3. tools generate; seed the vault block via: $name pull"
     msg "$DIM"   "next"    "4. tools install && tools check"
     echo
 }
@@ -812,113 +858,6 @@ cmd_key() {
     esac
 }
 
-# ---------- describe (the cross-repo command-surface aggregator) ----------
-# Each tool emits its own surface via `<tool> --describe` (rendered from its
-# describe_spec by lib/describe.sh — see the contract there). `tools describe`
-# is the orchestrator: it federates every tool's emitter into one deterministic
-# JSON document, so AI sessions, a TUI, and CI guards all read one source. The
-# `tools describe -h` text is itself derived from describe_spec (usage_command).
-
-cmd_describe() {
-    local pretty=0 repos=0 tui=0 only="" only_cmd=""
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --pretty)   pretty=1; shift ;;
-            --repos)    repos=1; shift ;;
-            --tui)      tui=1; shift ;;
-            -*)         die_unknown option "$1" describe ;;
-            *)          if [[ -z "$only" ]]; then only="$1"; else only_cmd="$1"; fi; shift ;;
-        esac
-    done
-
-    # --tui: the interactive explorer over the federated document. Aggregate
-    # only — a single tool stays the clean `<tool> -h`, never a mini-TUI. The
-    # TUI shells back out to `tools describe` for its data, so it renders the
-    # same emit-once contract every other consumer reads.
-    if (( tui )); then
-        [[ -z "$only" ]] || die "usage" "--tui describes the whole toolchain; drop the tool name ('$only' stays '$only -h')" 2
-        if (( repos )); then
-            exec node "$TOOLS_HOME/lib/tools/describe-tui.mjs" --repos
-        else
-            exec node "$TOOLS_HOME/lib/tools/describe-tui.mjs"
-        fi
-    fi
-
-    # Single tool, single command: the token-minimal AI path. Project the tool's
-    # contract down to one command object (lifting the tool name/effect context
-    # in) so an agent fetches just the scope it's about to act on, not the whole
-    # surface. `tools describe hq restart` → {tool, name, effect, args, …}.
-    if [[ -n "$only" && -n "$only_cmd" ]]; then
-        [[ -x "$TOOLS_HOME/bin/$only" ]] || die "error" "no such tool: $only"
-        # NB: the embedded python uses only double-quoted strings so it survives
-        # this single-quoted shell block.
-        "$TOOLS_HOME/bin/$only" --describe \
-            | TOOLS_DESC_CMD="$only_cmd" TOOLS_DESC_PRETTY="$pretty" python3 -c '
-import json, os, sys
-want = os.environ["TOOLS_DESC_CMD"]
-doc = json.load(sys.stdin)
-cmd = next((c for c in doc.get("commands", []) if c["name"] == want), None)
-if cmd is None:
-    names = ", ".join(c["name"] for c in doc.get("commands", [])) or "(none)"
-    print(json.dumps({"ok": False,
-        "error": "%s has no command %r; commands: %s" % (doc.get("name"), want, names)}))
-    sys.exit(1)
-out = {"ok": True, "schema_version": doc.get("schema_version"), "tool": doc.get("name")}
-out.update(cmd)
-print(json.dumps(out, indent=2) if os.environ["TOOLS_DESC_PRETTY"] == "1" else json.dumps(out))
-'
-        return "${PIPESTATUS[1]}"
-    fi
-
-    # Single-tool: hand straight to that tool's own emitter.
-    if [[ -n "$only" ]]; then
-        [[ -x "$TOOLS_HOME/bin/$only" ]] || die "error" "no such tool: $only"
-        if (( pretty )); then
-            "$TOOLS_HOME/bin/$only" --describe --pretty
-        else
-            "$TOOLS_HOME/bin/$only" --describe
-        fi
-        return $?
-    fi
-
-    # Federate: run every tool's --describe; pack the one-line objects into an
-    # array. A tool that errors or doesn't emit JSON becomes an error object so
-    # the aggregate is always well-formed (robust for automations).
-    local objs=() name out
-    for name in "${TOOL_NAMES[@]}"; do
-        if out=$("$TOOLS_HOME/bin/$name" --describe 2>/dev/null) && [[ "$out" == \{* ]]; then
-            objs+=("$out")
-        else
-            objs+=("$(printf '{"ok":false,"name":"%s","error":"%s"}' \
-                "$(json_escape "$name")" "tool did not emit a describe contract")")
-        fi
-    done
-
-    local siblings=""
-    if (( repos )); then
-        # Sibling repos that emit the same `describe` contract. Extend this list
-        # as more repos grow a `describe` subcommand (the P2 federation).
-        local sib_bins=(severino-vault-mcp) sib_objs=() bin
-        for bin in "${sib_bins[@]}"; do
-            if command -v "$bin" >/dev/null 2>&1 \
-                && out=$("$bin" describe 2>/dev/null) && [[ "$out" == \{* ]]; then
-                sib_objs+=("$out")
-            fi
-        done
-        siblings=$(printf ',"siblings":[%s]' "$(json_join "${sib_objs[@]:-}")")
-    fi
-
-    local body
-    body=$(printf '{"ok":true,"schema_version":%d,"repo":"tools","tools":[%s]%s}' \
-        "$DESCRIBE_SCHEMA_VERSION" "$(json_join "${objs[@]}")" "$siblings")
-
-    if (( pretty )) && command -v python3 >/dev/null 2>&1; then
-        printf '%s\n' "$body" | python3 -m json.tool
-    else
-        printf '%s\n' "$body"
-    fi
-}
-
 # All help + the machine surface render from the one spec via the shared
 # intercept (main `-h`, `--describe`, focused `<cmd> -h`) — so even
 # `tools status -h` / `tools install -h` render help instead of acting.
@@ -932,5 +871,7 @@ case "${1:-}" in
     watch)         shift; cmd_watch    "$@" ;;
     key)           shift; cmd_key      "$@" ;;
     describe)      shift; cmd_describe "$@" ;;
+    tui)           shift; cmd_describe --tui "$@" ;;
+    generate)      shift; cmd_generate "$@" ;;
     *)             die_unknown command "$1" ;;
 esac

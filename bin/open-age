@@ -7,19 +7,12 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" crypt "$@"
 
 describe_spec() {
     desc_tool "open-age" "Decrypt a .age file to a temp file and open it in the default app."
+    desc_inventory "Cryptography" 40
     desc_effect local_write +interactive
     desc_synopsis "open-age [options] <file.age>"
-    desc_para "Decrypts a .age file to a temporary file under \$TMPDIR (mode 600,"
-    desc_para "owner-only), opens it in the default macOS app for the underlying"
-    desc_para "extension via 'open -W', then deletes the temporary file when the app"
-    desc_para "finishes with it."
-    desc_para ""
-    desc_para "The plaintext never lands in the source directory or anywhere persistent."
-    desc_para "\$TMPDIR is per-user and cleared by macOS on reboot."
-    desc_para ""
-    desc_para "Set as the default opener for .age files via:"
-    desc_para "  duti -s <bundle.id.of.this.script> .age all"
-    desc_para "…or wrap this script in a tiny .app bundle (Automator: Run Shell Script)."
+    desc_para "Decrypts a .age file to a temporary file under \$TMPDIR (mode 600, owner-only), opens it in the default macOS app for the underlying extension via 'open -W', then deletes the temporary file when the app finishes with it."
+    desc_para "The plaintext never lands in the source directory or anywhere persistent. \$TMPDIR is per-user and cleared by macOS on reboot."
+    desc_para "Set it as the default opener for .age files with 'duti -s <bundle.id.of.this.script> .age all', or wrap this script in a tiny .app bundle (Automator: Run Shell Script)."
     desc_opt --no-cache -- "Skip the cached passphrase, let age prompt directly"
     desc_pos file -- "The .age file to open"
 }

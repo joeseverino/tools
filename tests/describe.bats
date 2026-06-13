@@ -20,6 +20,7 @@ render() {
         source "$TOOLS_HOME/lib/describe.sh"
         describe_spec() {
             desc_tool "demo" "A demo tool."
+            desc_inventory "Test" 10
             desc_synopsis "demo [options] <file>..."
             desc_para "First paragraph."
             desc_example "demo a.txt" -- "the common case"
@@ -49,16 +50,17 @@ render() {
 import json,sys
 o=json.load(sys.stdin)
 assert o["ok"] is True
-assert o["schema_version"] == 3
+assert o["schema_version"] == 4
 assert o["name"] == "demo"
 assert o["description"] == "A demo tool."
+assert o["group"] == "Test" and o["order"] == 10
 assert o["effect"] == "read"   # tool-level default for a command tool
 for k in ("global_options","positionals","commands"):
     assert isinstance(o[k], list), k
 '
 }
 
-@test "v3 effect triple: default read, declared class + network/interactive tags" {
+@test "effect triple: default read, declared class + network/interactive tags" {
     run render json
     [ "$status" -eq 0 ]
     echo "$output" | python3 -c '
@@ -87,6 +89,7 @@ g={x["name"]:x for x in o["global_options"]}
 assert g["--copy"]["flags"]==["-c","--copy"]
 assert g["--copy"]["takes_value"] is False
 assert g["--key"]["takes_value"] is True
+assert g["--key"]["metavar"]=="PATH"
 assert g["--key"]["repeatable"] is True
 assert g["--filter"]["choices"]==["all","published","draft"]
 assert "repeatable" not in g["--copy"]
@@ -132,6 +135,7 @@ o=json.load(sys.stdin)
 # top-level positional
 p={x["name"]:x for x in o["positionals"]}
 assert p["file"]["positional"] is True and p["file"]["required"] is True
+assert p["file"]["variadic"] is True
 # command + its scoped args
 cmd={c["name"]:c for c in o["commands"]}
 assert "run" in cmd
@@ -275,6 +279,106 @@ for c in o.get("commands",[]):
     done
 }
 
+@test "every real tool validates against the committed JSON Schema" {
+    run bash -c '"$TOOLS_HOME/bin/tools" describe | node "$TOOLS_HOME/lib/tools/validate-describe.mjs"'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"valid describe contracts: 17"* ]]
+}
+
+@test "prose is reflowable: validation rejects a paragraph that ends mid-sentence" {
+    # A paragraph in the contract is ONE logical, unwrapped string so every
+    # renderer (-h, README, TUI) reflows it to its own width. Storing a
+    # hard-wrapped source line as a paragraph fragments every consumer; the
+    # validator fails closed on it. Mutate a real contract to prove the guard.
+    run bash -c '
+        "$TOOLS_HOME/bin/tools" describe |
+        node -e '"'"'
+let input = "";
+process.stdin.on("data", chunk => input += chunk);
+process.stdin.on("end", () => {
+  const doc = JSON.parse(input);
+  doc.tools[0].paras = ["Encrypts files to your default age public key and any extras passed"];
+  process.stdout.write(JSON.stringify(doc));
+});
+'"'"' |
+        node "$TOOLS_HOME/lib/tools/validate-describe.mjs"
+    '
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"ends mid-sentence"* ]]
+}
+
+@test "aggregate validation rejects duplicate inventory order" {
+    run bash -c '
+        "$TOOLS_HOME/bin/tools" describe |
+        node -e '"'"'
+let input = "";
+process.stdin.on("data", chunk => input += chunk);
+process.stdin.on("end", () => {
+  const doc = JSON.parse(input);
+  doc.tools[1].order = doc.tools[0].order;
+  process.stdout.write(JSON.stringify(doc));
+});
+'"'"' |
+        node "$TOOLS_HOME/lib/tools/validate-describe.mjs"
+    '
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"duplicate tool order"* ]]
+}
+
+@test "contract-derived completions and README reference/inventory are current" {
+    run "$TOOLS_HOME/bin/tools" generate --check
+    [ "$status" -eq 0 ]
+}
+
+@test "README inventory is derived from tools and repository directories" {
+    run bash -c 'grep -q "schemas/.*machine-enforced" "$TOOLS_HOME/README.md" &&
+                 grep -q "doc-to-pdf.*Render a Markdown file" "$TOOLS_HOME/README.md" &&
+                 python3 - "$TOOLS_HOME/README.md" <<"PY"
+import sys
+text=open(sys.argv[1]).read()
+block=text.split("<!-- BEGIN GENERATED REPO INVENTORY -->",1)[1].split("<!-- END GENERATED REPO INVENTORY -->",1)[0]
+names=["tools","encrypt","decrypt","open-age","inbox","vault","backup","dns-test",
+       "ts-acl","cf-dns","adguard","nginx","hq","site","brand","remember","doc-to-pdf"]
+positions=[block.index("\n    "+name) for name in names]
+assert positions == sorted(positions), positions
+assert "# Cryptography" in block and "# Drift guards" in block
+PY'
+    [ "$status" -eq 0 ]
+}
+
+@test "README reference renders contract prose, examples, and metavariables" {
+    run bash -c 'grep -q "encrypt -k ~/keys/coworker.pub notes.md" "$TOOLS_HOME/README.md" &&
+                 grep -q -- "--key <PATH>" "$TOOLS_HOME/README.md" &&
+                 grep -q "site featured my-writeup top" "$TOOLS_HOME/README.md"'
+    [ "$status" -eq 0 ]
+}
+
+@test "surface generation fails closed when any tool cannot describe itself" {
+    fake="$BATS_TEST_TMPDIR/bin"
+    mkdir -p "$fake"
+    cat > "$fake/tools" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' '{"ok":true,"schema_version":4,"repo":"tools","tools":[{"ok":false,"name":"broken","error":"no contract"}]}'
+EOF
+    chmod +x "$fake/tools"
+    run env TOOLS_HOME="$BATS_TEST_TMPDIR" node "$TOOLS_HOME/lib/tools/generate-surfaces.mjs" completions
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"broken: no contract"* ]]
+}
+
+@test "surface generation validates contracts before rendering" {
+    fake="$BATS_TEST_TMPDIR/bin"
+    mkdir -p "$fake"
+    cat > "$fake/tools" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' '{"ok":true,"schema_version":4,"repo":"tools","tools":[{"ok":true,"name":"broken"}]}'
+EOF
+    chmod +x "$fake/tools"
+    run env TOOLS_HOME="$BATS_TEST_TMPDIR" node "$TOOLS_HOME/lib/tools/generate-surfaces.mjs" completions
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"broken/"* ]]
+}
+
 @test "tools describe <tool> <command> projects one command's contract (token-minimal AI path)" {
     run "$TOOLS_HOME/bin/tools" describe hq restart
     [ "$status" -eq 0 ]
@@ -367,7 +471,7 @@ path = sys.argv[1]
 src = open(path).read()
 spec = {c["name"] for c in
         json.loads(subprocess.run([path, "--describe"], capture_output=True, text=True).stdout)["commands"]}
-block = src[src.index('desc_help_intercept "$@"'):].split("\nesac", 1)[0]
+block = src[src.rindex('desc_help_intercept "$@"'):].split("\nesac", 1)[0]
 arms = set(re.findall(r'^\s*([a-z][a-z0-9-]*)\)\s', block, re.M))
 if spec != arms:
     print(f"{os.path.basename(path)}: spec-only={sorted(spec-arms)} arm-only={sorted(arms-spec)}")

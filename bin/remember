@@ -6,14 +6,14 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 
 describe_spec() {
     desc_tool "remember" "Write a Claude memory file + MEMORY.md index entry in one shot."
+    desc_inventory "Authoring" 160
     desc_effect local_write
     desc_synopsis "remember <type> <slug> \"<title>\" [options]   < body"
     desc_synopsis "remember <type> <slug> \"<title>\" -b \"body\" [options]"
     desc_synopsis "remember --list"
     desc_synopsis "remember --forget <slug>"
     desc_para "Compress the two-step \"write file + edit MEMORY.md\" loop into one command."
-    desc_para "Body content is read from stdin unless --body is given. Frontmatter is"
-    desc_para "generated from the args."
+    desc_para "Body content is read from stdin unless --body is given. Frontmatter is generated from the args."
     desc_pos type  -- "user | feedback | project | reference"
     desc_pos slug  -- "kebab- or snake-case identifier (becomes 'name:' in frontmatter; underscored in filename)"
     desc_pos title -- "text shown as the link in MEMORY.md"

@@ -14,14 +14,11 @@ BASELINE="AdGuard LAN"
 # self-describes from the same one declaration as the bash tools.
 describe_spec() {
     desc_tool "dns-test" "Compare DNS resolver latency across paths."
+    desc_inventory "Diagnostics" 80
     desc_effect read +network
     desc_synopsis "dns-test [-d domain] [-n runs] [-a adguard_ip] [-b baseline] [-h]"
-    desc_para "Measures DNS latency across System DNS, a LAN AdGuard resolver,"
-    desc_para "Cloudflare 1.1.1.1, and Cloudflare DoH. Reports avg/min/p50/p95/max and"
-    desc_para "the delta of each path against a chosen baseline."
-    desc_para ""
-    desc_para "The AdGuard IP defaults to an example LAN address; set ADGUARD_IP in your"
-    desc_para "environment (or pass -a) to point at your own resolver."
+    desc_para "Measures DNS latency across System DNS, a LAN AdGuard resolver, Cloudflare 1.1.1.1, and Cloudflare DoH. Reports avg/min/p50/p95/max and the delta of each path against a chosen baseline."
+    desc_para "The AdGuard IP defaults to an example LAN address; set ADGUARD_IP in your environment (or pass -a) to point at your own resolver."
     desc_opt -d domain -- "Domain to query (default: $DOMAIN)"
     desc_opt -n runs   -- "Queries per path (default: $RUNS)"
     desc_opt -a ip     -- "AdGuard LAN IP (default: $ADGUARD_IP, env ADGUARD_IP)"
