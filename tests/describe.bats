@@ -282,7 +282,7 @@ for c in o.get("commands",[]):
 @test "every real tool validates against the committed JSON Schema" {
     run bash -c '"$TOOLS_HOME/bin/tools" describe | node "$TOOLS_HOME/lib/tools/validate-describe.mjs"'
     [ "$status" -eq 0 ]
-    [[ "$output" == *"valid describe contracts: 17"* ]]
+    [[ "$output" == *"valid describe contracts: 18"* ]]
 }
 
 @test "prose is reflowable: validation rejects a paragraph that ends mid-sentence" {

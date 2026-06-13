@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# diagram [path...] — render Mermaid sources to committed PNGs
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
+
+describe_spec() {
+    desc_tool "diagram" "Render Mermaid .mmd sources to neighboring PNG files."
+    desc_inventory "Authoring" 180
+    desc_effect local_write +network
+    desc_synopsis "diagram <path>..."
+    desc_para "Each path may be an .mmd file or a directory. Directories render their top-level .mmd files."
+    desc_para "Rendering uses Mermaid CLI 11.15.0 with the toolchain's established settings: PNG output, 1100px width, 2x scale, and a white background."
+    desc_pos path +variadic -- "Mermaid source file or directory"
+    desc_example "diagram docs/diagrams/"
+    desc_example "diagram docs/diagrams/architecture.mmd"
+}
+
+desc_help_intercept "$@"
+
+sources=()
+for target in "$@"; do
+    if [[ -d "$target" ]]; then
+        found=0
+        for src in "$target"/*.mmd; do
+            [[ -f "$src" ]] || continue
+            sources+=("$src")
+            found=1
+        done
+        (( found )) || die "error" "no .mmd files found in: $target"
+    elif [[ -f "$target" && "$target" == *.mmd ]]; then
+        sources+=("$target")
+    elif [[ -e "$target" ]]; then
+        die "error" "expected an .mmd file or directory: $target"
+    else
+        die "error" "path not found: $target"
+    fi
+done
+
+command -v npx >/dev/null || die "error" "npx not installed (install Node.js)"
+
+header "rendering" "${#sources[@]}"
+failed=0
+for src in "${sources[@]}"; do
+    dir="$(cd "$(dirname "$src")" && pwd)"
+    name="$(basename "$src")"
+    out="${src%.mmd}.png"
+    if (
+        cd "$dir"
+        npx -y -p @mermaid-js/mermaid-cli@11.15.0 mmdc \
+            -i "$name" -o "${name%.mmd}.png" -w 1100 -s 2 -b white
+    ); then
+        msg "$GREEN" "rendered" "$src ${DIM}→${RESET} $out"
+    else
+        msg "$RED" "failed" "$src"
+        failed=$((failed + 1))
+    fi
+done
+
+footer "rendered" "$(( ${#sources[@]} - failed ))" 0 "$failed"
+(( failed == 0 ))
