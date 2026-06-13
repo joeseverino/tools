@@ -103,7 +103,12 @@ Every tool emits its command surface as one structured JSON document — the
   <tool> <command>`** projects the contract down to a single command object
   (lifting in `tool` + `effect`) — the token-minimal path an agent fetches before
   acting, instead of reading the whole surface. `tools doctor` gates that every
-  tool self-describes.
+  tool self-describes. Because the federated document is byte-deterministic, the
+  aggregate call is **content-cached** under
+  `${XDG_CACHE_HOME:-~/.cache}/severino-tools/describe-<hash>.json` — the hash is
+  over every `bin/*` plus the shared describe/render libs, so any spec or
+  renderer edit misses and re-federates (correctness never lags content; warm
+  calls go ~1.4s → ~35ms). `TOOLS_DESCRIBE_NO_CACHE=1` forces a live federation.
 - `lib/describe.sh` is written to run under **bash and zsh** (no numeric array
   indexing, no `read -ra`) so the lone zsh tool (`dns-test`) self-describes from
   the same engine. `tests/describe.bats` asserts the round-trip invariant and
@@ -121,6 +126,13 @@ type; both stay in sync because there is only one implementation.
 
 - **Scope: aggregate only.** A single tool stays the clean wrapped `-h` (no
   per-tool mini-TUIs); `tools describe <tool> --tui` is a usage error.
+- **Opens instantly, hydrates async.** The federation runs off the event loop
+  (`fetchDescribeAsync`, a `spawn` not a `spawnSync`): the alt-screen paints a
+  loading frame immediately, then fills the panes when `tools describe` resolves
+  — `q`/Esc work during load. SMOKE/REPLAY stay on the synchronous `load()` so
+  the test harnesses still render one deterministic frame. Per-tool lazy fetch is
+  deliberately *not* done: `/` filters commands across the whole toolchain, which
+  needs every contract in hand.
 - **Layout.** Left pane: tool list. Right pane: the selected tool's commands /
   options / args. `Tab`/`←→` switch panes, `↑↓` move, `/` filters tools *and*
   commands across the whole toolchain, `Enter` copies a ready-to-paste
