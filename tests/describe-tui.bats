@@ -71,6 +71,19 @@ tui() { node "$TOOLS_HOME/lib/tools/describe-tui.mjs"; }
     [[ "$output" == *"Machine-readable output"* ]]
 }
 
+@test "replay: selected command detail is separate from the stable command list" {
+    export DESCRIBE_TUI_COLUMNS=150
+    export DESCRIBE_TUI_ROWS=32
+    export DESCRIBE_TUI_KEYS='slash,s,i,t,e,enter,tab,down,down,down,down,down,down,down,down,down,down,down,down,down,down,down,down'
+    run tui
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"SELECTED"* ]]
+    [[ "$output" == *"featured"* ]]
+    [[ "$output" == *"effect"*"vault_write"* ]]
+    [[ "$output" == *"[slug]"* ]]
+    [[ "$output" == *"copy"*"site featured [<slug>] [<target>]"* ]]
+}
+
 @test "replay: Enter on a command copies a ready-to-paste invocation" {
     export DESCRIBE_TUI_KEYS='tab,enter'
     run tui

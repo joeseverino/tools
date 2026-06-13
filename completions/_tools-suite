@@ -241,7 +241,7 @@ _tools_suite_contract() {
         'key:Cache / forget / test the age key passphrase in Keychain'
         'watch:Manage the optional launchd auto-sync agent (off by default)'
         'describe:Emit the command surface of every tool as one JSON document (the emit-once contract)'
-        'generate:Regenerate contract-derived completions and README command index'
+        'generate:Regenerate contract-derived completions and README reference/inventory'
       )
       _arguments -C \
         '(-h --help)'{-h,--help}'[show help]' \

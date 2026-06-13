@@ -17,8 +17,8 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 [[ -n "${KEYS_HOME-}"    ]] && source "$TOOLS_HOME/config/crypt.sh"
 source "$TOOLS_HOME/lib/key.sh"
 source "$TOOLS_HOME/lib/doctor.sh"
-# shellcheck source=lib/tools/describe-command.sh
-source "$TOOLS_HOME/lib/tools/describe-command.sh"
+# shellcheck source=lib/tools/describe.sh
+source "$TOOLS_HOME/lib/tools/describe.sh"
 
 TOOL_NAMES=()
 for file in "$TOOLS_HOME/bin"/*; do
@@ -69,7 +69,7 @@ describe_spec() {
     desc_example "tools describe hq restart" -- "one command's contract — effect, args, examples"
     desc_example "tools describe --tui" -- "interactive explorer over the whole toolchain"
 
-    desc_cmd generate -- "Regenerate contract-derived completions and README command index"
+    desc_cmd generate -- "Regenerate contract-derived completions and README reference/inventory"
     desc_effect local_write
     desc_pos target +optional "{all,completions,readme}" -- "Generated surface (default: all)"
     desc_opt --check -- "Fail when generated files are stale; do not write"
@@ -424,8 +424,8 @@ cmd_check() {
     fi
 
     # Contract schema + generated consumers. The validator checks every real
-    # emitter against docs/describe.schema.json; the generator check makes
-    # completions and the README command index reproducible build artifacts.
+    # emitter against schemas/describe-v3.schema.json; the generator check makes
+    # completions and the README reference/inventory reproducible build artifacts.
     if command -v node >/dev/null && [[ -d "$TOOLS_HOME/node_modules/ajv" ]]; then
         if err=$("$TOOLS_HOME/bin/tools" describe | node "$TOOLS_HOME/lib/tools/validate-describe.mjs" 2>&1); then
             check "describe schema" 1 "$err"
@@ -456,7 +456,7 @@ cmd_check() {
         # New files (a new lib helper or config/<tool>.sh) are covered
         # automatically — no hand-editing here.
         while IFS= read -r f; do
-            sc_targets+=("$f")
+            [[ -f "$f" ]] && sc_targets+=("$f")
         done < <(git ls-files --cached --others --exclude-standard \
                      'lib/*.sh' 'config/*.sh' 'config/*.sh.example')
         if err=$(shellcheck -x "${sc_targets[@]}" 2>&1); then

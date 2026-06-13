@@ -282,8 +282,14 @@ for c in o.get("commands",[]):
     [[ "$output" == *"valid describe contracts: 17"* ]]
 }
 
-@test "contract-derived completions and README command index are current" {
+@test "contract-derived completions and README reference/inventory are current" {
     run "$TOOLS_HOME/bin/tools" generate --check
+    [ "$status" -eq 0 ]
+}
+
+@test "README inventory is derived from tools and repository directories" {
+    run bash -c 'grep -q "schemas/.*machine-enforced" "$TOOLS_HOME/README.md" &&
+                 grep -q "doc-to-pdf.*Render a Markdown file" "$TOOLS_HOME/README.md"'
     [ "$status" -eq 0 ]
 }
 

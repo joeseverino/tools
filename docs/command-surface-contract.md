@@ -127,8 +127,8 @@ folds in sibling repos that emit the same contract — today
 per-command `effect` (its vault writers are `vault_write`, the rest `read`).
 
 `tools generate` is another render-many consumer: it derives zsh completions
-and the README command index from the federated document. CI validates every
-tool document against `docs/describe.schema.json` and checks those generated
+and the README CLI reference/inventory from the federated document. CI validates every
+tool document against `schemas/describe-v3.schema.json` and checks those generated
 files for drift.
 
 ## How it can't drift
@@ -138,7 +138,7 @@ files for drift.
 - **effect enum** — every emitted `effect` is a valid class; `network` /
   `interactive` only ever appear as `true` (`describe.bats`).
 - **JSON Schema** — every real tool validates against the committed v3 schema.
-- **generated consumers** — completions and the README command index must match
+- **generated consumers** — completions and the README reference/inventory must match
   the current aggregate (`tools generate --check`).
 - **round-trip** — every JSON option/command appears in some help view.
 - **bash/zsh byte-parity** — `lib/describe.sh` runs identically under both

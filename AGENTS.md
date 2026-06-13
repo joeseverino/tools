@@ -153,6 +153,8 @@ text) · `--describe` (JSON) · `--tui` (this).
   healthy).
 - `config/` — per-tool defaults derived from layout env vars. Files ending
   `.example` are templates; their gitignored copies are user-specific.
+- `schemas/` — machine-enforced cross-tool contracts. Keep executable schemas
+  here rather than under `docs/`; prose explaining them stays in `docs/`.
 - `tests/` — bats suite. Hermetic: throwaway keys, tmpdirs, no Keychain.
 - `bench/` — every measured claim in the README has a script here that
   asserts it; they run in CI.
@@ -224,7 +226,7 @@ it (installed fingerprint vs source).
   (URL-encoding, payloads, MCP-output parsing); `jq` belongs to the drift
   guards in `lib/drift.sh`. Keep each file on one parser.
 - Adding a tool: drop it in `bin/`, then run `tools generate`. The generated
-  `completions/_tools-suite` and README command index both consume
+  `completions/_tools-suite` and README CLI reference/inventory both consume
   `--describe`; never hand-edit either generated block.
 
 ## Site visual comparison
