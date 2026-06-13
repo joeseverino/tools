@@ -36,6 +36,23 @@ die() {
     exit "$code"
 }
 
+# die_unknown <kind> <token> [<subcommand>] — the uniform usage error for an
+# unrecognized flag / command / value. Instead of a dead-end "try -h" pointer it
+# SHOWS the valid surface, rendered from the one describe_spec: the command list
+# for a bad command, or that command's own options/args for a bad flag. So the
+# fix is on screen, nothing is hand-written, and it can't drift. Exits 2.
+#
+#   die_unknown command "$1"          -> error + the tool's command list
+#   die_unknown flag "$1" sync        -> error + `sync`'s options/args
+#   die_unknown "test mode" "$1" test -> error + `test`'s options
+die_unknown() {
+    local kind="$1" token="$2" sub="${3:-}"
+    echo
+    msg "$RED" "usage" "unknown $kind: $token"
+    if [[ -n "$sub" ]]; then usage_command "$sub"; else usage; fi
+    exit 2
+}
+
 # header <verb> <count>
 header() {
     local s=""

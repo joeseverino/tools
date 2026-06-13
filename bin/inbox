@@ -30,7 +30,7 @@ while [[ $# -gt 0 ]]; do
         -h|--help) usage; exit 0 ;;
         -e|--edit) EDIT=1; shift ;;
         --)        shift; break ;;
-        -*)        die "usage" "unknown option: $1 (try -h)" 2 ;;
+        -*)        die_unknown option "$1" ;;
         *)         break ;;
     esac
 done

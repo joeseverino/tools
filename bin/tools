@@ -168,8 +168,7 @@ cmd_doctor() {
             --json) DOCTOR_JSON=1 ;;
             --all)  run_all=1 ;;
             --live) run_all=1; run_live=1 ;;
-            -h|--help) usage_command doctor; return 0 ;;
-            *) die "usage" "unknown option: $1 (try -h)" 2 ;;
+            *) die_unknown option "$1" doctor ;;
         esac
         shift
     done
@@ -344,8 +343,7 @@ cmd_check() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --no-bench) run_bench=0; shift ;;
-            -h|--help) usage_command check; return 0 ;;
-            *) die "usage" "unknown option: $1 (try -h)" 2 ;;
+            *) die_unknown option "$1" check ;;
         esac
     done
 
@@ -472,9 +470,8 @@ cmd_new() {
     local name="" drift=0
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -h|--help)  usage_command new; return 0 ;;
             --drift)    drift=1; shift ;;
-            -*)         die "usage" "unknown option: $1 (try -h)" 2 ;;
+            -*)         die_unknown option "$1" new ;;
             *)          name="$1"; shift ;;
         esac
     done
@@ -511,7 +508,7 @@ while [[ $# -gt 0 ]]; do
         --describe) describe_emit "$@"; exit 0 ;;
         -h|--help)  usage; exit 0 ;;
         --)         shift; break ;;
-        -*)         die "usage" "unknown option: $1 (try -h)" 2 ;;
+        -*)         die_unknown option "$1" ;;
         *)          break ;;
     esac
 done
@@ -736,8 +733,8 @@ cmd_watch() {
         disable)     watch_disable ;;
         status)      watch_status ;;
         run-now)     "$TOOLS_HOME/bin/vault" sync ;;
-        -h|--help|"") usage_command watch ;;
-        *)           die "usage" "unknown watch command: $1 (try -h)" 2 ;;
+        "")          usage_command watch ;;
+        *)           die_unknown "watch command" "$1" watch ;;
     esac
 }
 
@@ -795,8 +792,8 @@ cmd_key() {
             fi
             echo
             ;;
-        -h|--help) usage_command key ;;
-        *)         die "usage" "unknown key command: $1 (try -h)" 2 ;;
+        "")        usage_command key ;;
+        *)         die_unknown "key command" "$1" key ;;
     esac
 }
 
@@ -814,8 +811,7 @@ cmd_describe() {
             --pretty)   pretty=1; shift ;;
             --repos)    repos=1; shift ;;
             --tui)      tui=1; shift ;;
-            -h|--help)  usage_command describe; return 0 ;;
-            -*)         die "usage" "unknown option: $1 (try -h)" 2 ;;
+            -*)         die_unknown option "$1" describe ;;
             *)          only="$1"; shift ;;
         esac
     done
@@ -882,6 +878,10 @@ cmd_describe() {
     fi
 }
 
+# All help + the machine surface render from the one spec via the shared
+# intercept (main `-h`, `--describe`, focused `<cmd> -h`) — so even
+# `tools status -h` / `tools install -h` render help instead of acting.
+desc_help_intercept "$@"
 case "${1:-}" in
     status)        shift; cmd_status   "$@" ;;
     doctor)        shift; cmd_doctor   "$@" ;;
@@ -891,7 +891,5 @@ case "${1:-}" in
     watch)         shift; cmd_watch    "$@" ;;
     key)           shift; cmd_key      "$@" ;;
     describe)      shift; cmd_describe "$@" ;;
-    --describe)    describe_emit "$@"; exit 0 ;;
-    -h|--help|"")  usage; exit 0 ;;
-    *)             die "usage" "unknown command: $1 (try -h)" 2 ;;
+    *)             die_unknown command "$1" ;;
 esac

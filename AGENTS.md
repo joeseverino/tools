@@ -14,36 +14,60 @@ Every tool emits its command surface as one structured JSON document — the
 `read_doc('report-emit-once-render-many')`; the `.py` reference impl lives in
 `severino-vault-mcp` as `cli_introspect.describe_parser`).
 
-- **One source per tool.** A tool defines a single `describe_spec()` (the `desc_*`
-  DSL in `lib/describe.sh`). Both `-h`/`--help` (generic `usage()`) **and**
-  `--describe` (JSON) render from it, so the human and machine views *cannot*
-  drift — there is no prose to parse. New tools get this from `tools new`.
-- **Three human renderers, one spec — no hand-written sub-help.** `usage()` is
-  the git-style main screen (a scannable command list + a `Run '<tool> <cmd> -h'`
-  pointer; it does *not* inline per-command options). `usage_command <cmd>`
-  renders one command's focused detail (summary, arguments, options), so a
-  subcommand tool routes `<tool> <cmd> -h) usage_command <cmd>` instead of a
-  heredoc — `tools`, `brand`, and `hq` carry zero hand-written sub-help. Declare
-  a command's flags with `desc_opt`/`desc_pos` *after* its `desc_cmd` and all
-  four views (main `-h`, focused `-h`, JSON, `--tui`) light up at once.
-  `desc_pos … "{a,b,c}"` gives a positional a fixed choice set (e.g. an action
-  arg like `key {cache,forget,status,test}`), structured into the JSON the same
-  way `desc_opt` choices are. *Exception:* a command whose real flag surface is
-  owned by another repo keeps a curated heredoc (e.g. `hq create` → HQ's
-  `manage.py`), to point at the owner rather than duplicate it (drift).
-  **Still on prose-summary flags:** `bin/site` (30 commands) is the one tool not
-  yet migrated to per-command `desc_opt`/`desc_pos` — a focused follow-up against
-  its own bats suite (accurate flag extraction needs per-handler care).
+- **One source, one dispatch line.** A tool defines a single `describe_spec()`
+  (the `desc_*` DSL in `lib/describe.sh`) and calls **`desc_help_intercept "$@"`**
+  first in its dispatch. That one line renders the whole help + machine surface
+  from the spec: bare `-h`/`--help`/no-args → the git-style main screen
+  (`usage()`, a scannable command list + a `Run '<tool> <cmd> -h'` pointer);
+  `--describe` → the JSON; and **`<tool> <cmd> -h` → that command's focused
+  screen** (`usage_command`). No tool hand-routes help, and a help flag can never
+  fall through to run an action (`hq restart -h`, `adguard pull -h`, `site doctor
+  -h` all *render*, never execute). The `case` after it is pure command→action
+  wiring — the only thing not derivable from the spec (`cmd_*` vs `run_npm` vs
+  aliases); `describe.bats` guards that every declared command has a dispatch arm
+  so the two sets can't drift. New tools get the leaf-tool form from `tools new`.
+- **Everything per-command is spec-derived — zero hand-written sub-help, zero
+  help heredocs in the toolchain.** After a `desc_cmd`, declare its flags
+  (`desc_opt`/`desc_pos`), prose (`desc_para`), and examples (`desc_example`);
+  all are **scoped to that command**, so the focused `-h`, the JSON (flags/args
+  only — prose/examples stay human-help), and `--tui` light up from the one
+  declaration. `desc_pos … "{a,b,c}"` gives a positional a fixed choice set.
+  Keep the data model honest: structured → structured primitives
+  (flags`→desc_opt`, args`→desc_pos`, examples`→desc_example`), `desc_para` for
+  genuine prose only; interactive UIs (the `site manage` / compare viewers)
+  self-document their keymaps rather than restating them in CLI help.
+- **Flags owned by another repo are pointed at, never restated.** `hq create`'s
+  flags live in HQ's `manage.py`, and site's `scaffold-*`/`draft-alt`/`diagnose`
+  flags live in the site repo's `package.json` scripts. Those commands declare
+  **`desc_delegate "<owner>"`** (after the `desc_cmd`) instead of enumerating
+  flags — a *structured* ownership marker that renders in the focused `-h`
+  ("Flags are owned elsewhere: …") **and** rides into the JSON as `delegates`, so
+  an agent sees ownership without reading handlers. `hq create <kind> -h` also
+  falls through to `manage.py` (the help flag isn't the *2nd* arg, so the
+  intercept skips it) — the owner renders its own live list.
+- **Unknown input is self-service and derived — `die_unknown`.** `die_unknown
+  <kind> <token> [<cmd>]` (in `common.sh`) replaces every hand-written
+  "unknown … (try `tool -h`)": it prints the error and then *shows* the valid
+  surface from the spec — the command list for a bad command, a command's own
+  options for a bad flag — deriving the tool name from `$0`. No "(try -h)"
+  strings to drift between `-h`/`--help`.
 - **Wiring.** Source `lib/init.sh` (it sources `lib/describe.sh`), define
-  `describe_spec`, and add `--describe) describe_emit "$@"; exit 0 ;;` to the
-  dispatch. Drift guards get show/diff/pull from `drift_describe_commands` and
-  `--describe` from `drift_main` for free. `bin/doc-to-pdf` (node) carries its
-  own `SPEC` object that renders both its `--help` and `--describe`.
-- **Contract** (a superset of the MCP's): `{ ok, schema_version, name,
-  description, global_options:[<opt>], positionals:[<arg>],
-  commands:[{name, summary, args:[<arg>]}] }`. `desc_env`/`desc_example`/
-  `desc_para` are human-help only and never enter the JSON. Output is
-  byte-deterministic (no timestamps) so guards can diff it.
+  `describe_spec`, and put `desc_help_intercept "$@"` above the dispatch `case`.
+  Drift guards get show/diff/pull from `drift_describe_commands` and the whole
+  surface from `drift_main` (it calls the intercept) for free. `bin/doc-to-pdf`
+  (node) carries its own `SPEC` object that renders both its `--help` and
+  `--describe`.
+- **Contract** (`schema_version 2`, a superset of the MCP's): `{ ok,
+  schema_version, name, description, global_options:[<opt>], positionals:[<arg>],
+  paras:[<prose>], examples:[{command,comment}], commands:[{name, summary,
+  args:[<opt>|<arg>], paras:[<prose>], examples:[…], delegates?:"<owner>"}] }`.
+  v2 added per-scope `paras`/`examples` and `delegates` so an agent can read a
+  command's intent, usage, and external flag-ownership from the JSON alone (the
+  signal it needs to spot cohesion/refactor opportunities). `desc_para` and
+  `desc_example` are **scoped to the current command** (like `desc_opt`/`desc_pos`)
+  — declare tool-level ones *before the first `desc_cmd`* or they attach to the
+  last command. `desc_env` stays human-help only. Output is byte-deterministic
+  (no timestamps) so guards can diff it.
 - **`tools describe`** is the orchestrator: it federates every `bin/*`
   `--describe` into one document (`--pretty` to read, `--repos` to fold in
   sibling repos like the MCP, `tools describe <tool>` for one). `tools doctor`

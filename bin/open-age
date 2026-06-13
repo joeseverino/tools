@@ -30,7 +30,7 @@ while [[ $# -gt 0 ]]; do
         -h|--help)   usage; exit 0 ;;
         --no-cache)  PASSTHRU+=(--no-cache); shift ;;
         --)          shift; break ;;
-        -*)          die "usage" "unknown option: $1 (try -h)" 2 ;;
+        -*)          die_unknown option "$1" ;;
         *)           break ;;
     esac
 done

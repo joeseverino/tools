@@ -28,8 +28,9 @@ describe_spec() {
     desc_env ADGUARD_IP -- "AdGuard LAN resolver IP (overridden by -a)"
 }
 
-# getopts doesn't see long options; intercept --describe before the loop.
+# getopts doesn't see long options; intercept --describe / --help before the loop.
 [[ "${1:-}" == "--describe" ]] && { describe_emit "$@"; exit 0; }
+[[ "${1:-}" == "--help" ]] && { usage; exit 0; }
 
 while getopts ":d:n:a:b:h" opt; do
     case $opt in
@@ -38,7 +39,7 @@ while getopts ":d:n:a:b:h" opt; do
         a)  ADGUARD_IP=$OPTARG ;;
         b)  BASELINE=$OPTARG ;;
         h)  usage; exit 0 ;;
-        \?) die "usage" "unknown option: -$OPTARG (try -h)" 2 ;;
+        \?) die_unknown option "-$OPTARG" ;;
         :)  die "usage" "-$OPTARG requires an argument (try -h)" 2 ;;
     esac
 done

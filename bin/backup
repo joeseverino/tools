@@ -29,7 +29,7 @@ while [[ $# -gt 0 ]]; do
         -n|--dry-run) DRY=1; shift ;;
         --no-commit)  NO_COMMIT=1; shift ;;
         --)           shift; break ;;
-        -*)           die "usage" "unknown option: $1 (try -h)" 2 ;;
+        -*)           die_unknown option "$1" ;;
         *)            die "usage" "unexpected argument: $1 (try -h)" 2 ;;
     esac
 done

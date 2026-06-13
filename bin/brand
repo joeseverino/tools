@@ -42,7 +42,7 @@ cmd_build() {
 }
 
 cmd_kit() {
-    if [[ "$#" -lt 3 || "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    if [[ "$#" -lt 3 ]]; then    # incomplete invocation → show the spec-derived help
         usage_command kit
         return 0
     fi
@@ -70,11 +70,12 @@ cmd_status() {
     echo
 }
 
+# All help + the machine surface render from the one spec via the shared
+# intercept (main `-h`, `--describe`, focused `<cmd> -h`).
+desc_help_intercept "$@"
 case "${1:-}" in
     build)          shift; cmd_build "$@" ;;
     kit)            shift; cmd_kit "$@" ;;
     status)         shift; cmd_status "$@" ;;
-    --describe)     describe_emit "$@"; exit 0 ;;
-    -h|--help|"")   usage; exit 0 ;;
-    *)              die "usage" "unknown command: $1 (try -h)" 2 ;;
+    *)              die_unknown command "$1" ;;
 esac
