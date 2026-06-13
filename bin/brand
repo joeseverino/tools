@@ -14,7 +14,9 @@ describe_spec() {
     desc_para "Kits land in \$BRAND_HOME/kits. The engine lives in \$ENGINE_HOME and comes in"
     desc_para "as a dependency of the brand repo; see its README for all flags."
     desc_cmd build  -- "Rebuild every kit from brand/ + the social cards"
+    desc_effect local_write
     desc_cmd kit    -- "Render a one-off kit into severino-brand/kits/<slug>"
+    desc_effect local_write
     desc_pos slug              -- "Kit slug (output directory name)"
     desc_pos hex               -- "Primary brand color (hex, no leading #)"
     desc_pos initials          -- "Monogram initials"

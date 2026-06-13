@@ -28,6 +28,7 @@ render() {
             desc_opt --filter "{all,published,draft}" -- "Which items"
             desc_pos file +variadic        -- "File(s) to act on"
             desc_cmd run -- "Run it"
+            desc_effect vault_write +network
             desc_para "Detail about the run command."
             desc_opt --fast -- "Run faster"
             desc_pos target -- "What to run"
@@ -48,12 +49,33 @@ render() {
 import json,sys
 o=json.load(sys.stdin)
 assert o["ok"] is True
-assert o["schema_version"] == 2
+assert o["schema_version"] == 3
 assert o["name"] == "demo"
 assert o["description"] == "A demo tool."
+assert o["effect"] == "read"   # tool-level default for a command tool
 for k in ("global_options","positionals","commands"):
     assert isinstance(o[k], list), k
 '
+}
+
+@test "v3 effect triple: default read, declared class + network/interactive tags" {
+    run render json
+    [ "$status" -eq 0 ]
+    echo "$output" | python3 -c '
+import json,sys
+o=json.load(sys.stdin)
+run={c["name"]:c for c in o["commands"]}["run"]
+assert run["effect"]=="vault_write", run
+assert run["network"] is True
+# interactive was not declared, so the lean tag is omitted entirely
+assert "interactive" not in run
+'
+}
+
+@test "effect line shows in focused help only when non-trivial" {
+    # The run command mutates the vault over the network → an Effect line.
+    run render usage run
+    [[ "$output" == *"Effect: vault_write · network"* ]]
 }
 
 @test "options carry flags / takes_value / repeatable / choices" {
@@ -223,8 +245,58 @@ print("\n".join(sorted(toks)))
 import json,sys
 o=json.load(sys.stdin)
 assert o["ok"] is True and o["name"]=="encrypt"
+assert o["effect"]=="local_write"   # leaf tool declares its blast radius
 names={a["name"] for a in o["global_options"]}
 assert "--copy" in names and "--key" in names
+'
+}
+
+@test "every emitted effect is a valid enum; network/interactive are true-only booleans" {
+    # The effect triple is hand-declared, so the cheap honesty guard is that the
+    # value is one of the contract's classes (catches a typo like local-write) and
+    # the lean boolean tags only ever appear as true. Runs over every real tool.
+    setup_crypt
+    for t in "$TOOLS_HOME"/bin/*; do
+        "$t" --describe 2>/dev/null | python3 -c '
+import json,sys
+VALID={"read","local_write","vault_write","remote_write","deploy"}
+try: o=json.load(sys.stdin)
+except Exception: sys.exit(0)   # non-JSON tools are caught by the self-describe gate
+def chk(scope, label):
+    eff=scope.get("effect")
+    assert eff in VALID, label+": bad effect "+repr(eff)
+    for tag in ("network","interactive"):
+        if tag in scope:
+            assert scope[tag] is True, label+": "+tag+" not true"
+chk(o, o.get("name",""))
+for c in o.get("commands",[]):
+    chk(c, o.get("name","")+" "+c["name"])
+' || { echo "$(basename "$t"): invalid effect metadata"; return 1; }
+    done
+}
+
+@test "tools describe <tool> <command> projects one command's contract (token-minimal AI path)" {
+    run "$TOOLS_HOME/bin/tools" describe hq restart
+    [ "$status" -eq 0 ]
+    echo "$output" | python3 -c '
+import json,sys
+o=json.load(sys.stdin)
+assert o["ok"] is True
+assert o["tool"]=="hq" and o["name"]=="restart"
+assert o["effect"]=="deploy" and o["network"] is True
+# only the one command rides in — no sibling commands, no full surface
+assert "commands" not in o
+'
+}
+
+@test "tools describe <tool> <bad-command> errors with the valid command set" {
+    run "$TOOLS_HOME/bin/tools" describe hq nope
+    [ "$status" -eq 1 ]
+    echo "$output" | python3 -c '
+import json,sys
+o=json.load(sys.stdin)
+assert o["ok"] is False
+assert "no command" in o["error"] and "restart" in o["error"]
 '
 }
 

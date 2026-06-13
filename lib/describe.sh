@@ -25,14 +25,16 @@
 #   describe_emit            the standard `--describe` handler: reset, run the
 #                            tool's describe_spec, print JSON, honor --pretty.
 #
-# The JSON contract (schema_version 2 — a superset of `severino-vault-mcp describe`):
+# The JSON contract (schema_version 3 — a superset of `severino-vault-mcp describe`):
 #
 #   { ok, schema_version, name, description,
+#     effect, network?, interactive?,   # tool-level blast radius (leaf tools)
 #     global_options:[ <opt> ],   # flags valid everywhere (declared before any cmd)
 #     positionals:[ <arg> ],      # leaf-tool direct positionals
 #     paras:[ "<prose>" ],        # tool-level prose (global-scope desc_para)
 #     examples:[ <example> ],     # tool-level examples (global-scope desc_example)
 #     commands:[ { name, summary, args:[ <arg> ],
+#                  effect, network?, interactive?,   # this command's blast radius
 #                  paras:[ "<prose>" ], examples:[ <example> ],
 #                  delegates?: "<owner>" } ] }    # delegates = flags owned elsewhere
 #
@@ -40,10 +42,15 @@
 #                   flags?, choices?, takes_value?, repeatable? }
 #   <example>   = { command, comment }
 #
-# v2 adds paras / examples / delegates so an agent can read a command's intent,
+# v2 added paras / examples / delegates so an agent can read a command's intent,
 # usage, and external flag-ownership from the JSON alone (without re-reading the
-# handler). desc_env stays human-help only. desc_para / desc_example are scoped
-# to the current command, like desc_opt / desc_pos.
+# handler). v3 adds the EFFECT triple — effect (one of read | local_write |
+# vault_write | remote_write | deploy, escalating blast radius) plus the boolean
+# tags network / interactive — declared by desc_effect. It is the structured
+# signal an agent risk-gates on before running a command (read vs deploy), the
+# one fact it can't derive from flags. effect is always emitted (default read);
+# network / interactive only when true. desc_env stays human-help only. desc_para
+# / desc_example / desc_effect are scoped to the current command, like desc_opt.
 #
 # Portability: this is sourced by every tool, including the one zsh tool
 # (dns-test). It is therefore written to run under bash AND zsh — no numeric
@@ -51,7 +58,7 @@
 # into single array elements with a control-char separator and unpacked with
 # IFS-`read`, which behaves the same in both shells.
 
-DESCRIBE_SCHEMA_VERSION=2
+DESCRIBE_SCHEMA_VERSION=3
 
 # Field separator for the encoded records below (a control char that can't
 # appear in option flags, help text, or names).
@@ -71,6 +78,7 @@ describe_reset() {
     _D_ENV=()              # var <sep> help
     _D_EX=()               # scope <sep> command <sep> comment
     _D_DELEGATE=()         # scope <sep> owner (command's flags owned by another repo)
+    _D_EFFECT=()           # scope <sep> effect <sep> network <sep> interactive
 }
 
 # desc_tool <name> <one-line description>
@@ -146,6 +154,28 @@ desc_delegate() {
     local owner="$1"; shift || true
     [[ "${1:-}" == "--" ]] && shift
     _D_DELEGATE+=("${_D_CUR_CMD}${_DSEP}${owner}")
+}
+
+# desc_effect <class> [+network] [+interactive] — declare a command's (or, before
+# the first desc_cmd, the leaf tool's) blast radius and reach. <class> escalates:
+#   read | local_write | vault_write | remote_write | deploy
+# Optional tags: +network (touches a remote / API / SSH) and +interactive (needs
+# a TTY). Scoped like desc_opt/desc_para. It is the structured signal an agent
+# risk-gates on before running a command — the one fact it can't read off the
+# flags — and rides into the JSON as effect / network / interactive. Undeclared
+# defaults to read (no mutation, no network); declare it on anything that mutates,
+# reaches off-box, or blocks on a TTY.
+desc_effect() {
+    local class="$1"; shift
+    local network=0 interactive=0
+    while [[ $# -gt 0 && "$1" != "--" ]]; do
+        case "$1" in
+            +network)     network=1 ;;
+            +interactive) interactive=1 ;;
+        esac
+        shift
+    done
+    _D_EFFECT+=("${_D_CUR_CMD}${_DSEP}${class}${_DSEP}${network}${_DSEP}${interactive}")
 }
 
 # desc_env <VAR> -- <help...> — human help only.
@@ -254,6 +284,10 @@ describe_render_usage() {
         [[ -n "$_D_DESC" ]] && printf '\n%s\n' "$_D_DESC"
     fi
 
+    # Effect line for a leaf tool (tool-level scope) — e.g. encrypt is a
+    # local_write. Command tools leave this at the default read and show nothing.
+    _describe_render_effect_line ""
+
     # Commands.
     if (( ${#_D_CMDS[@]} )); then
         local w=0
@@ -347,6 +381,7 @@ describe_render_usage_for() {
     printf 'Usage: %s %s [options]%s\n' "$_D_NAME" "$want" "${pos:+ $pos}"
     [[ -n "$summary" ]] && printf '\n%s\n' "$summary"
     _describe_render_para_section "$want" || true
+    _describe_render_effect_line "$want"
     local owner; owner="$(_describe_delegate_for "$want")"
     [[ -n "$owner" ]] && printf '\nFlags are owned elsewhere: %s\n' "$owner"
     _describe_render_pos_section "$want" "Arguments:"
@@ -404,6 +439,36 @@ _describe_delegate_for() {
         [[ "$scope" == "$want" ]] || continue
         printf '%s' "$owner"; return 0
     done
+}
+
+# _describe_effect_for <scope> — print "effect<sep>network<sep>interactive" for a
+# scope, defaulting to read / 0 / 0 when none was declared. Consumed by both the
+# usage line and the JSON, so the two can't drift.
+_describe_effect_for() {
+    local want="$1" rec scope effect network interactive
+    if (( ${#_D_EFFECT[@]} )); then
+        for rec in "${_D_EFFECT[@]}"; do
+            IFS="$_DSEP" read -r scope effect network interactive <<<"$rec"
+            if [[ "$scope" == "$want" ]]; then
+                printf '%s%s%s%s%s' "$effect" "$_DSEP" "$network" "$_DSEP" "$interactive"
+                return 0
+            fi
+        done
+    fi
+    printf 'read%s0%s0' "$_DSEP" "$_DSEP"
+}
+
+# _describe_render_effect_line <scope> — print "Effect: <class> · network · …",
+# but only when it carries information (anything other than a plain read). A
+# read-only, off-network command shows nothing, keeping the common help clean.
+_describe_render_effect_line() {
+    local want="$1" eff net ia tags
+    IFS="$_DSEP" read -r eff net ia <<<"$(_describe_effect_for "$want")"
+    [[ "$eff" == read && "$net" == 0 && "$ia" == 0 ]] && return 0
+    tags="$eff"
+    (( net )) && tags="$tags · network"
+    (( ia )) && tags="$tags · interactive"
+    printf '\nEffect: %s\n' "$tags"
 }
 
 # _describe_render_example_section <scope> — the Examples block for a scope.
@@ -609,6 +674,19 @@ _describe_examples_json() {
     printf '%s' "$items"
 }
 
+# _describe_effect_json <scope> — ',"effect":"<class>"[,"network":true]
+# [,"interactive":true]'. effect is always emitted (default read); the boolean
+# tags only when true, to keep the document lean (same shape as repeatable).
+_describe_effect_json() {
+    local eff net ia
+    IFS="$_DSEP" read -r eff net ia <<<"$(_describe_effect_for "$1")"
+    printf ',"effect":"%s"' "$(json_escape "$eff")"
+    # if/fi (not a bare `(( )) &&`) so the function's exit status is always 0 —
+    # this runs in `out+=$(...)`, where a trailing non-zero would trip set -e.
+    if (( net )); then printf ',"network":true'; fi
+    if (( ia  )); then printf ',"interactive":true'; fi
+}
+
 # describe_render_json [--pretty] — print the contract for the current spec.
 describe_render_json() {
     local pretty=0
@@ -617,6 +695,8 @@ describe_render_json() {
     local out rec name summary cmds=""
     out=$(printf '{"ok":true,"schema_version":%d,"name":"%s","description":"%s"' \
         "$DESCRIBE_SCHEMA_VERSION" "$(json_escape "$_D_NAME")" "$(json_escape "$_D_DESC")")
+    # Tool-level blast radius (meaningful for leaf tools; read for command tools).
+    out+=$(_describe_effect_json "")
     out+=$(printf ',"global_options":[%s]' "$(_describe_global_opts_json)")
     out+=$(printf ',"positionals":[%s]' "$(_describe_global_pos_json)")
     # Tool-level (global-scope) prose + examples — the signals an agent uses to
@@ -634,9 +714,10 @@ describe_render_json() {
             else
                 delegate_json=""
             fi
-            cmds="${cmds:+$cmds,}$(printf '{"name":"%s","summary":"%s","args":[%s],"paras":[%s],"examples":[%s]%s}' \
+            cmds="${cmds:+$cmds,}$(printf '{"name":"%s","summary":"%s","args":[%s]%s,"paras":[%s],"examples":[%s]%s}' \
                 "$(json_escape "$name")" "$(json_escape "$summary")" \
                 "$(_describe_args_for_scope "$name")" \
+                "$(_describe_effect_json "$name")" \
                 "$(_describe_paras_json "$name")" \
                 "$(_describe_examples_json "$name")" \
                 "$delegate_json")"

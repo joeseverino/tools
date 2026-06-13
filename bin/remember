@@ -6,6 +6,7 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" ""
 
 describe_spec() {
     desc_tool "remember" "Write a Claude memory file + MEMORY.md index entry in one shot."
+    desc_effect local_write
     desc_synopsis "remember <type> <slug> \"<title>\" [options]   < body"
     desc_synopsis "remember <type> <slug> \"<title>\" -b \"body\" [options]"
     desc_synopsis "remember --list"

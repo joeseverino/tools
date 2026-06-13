@@ -31,6 +31,7 @@ describe_spec() {
     desc_synopsis "tools <command> [options]"
 
     desc_cmd status   -- "One-screen health check across vault, inbox, backup, keys"
+    desc_effect read +network
     desc_opt --json   -- "Machine-readable output (one JSON object)"
 
     desc_cmd doctor   -- "Verify environment, deps, and installed symlinks"
@@ -42,22 +43,29 @@ describe_spec() {
     desc_opt --no-bench -- "Skip the bench scripts (the slowest step)"
 
     desc_cmd new      -- "Scaffold a new tool in bin/ with the house conventions"
+    desc_effect local_write
     desc_pos name     -- "Name of the new tool (creates bin/<name>)"
     desc_opt --drift  -- "Scaffold a drift-guard tool instead (show/diff/pull, with get_token/fetch_live/normalize + a config template)"
 
     desc_cmd install  -- "Create symlinks in \$INSTALL_DIR for every tool"
+    desc_effect local_write
 
     desc_cmd key      -- "Cache / forget / test the age key passphrase in Keychain"
+    desc_effect local_write +interactive
     desc_pos action +optional "{cache,forget,status,test}" -- "Keychain action — cache (store), forget (clear), status (show, default), test (verify it still unlocks \$AGE_KEY)"
 
     desc_cmd watch    -- "Manage the optional launchd auto-sync agent (off by default)"
+    desc_effect local_write
     desc_pos action +optional "{enable,disable,status,run-now}" -- "Agent action — enable (install+load), disable (unload+remove), status (loaded? + log tail), run-now (one immediate vault sync)"
 
     desc_cmd describe -- "Emit the command surface of every tool as one JSON document (the emit-once contract)"
     desc_pos tool +optional -- "Describe just one tool (delegates to <tool> --describe)"
+    desc_pos command +optional -- "With a tool, project its contract to one command — the token-minimal AI path (tools describe hq restart)"
     desc_opt --pretty -- "Indent the JSON for reading (default: compact, diff-stable)"
     desc_opt --repos  -- "Also fold in sibling repos' emitters (severino-vault-mcp)"
     desc_opt --tui    -- "Browse the whole toolchain in a full-screen explorer (aggregate only; / filters, Enter copies an invocation)"
+    desc_example "tools describe hq restart" -- "one command's contract — effect, args, examples"
+    desc_example "tools describe --tui" -- "interactive explorer over the whole toolchain"
 
     desc_env TOOLS_HOME        -- "Read from ~/.zshrc; root of this repo"
     desc_env TOOLS_INSTALL_DIR -- "Override install target (default: ~/.local/bin)"
@@ -499,6 +507,13 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" ""
 describe_spec() {
     desc_tool "__NAME__" "One-line description of __NAME__."
     desc_synopsis "__NAME__ [options] <args>"
+    # Declare blast radius if this tool does anything but read (default is read):
+    #   desc_effect local_write             # writes local files
+    #   desc_effect vault_write             # mutates the Obsidian vault
+    #   desc_effect remote_write +network   # mutates a remote system over the network
+    #   desc_effect deploy +network         # ships / restarts a service
+    # +interactive marks a command that blocks on a TTY. On a subcommand tool,
+    # put desc_effect right after each desc_cmd; here (leaf tool) it is the tool's.
     # desc_opt -x --example METAVAR -- "what the flag does"
     # desc_pos arg -- "what the positional is"
 }
@@ -805,14 +820,14 @@ cmd_key() {
 # `tools describe -h` text is itself derived from describe_spec (usage_command).
 
 cmd_describe() {
-    local pretty=0 repos=0 tui=0 only=""
+    local pretty=0 repos=0 tui=0 only="" only_cmd=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --pretty)   pretty=1; shift ;;
             --repos)    repos=1; shift ;;
             --tui)      tui=1; shift ;;
             -*)         die_unknown option "$1" describe ;;
-            *)          only="$1"; shift ;;
+            *)          if [[ -z "$only" ]]; then only="$1"; else only_cmd="$1"; fi; shift ;;
         esac
     done
 
@@ -827,6 +842,32 @@ cmd_describe() {
         else
             exec node "$TOOLS_HOME/lib/tools/describe-tui.mjs"
         fi
+    fi
+
+    # Single tool, single command: the token-minimal AI path. Project the tool's
+    # contract down to one command object (lifting the tool name/effect context
+    # in) so an agent fetches just the scope it's about to act on, not the whole
+    # surface. `tools describe hq restart` → {tool, name, effect, args, …}.
+    if [[ -n "$only" && -n "$only_cmd" ]]; then
+        [[ -x "$TOOLS_HOME/bin/$only" ]] || die "error" "no such tool: $only"
+        # NB: the embedded python uses only double-quoted strings so it survives
+        # this single-quoted shell block.
+        "$TOOLS_HOME/bin/$only" --describe \
+            | TOOLS_DESC_CMD="$only_cmd" TOOLS_DESC_PRETTY="$pretty" python3 -c '
+import json, os, sys
+want = os.environ["TOOLS_DESC_CMD"]
+doc = json.load(sys.stdin)
+cmd = next((c for c in doc.get("commands", []) if c["name"] == want), None)
+if cmd is None:
+    names = ", ".join(c["name"] for c in doc.get("commands", [])) or "(none)"
+    print(json.dumps({"ok": False,
+        "error": "%s has no command %r; commands: %s" % (doc.get("name"), want, names)}))
+    sys.exit(1)
+out = {"ok": True, "schema_version": doc.get("schema_version"), "tool": doc.get("name")}
+out.update(cmd)
+print(json.dumps(out, indent=2) if os.environ["TOOLS_DESC_PRETTY"] == "1" else json.dumps(out))
+'
+        return "${PIPESTATUS[1]}"
     fi
 
     # Single-tool: hand straight to that tool's own emitter.
