@@ -1,0 +1,33 @@
+#!/usr/bin/expect -f
+
+set timeout 5
+match_max 200000
+encoding system utf-8
+
+spawn -noecho /bin/sh -c "stty rows 12 columns 54 raw -echo; exec '$env(NODE_BIN)' '$env(TUI_BIN)'"
+
+expect -glob "*Writeups*"
+after 300
+send -- "\r"
+after 150
+send -- "\r"
+after 150
+send -- "\025"
+after 80
+send -- "\033\[200~PTY pasted title\033\[201~"
+after 150
+send -- "\033"
+after 30
+send -- "\[D"
+after 80
+send -- "X"
+after 150
+send -- "\r"
+after 150
+send -- "\033"
+after 150
+send -- "q"
+after 150
+send -- "d"
+expect -glob "*discarded*"
+exit 0

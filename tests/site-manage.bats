@@ -46,6 +46,16 @@ tui() { node "$TOOLS_HOME/lib/site/manage-tui.mjs"; }
     [[ "$output" == *"INTERACTIVE ACTIONS"* ]]
 }
 
+@test "smoke: detail fields keep long labels separated from their values" {
+    export MANAGE_TUI_SMOKE=detail
+    run tui
+    [ "$status" -eq 0 ]
+    related_line="$(printf '%s\n' "$output" | grep 'related_projects')"
+    [[ "$related_line" == *"related_projects  "* ]]
+    [[ "$related_line" == *"edit in Obsidian"* ]]
+    [[ "$related_line" != *"related_projectsadguard"* ]]
+}
+
 # ---- interactions ------------------------------------------------------------
 
 @test "replay: right arrow lands on the Site tab" {
@@ -68,6 +78,56 @@ tui() { node "$TOOLS_HOME/lib/site/manage-tui.mjs"; }
     [ "$status" -eq 0 ]
     [[ "$output" == *"Alpha Writeup"* ]]
     [[ "$output" == *"published_at"* ]]
+}
+
+@test "replay: split left-arrow edits at the cursor instead of typing [D" {
+    export MANAGE_TUI_KEYS='enter,enter,left-prefix,left-suffix,X,enter'
+    run tui
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Alpha WriteuXp"* ]]
+    [[ "$output" != *"[D"* ]]
+}
+
+@test "replay: long field editor keeps the cursor visible in a narrow terminal" {
+    export MANAGE_TUI_COLUMNS=54
+    export MANAGE_TUI_KEYS='enter,down,enter,abcdefghijklmnopqrstuvwxyz-abcdefghijklmnopqrstuvwxyz'
+    run tui
+    [ "$status" -eq 0 ]
+    description_line="$(printf '%s\n' "$output" | grep '^.*description')"
+    [[ "$description_line" == *"…"* ]]
+    [[ "$description_line" == *$'\033[7m '* ]]
+}
+
+@test "replay: Unicode cursor movement and backspace operate on graphemes" {
+    export MANAGE_TUI_KEYS='enter,enter,ctrl-u,paste:café🙂,left,backspace,enter'
+    run tui
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"caf🙂"* ]]
+    [[ "$output" != *"café🙂"* ]]
+}
+
+@test "replay: bracketed paste inserts text atomically and flattens newlines" {
+    export MANAGE_TUI_KEYS=$'enter,down,enter,paste:first line\nsecond line,enter'
+    run tui
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"first line second line"* ]]
+}
+
+@test "replay: short terminals keep the selected row and footer visible" {
+    export MANAGE_TUI_ROWS=10
+    export MANAGE_TUI_KEYS='down,down'
+    run tui
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"▸"* ]]
+    [[ "$output" == *"↑/↓ select"* ]]
+    [ "$(printf '%s\n' "$output" | wc -l | tr -d ' ')" -le 10 ]
+}
+
+@test "replay: left and right arrows still switch tabs outside line editing" {
+    export MANAGE_TUI_KEYS='right,left'
+    run tui
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"FEATURED"* ]]
 }
 
 @test "replay: p stages a publish flip and the save hint appears" {
@@ -118,4 +178,17 @@ tui() { node "$TOOLS_HOME/lib/site/manage-tui.mjs"; }
     [ "$status" -eq 0 ]
     [ "$(grep -c -- 'apply-writeup-plan' "$FAKE_MCP_LOG")" -eq 1 ]
     grep -q -- '"featured_order":\["beta"\]' "$FAKE_MCP_LOG"
+}
+
+@test "PTY: interactive terminal handles resize-sized frames, paste, and split arrows" {
+    [ -x /usr/bin/expect ] || skip "macOS expect is unavailable"
+    export NODE_BIN
+    NODE_BIN="$(command -v node)"
+    export TUI_BIN="$TOOLS_HOME/lib/site/manage-tui.mjs"
+    run /usr/bin/expect "$TOOLS_HOME/tests/site-manage-pty.exp"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *$'\033[?1049h'* ]]
+    [[ "$output" == *$'\033[?2004h'* ]]
+    [[ "$output" == *$'\033[?2004l'* ]]
+    [[ "$output" == *"PTY pasted titlXe"* ]]
 }
