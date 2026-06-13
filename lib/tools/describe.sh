@@ -52,31 +52,59 @@ print(json.dumps(out, indent=2) if os.environ["TOOLS_DESC_PRETTY"] == "1" else j
         return $?
     fi
 
-    local objs=() name out
-    for name in "${TOOL_NAMES[@]}"; do
-        if out=$("$TOOLS_HOME/bin/$name" --describe 2>/dev/null) && [[ "$out" == \{* ]]; then
-            objs+=("$out")
-        else
-            objs+=("$(printf '{"ok":false,"name":"%s","error":"%s"}' \
-                "$(json_escape "$name")" "tool did not emit a describe contract")")
-        fi
-    done
-
-    local siblings=""
-    if (( repos )); then
-        local sib_bins=(severino-vault-mcp) sib_objs=() bin
-        for bin in "${sib_bins[@]}"; do
-            if command -v "$bin" >/dev/null 2>&1 \
-                && out=$("$bin" describe 2>/dev/null) && [[ "$out" == \{* ]]; then
-                sib_objs+=("$out")
-            fi
-        done
-        siblings=$(printf ',"siblings":[%s]' "$(json_join "${sib_objs[@]:-}")")
+    # Warm cache. The federated document is byte-deterministic (no timestamps),
+    # so re-running a --describe subprocess per tool on every call is wasted work
+    # — it's the ~1.5s startup the `tools tui` / `tools generate` consumers pay.
+    # Key on a content hash of every tool plus the shared describe/render libs
+    # (reading those files is far cheaper than spawning a shell each), so any
+    # edit to a spec or the renderer misses and re-federates; correctness never
+    # lags content. --repos changes the body, so it joins the key. Best-effort:
+    # an unhashable source or unwritable cache dir just falls through to a live
+    # federation; TOOLS_DESCRIBE_NO_CACHE opts out entirely.
+    local cache_dir cache_file="" body="" sig=""
+    cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/severino-tools"
+    if [[ -z "${TOOLS_DESCRIBE_NO_CACHE:-}" ]]; then
+        sig=$(cat "$TOOLS_HOME"/bin/* "$TOOLS_HOME"/lib/*.sh \
+            "$TOOLS_HOME"/lib/tools/describe.sh 2>/dev/null | cksum) || sig=""
+        sig=${sig%% *}
+    fi
+    if [[ -n "$sig" ]]; then
+        local key="describe-$sig"
+        if (( repos )); then key="$key-repos"; fi
+        cache_file="$cache_dir/$key.json"
+        if [[ -r "$cache_file" ]]; then body=$(cat "$cache_file"); fi
     fi
 
-    local body
-    body=$(printf '{"ok":true,"schema_version":%d,"repo":"tools","tools":[%s]%s}' \
-        "$DESCRIBE_SCHEMA_VERSION" "$(json_join "${objs[@]}")" "$siblings")
+    if [[ -z "$body" ]]; then
+        local objs=() name out
+        for name in "${TOOL_NAMES[@]}"; do
+            if out=$("$TOOLS_HOME/bin/$name" --describe 2>/dev/null) && [[ "$out" == \{* ]]; then
+                objs+=("$out")
+            else
+                objs+=("$(printf '{"ok":false,"name":"%s","error":"%s"}' \
+                    "$(json_escape "$name")" "tool did not emit a describe contract")")
+            fi
+        done
+
+        local siblings=""
+        if (( repos )); then
+            local sib_bins=(severino-vault-mcp) sib_objs=() bin
+            for bin in "${sib_bins[@]}"; do
+                if command -v "$bin" >/dev/null 2>&1 \
+                    && out=$("$bin" describe 2>/dev/null) && [[ "$out" == \{* ]]; then
+                    sib_objs+=("$out")
+                fi
+            done
+            siblings=$(printf ',"siblings":[%s]' "$(json_join "${sib_objs[@]:-}")")
+        fi
+
+        body=$(printf '{"ok":true,"schema_version":%d,"repo":"tools","tools":[%s]%s}' \
+            "$DESCRIBE_SCHEMA_VERSION" "$(json_join "${objs[@]}")" "$siblings")
+
+        if [[ -n "$cache_file" ]] && mkdir -p "$cache_dir" 2>/dev/null; then
+            printf '%s\n' "$body" > "$cache_file" 2>/dev/null || true
+        fi
+    fi
 
     if (( pretty )) && command -v python3 >/dev/null 2>&1; then
         printf '%s\n' "$body" | python3 -m json.tool
