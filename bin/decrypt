@@ -10,11 +10,7 @@ describe_spec() {
     desc_inventory "Cryptography" 30
     desc_effect local_write +interactive
     desc_synopsis "decrypt [options] <file.age>..."
-    desc_para "Decrypts .age files using your default age private key. If the key is an"
-    desc_para "SSH key with a passphrase, decrypt unlocks it transparently using the"
-    desc_para "passphrase cached via 'tools key cache' — one prompt up front, silent"
-    desc_para "forever after. With no cached passphrase, it prompts (terminal or"
-    desc_para "osascript dialog, whichever is appropriate)."
+    desc_para "Decrypts .age files using your default age private key. If the key is an SSH key with a passphrase, decrypt unlocks it transparently using the passphrase cached via 'tools key cache' — one prompt up front, silent forever after. With no cached passphrase, it prompts (terminal or osascript dialog, whichever is appropriate)."
     desc_opt -f --force            -- "Overwrite existing decrypted output files"
     desc_opt -k --key PATH +repeat -- "Add another identity to try (repeatable). Bypasses the cached passphrase / unlock path for that key."
     desc_opt -p --stdout           -- "Write decrypted bytes to stdout, not a file. Silent on success; status/errors go to stderr (e.g. decrypt -p secret.age | less)."

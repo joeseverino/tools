@@ -426,16 +426,40 @@ _describe_scope_has_args() {
     return 1
 }
 
+# _describe_wrap <text> <width> — print <text> word-wrapped to <width> columns,
+# one line per output row. Word-splitting is done by peeling (bash + zsh safe).
+# This is why a paragraph is stored as ONE unwrapped logical string in the
+# contract: every renderer (this -h, the README, the TUI) reflows it to its own
+# width, so no presentation line-breaks are baked into the source of truth.
+_describe_wrap() {
+    local rest="$1" width="$2" line="" word
+    (( width < 20 )) && width=20
+    while [[ -n "$rest" ]]; do
+        word="${rest%% *}"
+        rest="${rest#"$word"}"; rest="${rest## }"
+        if [[ -z "$line" ]]; then
+            line="$word"
+        elif (( ${#line} + 1 + ${#word} <= width )); then
+            line="$line $word"
+        else
+            printf '%s\n' "$line"; line="$word"
+        fi
+    done
+    [[ -n "$line" ]] && printf '%s\n' "$line"
+}
+
 # _describe_render_para_section <scope> — print the prose paragraphs declared for
-# a scope, each preceded by a blank line. Same scope-filter shape as the pos/opt
-# sections. Returns 0 if any printed, 1 if none (lets usage fall back to _D_DESC).
+# a scope, each preceded by a blank line and reflowed to the terminal width. Same
+# scope-filter shape as the pos/opt sections. Returns 0 if any printed, 1 if none
+# (lets usage fall back to _D_DESC).
 _describe_render_para_section() {
     local want="$1" rec scope text printed=0
     (( ${#_D_PARA[@]} )) || return 1
     for rec in "${_D_PARA[@]}"; do
         scope="${rec%%"$_DSEP"*}"; text="${rec#*"$_DSEP"}"
         [[ "$scope" == "$want" ]] || continue
-        printf '\n%s\n' "$text"
+        printf '\n'
+        _describe_wrap "$text" "${_D_WIDTH:-80}"
         printed=1
     done
     (( printed )) || return 1

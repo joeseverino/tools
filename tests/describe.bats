@@ -285,6 +285,28 @@ for c in o.get("commands",[]):
     [[ "$output" == *"valid describe contracts: 17"* ]]
 }
 
+@test "prose is reflowable: validation rejects a paragraph that ends mid-sentence" {
+    # A paragraph in the contract is ONE logical, unwrapped string so every
+    # renderer (-h, README, TUI) reflows it to its own width. Storing a
+    # hard-wrapped source line as a paragraph fragments every consumer; the
+    # validator fails closed on it. Mutate a real contract to prove the guard.
+    run bash -c '
+        "$TOOLS_HOME/bin/tools" describe |
+        node -e '"'"'
+let input = "";
+process.stdin.on("data", chunk => input += chunk);
+process.stdin.on("end", () => {
+  const doc = JSON.parse(input);
+  doc.tools[0].paras = ["Encrypts files to your default age public key and any extras passed"];
+  process.stdout.write(JSON.stringify(doc));
+});
+'"'"' |
+        node "$TOOLS_HOME/lib/tools/validate-describe.mjs"
+    '
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"ends mid-sentence"* ]]
+}
+
 @test "aggregate validation rejects duplicate inventory order" {
     run bash -c '
         "$TOOLS_HOME/bin/tools" describe |

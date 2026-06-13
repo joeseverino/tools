@@ -66,9 +66,14 @@ describe_spec() {
     desc_pos command +optional -- "With a tool, project its contract to one command — the token-minimal AI path (tools describe hq restart)"
     desc_opt --pretty -- "Indent the JSON for reading (default: compact, diff-stable)"
     desc_opt --repos  -- "Also fold in sibling repos' emitters (severino-vault-mcp)"
-    desc_opt --tui    -- "Browse the whole toolchain in a full-screen explorer (aggregate only; / filters, Enter copies an invocation)"
+    desc_opt --tui    -- "Browse the whole toolchain in a full-screen explorer (aggregate only; / filters, Enter copies an invocation). Shorthand: 'tools tui'"
     desc_example "tools describe hq restart" -- "one command's contract — effect, args, examples"
-    desc_example "tools describe --tui" -- "interactive explorer over the whole toolchain"
+    desc_example "tools tui" -- "interactive explorer over the whole toolchain (alias of describe --tui)"
+
+    desc_cmd tui -- "Open the full-screen command-surface explorer (shorthand for 'describe --tui')"
+    desc_effect read +interactive
+    desc_opt --repos -- "Also fold in sibling repos' emitters (severino-vault-mcp)"
+    desc_para "The human tier of the emit-once contract: a two-pane explorer over every tool and command, with / to filter, e to expand the selected command's full prose + examples, and Enter to copy a ready-to-paste invocation."
 
     desc_cmd generate -- "Regenerate contract-derived completions and README reference/inventory"
     desc_effect local_write
@@ -560,6 +565,8 @@ describe_spec() {
     # put desc_effect right after each desc_cmd; here (leaf tool) it is the tool's.
     # desc_opt -x --example METAVAR -- "what the flag does"
     # desc_pos arg -- "what the positional is"
+    # desc_para "One logical paragraph as a single unwrapped string; renderers
+    #            reflow it. One desc_para per paragraph — never split a sentence."
 }
 
 desc_help_intercept "$@"
@@ -864,6 +871,7 @@ case "${1:-}" in
     watch)         shift; cmd_watch    "$@" ;;
     key)           shift; cmd_key      "$@" ;;
     describe)      shift; cmd_describe "$@" ;;
+    tui)           shift; cmd_describe --tui "$@" ;;
     generate)      shift; cmd_generate "$@" ;;
     *)             die_unknown command "$1" ;;
 esac

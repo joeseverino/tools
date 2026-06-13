@@ -100,6 +100,29 @@ tui() { node "$TOOLS_HOME/lib/tools/describe-tui.mjs"; }
     [[ "$output" == *"copied: decrypt <file>"* ]]
 }
 
+@test "replay: e expands the selected scope into a full-screen detail overlay" {
+    # The expand overlay surfaces the full prose + examples a command carries
+    # in the contract, instead of truncating to a "-h" pointer. tools describe
+    # carries examples (one of them the `tools tui` alias).
+    export DESCRIBE_TUI_COLUMNS=100
+    export DESCRIBE_TUI_ROWS=40
+    export DESCRIBE_TUI_KEYS='slash,t,o,o,l,s,enter,tab,down,down,down,down,down,down,down,e'
+    run tui
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"DETAIL"* ]]
+    [[ "$output" == *"tools describe"* ]]
+    [[ "$output" == *"EXAMPLES"* ]]
+    [[ "$output" == *"e/esc back"* ]]
+}
+
+@test "replay: e then e closes the overlay back to the two-pane explorer" {
+    export DESCRIBE_TUI_KEYS='tab,e,e'
+    run tui
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"DETAIL"* ]]
+    [[ "$output" == *"switch pane"* ]]
+}
+
 @test "replay: esc clears an active filter back to every tool" {
     export DESCRIBE_TUI_KEYS='slash,s,i,t,e,enter,esc'
     run tui

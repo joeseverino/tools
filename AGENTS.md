@@ -36,6 +36,13 @@ Every tool emits its command surface as one structured JSON document — the
   (flags`→desc_opt`, args`→desc_pos`, examples`→desc_example`), `desc_para` for
   genuine prose only; interactive UIs (the `site manage` / compare viewers)
   self-document their keymaps rather than restating them in CLI help.
+  **A `desc_para` call is ONE logical paragraph — a single unwrapped string, not
+  a hard-wrapped source line.** Every renderer (`-h`, the README, the `--tui`
+  expand pane) reflows it to its own width, so presentation line-breaks must
+  never be baked into the source of truth; declare multiple `desc_para`s for
+  multiple paragraphs (the renderers space them), never an empty `desc_para ""`
+  separator. The validator fails closed on a paragraph that ends mid-sentence or
+  is empty (`lib/tools/describe-schema.mjs`, guarded by `describe.bats`).
 - **Flags owned by another repo are pointed at, never restated.** `hq create`'s
   flags live in HQ's `manage.py`, and site's `scaffold-*`/`draft-alt`/`diagnose`
   flags live in the site repo's `package.json` scripts. Those commands declare
@@ -104,11 +111,13 @@ Every tool emits its command surface as one structured JSON document — the
 
 ## `tools describe --tui` — the human tier (shipped 2026-06-13)
 
-`tools describe --tui` is the interactive consumer of the contract above: a
-full-screen Node explorer over the same `tools describe` JSON
-(`lib/tools/describe-tui.mjs`), sharing the `site manage` look + polish bar (see
-`[[feedback_tui_polish]]`). The three tiers stay cleanly separated: `-h` (clean
-text) · `--describe` (JSON) · `--tui` (this).
+`tools describe --tui` (shorthand **`tools tui`**) is the interactive consumer of
+the contract above: a full-screen Node explorer over the same `tools describe`
+JSON (`lib/tools/describe-tui.mjs`), sharing the `site manage` look + polish bar
+(see `[[feedback_tui_polish]]`). The three tiers stay cleanly separated: `-h`
+(clean text) · `--describe` (JSON) · `--tui` (this). `tools tui` is a thin
+dispatch alias to `cmd_describe --tui` — the same renderer, one less thing to
+type; both stay in sync because there is only one implementation.
 
 - **Scope: aggregate only.** A single tool stays the clean wrapped `-h` (no
   per-tool mini-TUIs); `tools describe <tool> --tui` is a usage error.
@@ -117,6 +126,12 @@ text) · `--describe` (JSON) · `--tui` (this).
   commands across the whole toolchain, `Enter` copies a ready-to-paste
   invocation (pbcopy), `q`/Esc quits. Purposeful (find-and-use a command), not
   decorative.
+- **`e` expands the selected scope** into a full-screen, scrollable detail
+  overlay rendering everything the contract holds for that command (or leaf
+  tool): summary, effect, all args, the full reflowed `paras`, and `examples` —
+  instead of truncating to a `-h` pointer. `e`/Esc closes it, `Enter`/`c` copies.
+  This is the consumer that the one-logical-paragraph `desc_para` rule feeds:
+  the overlay reflows real paragraphs to the pane width.
 - **Reuse, don't fork — shared `lib/tui.mjs`.** The visual language and input
   plumbing (palette, grapheme-aware width/clip, `lineEditor`, `fitFrame`, the
   alt-screen/title polish bar, the escape-sequence input pump + replay key map)

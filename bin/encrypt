@@ -11,8 +11,7 @@ describe_spec() {
     desc_inventory "Cryptography" 20
     desc_effect local_write
     desc_synopsis "encrypt [options] <file>..."
-    desc_para "Encrypts files to your default age public key (and any extras passed"
-    desc_para "with -k). The original file is removed on success unless -c is given."
+    desc_para "Encrypts files to your default age public key (and any extras passed with -k). The original file is removed on success unless -c is given."
     desc_opt -c --copy             -- "Keep the original file (encrypt a copy)"
     desc_opt -f --force            -- "Overwrite existing .age output files"
     desc_opt -k --key PATH +repeat -- "Add another public key as a recipient (repeatable)"

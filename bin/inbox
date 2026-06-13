@@ -10,8 +10,7 @@ describe_spec() {
     desc_effect vault_write
     desc_synopsis "inbox [options] [text...]"
     desc_synopsis "cmd | inbox [options]"
-    desc_para "Capture a quick note into your vault inbox folder. The filename is"
-    desc_para "\"YYYY-MM-DD HHMMSS <first words>.md\" and the body is the captured text."
+    desc_para "Capture a quick note into your vault inbox folder. The filename is \"YYYY-MM-DD HHMMSS <first words>.md\" and the body is the captured text."
     desc_opt -e --edit -- "Open the captured note in \$EDITOR after writing. With no text/stdin, creates an empty note, opens the editor, then renames the file from its first non-empty content line on save."
     desc_pos text +optional +variadic -- "Note text (joined). Omitted when piping stdin."
     desc_env NOTES_HOME -- "Read from ~/.zshrc; resolves VAULT"

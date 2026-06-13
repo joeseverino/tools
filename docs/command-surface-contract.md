@@ -45,13 +45,21 @@ prose/examples/effect *before the first `desc_cmd`*. One dispatch line —
 `desc_help_intercept "$@"` — renders the whole help + machine surface; the `case`
 after it is pure wiring.
 
+A `desc_para` is **one logical paragraph stored as a single unwrapped string** —
+never a hard-wrapped source line. Every renderer (`-h`, README, the `--tui`
+expand pane) reflows it to its own width, so no presentation line-breaks are
+baked into the source of truth; declare one `desc_para` per paragraph (renderers
+space them) rather than an empty `desc_para ""` separator. Validation fails
+closed on a paragraph that ends mid-sentence or is empty, so the data stays
+reflowable as the repo scales.
+
 ## Three tiers, cleanly separated
 
 | Tier | Command | For |
 |---|---|---|
 | `-h` | `<tool> -h`, `<tool> <cmd> -h` | humans — clean wrapped text |
 | `--describe` | `<tool> --describe`, `tools describe [<tool> [<cmd>]]` | agents / guards — JSON |
-| `--tui` | `tools describe --tui` | humans — interactive explorer |
+| `--tui` | `tools describe --tui` (alias `tools tui`) | humans — interactive explorer; `e` expands a command's full prose + examples |
 
 The main `-h` stays a scannable git-style command list with a
 `Run '<tool> <cmd> -h'` pointer; the focused `<cmd> -h` renders that one

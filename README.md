@@ -177,6 +177,7 @@ Umbrella command for the personal CLI toolchain.
 | `tools key [cache|forget|status|test]` | `[cache\|forget\|status\|test]` | `local_write + interactive` | Cache / forget / test the age key passphrase in Keychain |
 | `tools watch [enable|disable|status|run-now]` | `[enable\|disable\|status\|run-now]` | `local_write` | Manage the optional launchd auto-sync agent (off by default) |
 | `tools describe [tool] [command]` | `[tool]`<br>`[command]`<br>`--pretty`<br>`--repos`<br>`--tui` | `read` | Emit the command surface of every tool as one JSON document (the emit-once contract) |
+| `tools tui` | `--repos` | `read + interactive` | Open the full-screen command-surface explorer (shorthand for 'describe --tui') |
 | `tools generate [all|completions|readme]` | `[all\|completions\|readme]`<br>`--check` | `local_write` | Regenerate contract-derived completions and README reference/inventory |
 
 **`tools describe` details**
@@ -185,16 +186,18 @@ Umbrella command for the personal CLI toolchain.
 
 ```sh
 tools describe hq restart  # one command's contract — effect, args, examples
-tools describe --tui  # interactive explorer over the whole toolchain
+tools tui  # interactive explorer over the whole toolchain (alias of describe --tui)
 ```
+
+**`tools tui` details**
+
+The human tier of the emit-once contract: a two-pane explorer over every tool and command, with / to filter, e to expand the selected command's full prose + examples, and Enter to copy a ready-to-paste invocation.
 
 #### `encrypt`
 
 Age-encrypt files to your public key; remove originals.
 
-Encrypts files to your default age public key (and any extras passed
-
-with -k). The original file is removed on success unless -c is given.
+Encrypts files to your default age public key (and any extras passed with -k). The original file is removed on success unless -c is given.
 
 Usage: `encrypt <file>...`
 
@@ -222,15 +225,7 @@ encrypt -- -starts-with-dash.md
 
 Age-decrypt .age files with your private key; restore originals.
 
-Decrypts .age files using your default age private key. If the key is an
-
-SSH key with a passphrase, decrypt unlocks it transparently using the
-
-passphrase cached via 'tools key cache' — one prompt up front, silent
-
-forever after. With no cached passphrase, it prompts (terminal or
-
-osascript dialog, whichever is appropriate).
+Decrypts .age files using your default age private key. If the key is an SSH key with a passphrase, decrypt unlocks it transparently using the passphrase cached via 'tools key cache' — one prompt up front, silent forever after. With no cached passphrase, it prompts (terminal or osascript dialog, whichever is appropriate).
 
 Usage: `decrypt <file>...`
 
@@ -257,27 +252,11 @@ decrypt -p secret.age | less
 
 Decrypt a .age file to a temp file and open it in the default app.
 
-Decrypts a .age file to a temporary file under $TMPDIR (mode 600,
+Decrypts a .age file to a temporary file under $TMPDIR (mode 600, owner-only), opens it in the default macOS app for the underlying extension via 'open -W', then deletes the temporary file when the app finishes with it.
 
-owner-only), opens it in the default macOS app for the underlying
+The plaintext never lands in the source directory or anywhere persistent. $TMPDIR is per-user and cleared by macOS on reboot.
 
-extension via 'open -W', then deletes the temporary file when the app
-
-finishes with it.
-
-
-
-The plaintext never lands in the source directory or anywhere persistent.
-
-$TMPDIR is per-user and cleared by macOS on reboot.
-
-
-
-Set as the default opener for .age files via:
-
-  duti -s <bundle.id.of.this.script> .age all
-
-…or wrap this script in a tiny .app bundle (Automator: Run Shell Script).
+Set it as the default opener for .age files with 'duti -s <bundle.id.of.this.script> .age all', or wrap this script in a tiny .app bundle (Automator: Run Shell Script).
 
 Usage: `open-age <file>`
 
@@ -292,9 +271,7 @@ Effect: `local_write + interactive`
 
 Quick-capture a note into the vault inbox.
 
-Capture a quick note into your vault inbox folder. The filename is
-
-"YYYY-MM-DD HHMMSS <first words>.md" and the body is the captured text.
+Capture a quick note into your vault inbox folder. The filename is "YYYY-MM-DD HHMMSS <first words>.md" and the body is the captured text.
 
 Usage: `inbox [text]...`
 
@@ -329,19 +306,9 @@ Operations on the vault git repo.
 
 Mirror the items in config/backup.sh into $BACKUPS_HOME.
 
-Mirror each tracked file into $BACKUPS_HOME using the mapping in
+Mirror each tracked file into $BACKUPS_HOME using the mapping in config/backup.sh. Uses rsync, so permissions, xattrs, and timestamps are preserved and unchanged files are skipped at the byte level.
 
-config/backup.sh. Uses rsync, so permissions, xattrs, and timestamps
-
-are preserved and unchanged files are skipped at the byte level.
-
-
-
-If $BACKUPS_HOME is a git repo, an auto-commit is made after the copy
-
-so each backup run leaves a point-in-time entry in the local history.
-
-
+If $BACKUPS_HOME is a git repo, an auto-commit is made after the copy so each backup run leaves a point-in-time entry in the local history.
 
 Add or remove items by editing tools/config/backup.sh.
 
@@ -358,17 +325,9 @@ Effect: `local_write`
 
 Compare DNS resolver latency across paths.
 
-Measures DNS latency across System DNS, a LAN AdGuard resolver,
+Measures DNS latency across System DNS, a LAN AdGuard resolver, Cloudflare 1.1.1.1, and Cloudflare DoH. Reports avg/min/p50/p95/max and the delta of each path against a chosen baseline.
 
-Cloudflare 1.1.1.1, and Cloudflare DoH. Reports avg/min/p50/p95/max and
-
-the delta of each path against a chosen baseline.
-
-
-
-The AdGuard IP defaults to an example LAN address; set ADGUARD_IP in your
-
-environment (or pass -a) to point at your own resolver.
+The AdGuard IP defaults to an example LAN address; set ADGUARD_IP in your environment (or pass -a) to point at your own resolver.
 
 Usage: `dns-test`
 
@@ -435,11 +394,7 @@ forward_port / enabled, sorted by domain.
 
 Sync vault frontmatter to Severino HQ, plus routine HQ deployment ops.
 
-Severino HQ glue. Reads YAML frontmatter from the vault and upserts the
-
-HQ docs index. Also wraps the routine ssh + docker compose calls for
-
-managing the HQ deployment.
+Severino HQ glue. Reads YAML frontmatter from the vault and upserts the HQ docs index. Also wraps the routine ssh + docker compose calls for managing the HQ deployment.
 
 | Invocation | Arguments / options | Effect | Summary |
 |---|---|---|---|
@@ -567,9 +522,7 @@ Both panes share a route and a draggable divider; the viewer documents its own k
 
 Render Joe's brand kits via the branding-engine.
 
-Kits land in $BRAND_HOME/kits. The engine lives in $ENGINE_HOME and comes in
-
-as a dependency of the brand repo; see its README for all flags.
+Kits land in $BRAND_HOME/kits. The engine lives in $ENGINE_HOME and comes in as a dependency of the brand repo; see its README for all flags.
 
 | Invocation | Arguments / options | Effect | Summary |
 |---|---|---|---|
@@ -583,9 +536,7 @@ Write a Claude memory file + MEMORY.md index entry in one shot.
 
 Compress the two-step "write file + edit MEMORY.md" loop into one command.
 
-Body content is read from stdin unless --body is given. Frontmatter is
-
-generated from the args.
+Body content is read from stdin unless --body is given. Frontmatter is generated from the args.
 
 Usage: `remember <type> <slug> <title>`
 

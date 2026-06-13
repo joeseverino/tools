@@ -17,6 +17,7 @@ _tools_suite_contract() {
         'key:Cache / forget / test the age key passphrase in Keychain'
         'watch:Manage the optional launchd auto-sync agent (off by default)'
         'describe:Emit the command surface of every tool as one JSON document (the emit-once contract)'
+        'tui:Open the full-screen command-surface explorer (shorthand for '\''describe --tui'\'')'
         'generate:Regenerate contract-derived completions and README reference/inventory'
       )
       _arguments -C \
@@ -32,7 +33,8 @@ _tools_suite_contract() {
             new) _arguments '1:Name of the new tool (creates bin/<name>):' '--drift[Scaffold a drift-guard tool instead (show/diff/pull, with get_token/fetch_live/normalize + a config template)]' ;;
             key) _arguments '1:Keychain action — cache (store), forget (clear), status (show, default), test (verify it still unlocks $AGE_KEY):(cache forget status test)' ;;
             watch) _arguments '1:Agent action — enable (install+load), disable (unload+remove), status (loaded? + log tail), run-now (one immediate vault sync):(enable disable status run-now)' ;;
-            describe) _arguments '1:Describe just one tool (delegates to <tool> --describe):' '2:With a tool, project its contract to one command — the token-minimal AI path (tools describe hq restart):' '--pretty[Indent the JSON for reading (default: compact, diff-stable)]' '--repos[Also fold in sibling repos'\'' emitters (severino-vault-mcp)]' '--tui[Browse the whole toolchain in a full-screen explorer (aggregate only; / filters, Enter copies an invocation)]' ;;
+            describe) _arguments '1:Describe just one tool (delegates to <tool> --describe):' '2:With a tool, project its contract to one command — the token-minimal AI path (tools describe hq restart):' '--pretty[Indent the JSON for reading (default: compact, diff-stable)]' '--repos[Also fold in sibling repos'\'' emitters (severino-vault-mcp)]' '--tui[Browse the whole toolchain in a full-screen explorer (aggregate only; / filters, Enter copies an invocation). Shorthand: '\''tools tui'\'']' ;;
+            tui) _arguments '--repos[Also fold in sibling repos'\'' emitters (severino-vault-mcp)]' ;;
             generate) _arguments '1:Generated surface (default: all):(all completions readme)' '--check[Fail when generated files are stale; do not write]' ;;
           esac
           ;;
