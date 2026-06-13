@@ -70,8 +70,8 @@ command's options, args, prose, examples, and effect line.
                    "delegates": "<owner>" } ] }
 ```
 
-`<opt>`/`<arg>` = `{ name, positional, required, help, flags?, choices?,
-takes_value?, repeatable?, variadic? }`. Output is byte-deterministic (no timestamps), so a
+`<opt>`/`<arg>` = `{ name, positional, required, help, flags?, metavar?,
+choices?, takes_value?, repeatable?, variadic? }`. Output is byte-deterministic (no timestamps), so a
 guard can diff it. v2 added per-scope `paras` / `examples` / `delegates`; v3 added
 the effect triple below.
 

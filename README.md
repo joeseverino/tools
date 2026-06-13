@@ -159,6 +159,8 @@ command surface.
 
 Fetch the live AdGuard Home DNS rewrites and diff them against the vault mirror.
 
+Rewrites are normalized to domain/answer, sorted by domain.
+
 | Invocation | Arguments / options | Effect | Summary |
 |---|---|---|---|
 | `adguard show` | — | `read + network` | Fetch and print the live state (normalized, sorted JSON) |
@@ -168,6 +170,22 @@ Fetch the live AdGuard Home DNS rewrites and diff them against the vault mirror.
 #### `backup`
 
 Mirror the items in config/backup.sh into $BACKUPS_HOME.
+
+Mirror each tracked file into $BACKUPS_HOME using the mapping in
+
+config/backup.sh. Uses rsync, so permissions, xattrs, and timestamps
+
+are preserved and unchanged files are skipped at the byte level.
+
+
+
+If $BACKUPS_HOME is a git repo, an auto-commit is made after the copy
+
+so each backup run leaves a point-in-time entry in the local history.
+
+
+
+Add or remove items by editing tools/config/backup.sh.
 
 Usage: `backup`
 
@@ -182,15 +200,23 @@ Effect: `local_write`
 
 Render Joe's brand kits via the branding-engine.
 
+Kits land in $BRAND_HOME/kits. The engine lives in $ENGINE_HOME and comes in
+
+as a dependency of the brand repo; see its README for all flags.
+
 | Invocation | Arguments / options | Effect | Summary |
 |---|---|---|---|
 | `brand build` | — | `local_write` | Rebuild every kit from brand/ + the social cards |
-| `brand kit <slug> <hex> <initials> [wordmark]` | `<slug>`<br>`<hex>`<br>`<initials>`<br>`[wordmark]`<br>`--font <value>`<br>`--only <value>`<br>`--out <value>` | `local_write` | Render a one-off kit into severino-brand/kits/<slug> |
+| `brand kit <slug> <hex> <initials> [wordmark]` | `<slug>`<br>`<hex>`<br>`<initials>`<br>`[wordmark]`<br>`--font <FONT>`<br>`--only <LIST>`<br>`--out <DIR>` | `local_write` | Render a one-off kit into severino-brand/kits/<slug> |
 | `brand status` | — | `read` | Show engine + brand locations and git state |
 
 #### `cf-dns`
 
 Fetch the live Cloudflare DNS records and diff them against the vault mirror.
+
+Records are normalized to type/name/content/proxied (+ priority for MX);
+
+Cloudflare-internal fields (id, timestamps, meta) are dropped.
 
 | Invocation | Arguments / options | Effect | Summary |
 |---|---|---|---|
@@ -202,30 +228,61 @@ Fetch the live Cloudflare DNS records and diff them against the vault mirror.
 
 Age-decrypt .age files with your private key; restore originals.
 
+Decrypts .age files using your default age private key. If the key is an
+
+SSH key with a passphrase, decrypt unlocks it transparently using the
+
+passphrase cached via 'tools key cache' — one prompt up front, silent
+
+forever after. With no cached passphrase, it prompts (terminal or
+
+osascript dialog, whichever is appropriate).
+
 Usage: `decrypt <file>...`
 
 | Argument | Description |
 |---|---|
 | `-f, --force` | Overwrite existing decrypted output files |
-| `-k, --key <value>` | Add another identity to try (repeatable). Bypasses the cached passphrase / unlock path for that key. |
+| `-k, --key <PATH>` | Add another identity to try (repeatable). Bypasses the cached passphrase / unlock path for that key. |
 | `-p, --stdout` | Write decrypted bytes to stdout, not a file. Silent on success; status/errors go to stderr (e.g. decrypt -p secret.age \| less). |
 | `--no-cache` | Don't use the cached passphrase even if one exists. Lets age prompt directly (terminal only). |
 | `<file>...` | The .age file(s) to decrypt |
 
 Effect: `local_write + interactive`
 
+**Examples**
+
+```sh
+decrypt notes.md.age
+decrypt -k ~/keys/oldkey notes.md.age
+decrypt -f *.age
+decrypt -p secret.age | less
+```
+
 #### `dns-test`
 
 Compare DNS resolver latency across paths.
+
+Measures DNS latency across System DNS, a LAN AdGuard resolver,
+
+Cloudflare 1.1.1.1, and Cloudflare DoH. Reports avg/min/p50/p95/max and
+
+the delta of each path against a chosen baseline.
+
+
+
+The AdGuard IP defaults to an example LAN address; set ADGUARD_IP in your
+
+environment (or pass -a) to point at your own resolver.
 
 Usage: `dns-test`
 
 | Argument | Description |
 |---|---|
-| `-d <value>` | Domain to query (default: google.com) |
-| `-n <value>` | Queries per path (default: 20) |
-| `-a <value>` | AdGuard LAN IP (default: 192.168.1.233, env ADGUARD_IP) |
-| `-b <value>` | Path label to use as delta baseline (default: "AdGuard LAN") |
+| `-d <domain>` | Domain to query (default: google.com) |
+| `-n <runs>` | Queries per path (default: 20) |
+| `-a <ip>` | AdGuard LAN IP (default: 192.168.1.233, env ADGUARD_IP) |
+| `-b <label>` | Path label to use as delta baseline (default: "AdGuard LAN") |
 
 Effect: `read + network`
 
@@ -246,20 +303,41 @@ Effect: `local_write`
 
 Age-encrypt files to your public key; remove originals.
 
+Encrypts files to your default age public key (and any extras passed
+
+with -k). The original file is removed on success unless -c is given.
+
 Usage: `encrypt <file>...`
 
 | Argument | Description |
 |---|---|
 | `-c, --copy` | Keep the original file (encrypt a copy) |
 | `-f, --force` | Overwrite existing .age output files |
-| `-k, --key <value>` | Add another public key as a recipient (repeatable) |
+| `-k, --key <PATH>` | Add another public key as a recipient (repeatable) |
 | `<file>...` | File(s) to encrypt |
 
 Effect: `local_write`
 
+**Examples**
+
+```sh
+encrypt notes.md  # original removed
+encrypt -c ~/.ssh/id_ed25519  # original kept (backup pattern)
+encrypt -k ~/keys/coworker.pub notes.md
+encrypt -k a.pub -k b.pub *.md
+encrypt -f *.txt
+encrypt -- -starts-with-dash.md
+```
+
 #### `hq`
 
 Sync vault frontmatter to Severino HQ, plus routine HQ deployment ops.
+
+Severino HQ glue. Reads YAML frontmatter from the vault and upserts the
+
+HQ docs index. Also wraps the routine ssh + docker compose calls for
+
+managing the HQ deployment.
 
 | Invocation | Arguments / options | Effect | Summary |
 |---|---|---|---|
@@ -270,17 +348,39 @@ Sync vault frontmatter to Severino HQ, plus routine HQ deployment ops.
 | `hq validate` | — | `read + network` | Report HQ registry entries (Projects/Assets) that no vault doc references. Read-only |
 | `hq create <project|asset> <slug>` | `<project\|asset>`<br>`<slug>` | `remote_write + network` | Create or update a Project or Asset in HQ (idempotent upsert by slug) |
 | `hq deploy` | — | `deploy + network` | Fallback: re-pull the latest scanned GHCR image and restart the container (CI's deploy step) |
-| `hq ship` | `-m, --message <value>` | `deploy + network` | Commit + push a small HQ change. The push IS the deploy: it triggers the gated pipeline (build → scan → deploy on green) |
-| `hq logs` | `-f, --follow`<br>`--tail <value>` | `read + network` | Show app container logs (default tail 50) |
+| `hq ship` | `-m, --message <TEXT>` | `deploy + network` | Commit + push a small HQ change. The push IS the deploy: it triggers the gated pipeline (build → scan → deploy on green) |
+| `hq logs` | `-f, --follow`<br>`--tail <N>` | `read + network` | Show app container logs (default tail 50) |
 | `hq restart` | — | `deploy + network` | `docker compose restart app` — no rebuild, no migrations. For env changes or stuck state |
 | `hq open` | — | `read` | Open $HQ_URL in the browser |
 | `hq shell` | — | `remote_write + network + interactive` | ssh -t into the HQ Django shell (poke the ORM) |
 | `hq superuser` | — | `remote_write + network + interactive` | ssh -t into HQ and run createsuperuser interactively |
 | `hq export [year] [md|json]` | `[year]`<br>`[md\|json]` | `local_write + network` | Download the year summary to ./ and print the path |
 
+**`hq create` details**
+
+**Examples**
+
+```sh
+hq create project my-site --name "My Site" --category cloudflare --status published --url https://example.com
+hq create asset example-com --name "example.com" --category domain
+```
+
+**Examples**
+
+```sh
+hq sync  # most common — push vault → HQ
+hq manifest | jq '.[] | .doc_id'
+hq doctor  # find docs missing frontmatter
+hq export 2026  # download year-summary-2026.md
+```
+
 #### `inbox`
 
 Quick-capture a note into the vault inbox.
+
+Capture a quick note into your vault inbox folder. The filename is
+
+"YYYY-MM-DD HHMMSS <first words>.md" and the body is the captured text.
 
 Usage: `inbox [text]...`
 
@@ -291,9 +391,23 @@ Usage: `inbox [text]...`
 
 Effect: `vault_write`
 
+**Examples**
+
+```sh
+inbox "remember to update the homelab certs"
+pbpaste | inbox
+echo "lookup later" | inbox
+inbox -e  # blank note, opens editor
+inbox -e "draft: post-mortem template"  # seed + open editor
+```
+
 #### `nginx`
 
 Fetch the live Nginx Proxy Manager proxy hosts and diff them against the vault mirror.
+
+Proxy hosts are normalized to domain_names / forward_scheme / forward_host /
+
+forward_port / enabled, sorted by domain.
 
 | Invocation | Arguments / options | Effect | Summary |
 |---|---|---|---|
@@ -304,6 +418,28 @@ Fetch the live Nginx Proxy Manager proxy hosts and diff them against the vault m
 #### `open-age`
 
 Decrypt a .age file to a temp file and open it in the default app.
+
+Decrypts a .age file to a temporary file under $TMPDIR (mode 600,
+
+owner-only), opens it in the default macOS app for the underlying
+
+extension via 'open -W', then deletes the temporary file when the app
+
+finishes with it.
+
+
+
+The plaintext never lands in the source directory or anywhere persistent.
+
+$TMPDIR is per-user and cleared by macOS on reboot.
+
+
+
+Set as the default opener for .age files via:
+
+  duti -s <bundle.id.of.this.script> .age all
+
+…or wrap this script in a tiny .app bundle (Automator: Run Shell Script).
 
 Usage: `open-age <file>`
 
@@ -318,23 +454,38 @@ Effect: `local_write + interactive`
 
 Write a Claude memory file + MEMORY.md index entry in one shot.
 
+Compress the two-step "write file + edit MEMORY.md" loop into one command.
+
+Body content is read from stdin unless --body is given. Frontmatter is
+
+generated from the args.
+
 Usage: `remember <type> <slug> <title>`
 
 | Argument | Description |
 |---|---|
-| `-d, --description <value>` | Frontmatter description (default: title) |
-| `-k, --hook <value>` | MEMORY.md one-liner hook (default: title) |
-| `-b, --body <value>` | Body text in lieu of stdin |
-| `-f, --body-file <value>` | Body text from file |
+| `-d, --description <STR>` | Frontmatter description (default: title) |
+| `-k, --hook <STR>` | MEMORY.md one-liner hook (default: title) |
+| `-b, --body <STR>` | Body text in lieu of stdin |
+| `-f, --body-file <FILE>` | Body text from file |
 | `-F, --force` | Overwrite an existing memory (update in place) |
-| `--dir <value>` | Memory dir. Default: CLAUDE_MEMORY_DIR, else CLAUDE_PROJECT_DIR, else $PWD — encoded to ~/.claude/projects/<enc>/memory. No flag needed inside a Claude project. |
+| `--dir <PATH>` | Memory dir. Default: CLAUDE_MEMORY_DIR, else CLAUDE_PROJECT_DIR, else $PWD — encoded to ~/.claude/projects/<enc>/memory. No flag needed inside a Claude project. |
 | `--list` | Show the MEMORY.md index |
-| `--forget <value>` | Delete the memory and its index entry |
+| `--forget <SLUG>` | Delete the memory and its index entry |
 | `<type>` | user \| feedback \| project \| reference |
 | `<slug>` | kebab- or snake-case identifier (becomes 'name:' in frontmatter; underscored in filename) |
 | `<title>` | text shown as the link in MEMORY.md |
 
 Effect: `local_write`
+
+**Examples**
+
+```sh
+echo "rule body here" | remember feedback use-rg-and-fd "Use rg and fd"
+remember feedback use-rg-and-fd "Use rg and fd" -F < updated-body  # update
+remember --list
+remember --forget use-rg-and-fd
+```
 
 #### `site`
 
@@ -370,8 +521,58 @@ Public jseverino.com Astro site workflow.
 | `site seo <page>` | `<page>`<br>`-r, --result` | `read` | Preview the Google-style search result snippet for a built page |
 | `site dev` | `--drafts` | `read` | Start the local Astro dev server |
 | `site open` | — | `read` | Open the local dev URL in the browser |
-| `site compare [path]` | `[path]`<br>`--dev <value>`<br>`--live <value>`<br>`--mobile`<br>`--desktop`<br>`--compact`<br>`--expanded`<br>`--link-scroll`<br>`--no-link-scroll`<br>`--scroll-mode <exact\|ratio>`<br>`--mirror-links`<br>`--no-mirror-links`<br>`--split <value>`<br>`--swap`<br>`--solo`<br>`--split-view`<br>`--overlay`<br>`--overlay-diff`<br>`--focus <dev\|live>`<br>`--notes`<br>`--note <value>`<br>`--notes-out <value>`<br>`--clear-notes`<br>`--brand <value>`<br>`--http`<br>`--no-open` | `read + interactive` | Open a resizable dev-vs-live browser comparison |
+| `site compare [path]` | `[path]`<br>`--dev <URL>`<br>`--live <URL>`<br>`--mobile`<br>`--desktop`<br>`--compact`<br>`--expanded`<br>`--link-scroll`<br>`--no-link-scroll`<br>`--scroll-mode <exact\|ratio>`<br>`--mirror-links`<br>`--no-mirror-links`<br>`--split <PERCENT>`<br>`--swap`<br>`--solo`<br>`--split-view`<br>`--overlay`<br>`--overlay-diff`<br>`--focus <dev\|live>`<br>`--notes`<br>`--note <TEXT>`<br>`--notes-out <FILE>`<br>`--clear-notes`<br>`--brand <NAME>`<br>`--http`<br>`--no-open` | `read + interactive` | Open a resizable dev-vs-live browser comparison |
 | `site og` | — | `local_write` | Regenerate the Open Graph social card (public/assets/og/) |
+
+**`site publish` details**
+
+Runs the whole vault-to-live flow: gate every published writeup, hq sync, build + audits, auto-commit the synced snapshot, push (Cloudflare Pages rebuilds), then verify each affected writeup live. Only the generated snapshot is committed; drafts stay in the vault and are never pushed.
+
+**`site publish-writeup` details**
+
+The same gate as `site publish` validates every published writeup once before any sync, build, commit, or push. Requires the severino-vault-mcp console script on PATH.
+
+**`site tech` details**
+
+Catalog source: 06 Pages/_technology-groups.md. Featured slugs surface in the home-page cloud.
+
+**`site featured` details**
+
+No args prints the order the home page renders; a slug + target moves that writeup and renumbers 1..N (inserting one sets featured: true). The new order ships on the next `site publish`.
+
+**Examples**
+
+```sh
+site featured my-writeup top  # move to slot 1
+site featured my-writeup off  # unfeature; others close the gap
+```
+
+**`site manage` details**
+
+Full-screen manager (keys shown in-app): reorder featured, feature/unfeature, publish/unpublish across every writeup; saving submits one transactional plan. Ship with `site publish`.
+
+**`site verify` details**
+
+Checks the live site: /portfolio/<slug>/ is 200, the og:image resolves, every tag page lists it, and the home page shows it when featured. Run ~30s after publishing (Cloudflare rebuild).
+
+**`site new-writeup` details**
+
+Creates 05 Writeups/<slug>/index.md (published: false) and an images/ folder; stays out of the build until you set published: true.
+
+**`site seo` details**
+
+Reads dist.nosync — run `site build` first if the page is missing.
+
+**Examples**
+
+```sh
+site seo portfolio
+site seo --result architecting-a-custom-detection-engine
+```
+
+**`site compare` details**
+
+Both panes share a route and a draggable divider; the viewer documents its own keys. Review notes live in a shared file the viewer polls, so a teammate or an AI session can leave notes live — set SITE_COMPARE_VAULT (defaults to the vault 00 Inbox) for the drawer's Send-to-vault button.
 
 #### `tools`
 
@@ -388,6 +589,15 @@ Umbrella command for the personal CLI toolchain.
 | `tools watch [enable|disable|status|run-now]` | `[enable\|disable\|status\|run-now]` | `local_write` | Manage the optional launchd auto-sync agent (off by default) |
 | `tools describe [tool] [command]` | `[tool]`<br>`[command]`<br>`--pretty`<br>`--repos`<br>`--tui` | `read` | Emit the command surface of every tool as one JSON document (the emit-once contract) |
 | `tools generate [all|completions|readme]` | `[all\|completions\|readme]`<br>`--check` | `local_write` | Regenerate contract-derived completions and README reference/inventory |
+
+**`tools describe` details**
+
+**Examples**
+
+```sh
+tools describe hq restart  # one command's contract — effect, args, examples
+tools describe --tui  # interactive explorer over the whole toolchain
+```
 
 #### `ts-acl`
 

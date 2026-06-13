@@ -43,7 +43,7 @@ _tools_suite_contract() {
         command) _describe 'command' commands ;;
         args)
           case "${words[2]}" in
-            kit) _arguments '1:Kit slug (output directory name):' '2:Primary brand color (hex, no leading #):' '3:Monogram initials:' '4:Wordmark text:' '--font[Font family]:value:' '--only[Comma-separated subset (e.g. mark,wordmark)]:value:' '--out[Output directory override]:value:' ;;
+            kit) _arguments '1:Kit slug (output directory name):' '2:Primary brand color (hex, no leading #):' '3:Monogram initials:' '4:Wordmark text:' '--font[Font family]:font:' '--only[Comma-separated subset (e.g. mark,wordmark)]:list:' '--out[Output directory override]:dir:' ;;
           esac
           ;;
       esac
@@ -68,7 +68,7 @@ _tools_suite_contract() {
     decrypt)
       _arguments \
         '{-f,--force}[Overwrite existing decrypted output files]' \
-        '*{-k,--key}[Add another identity to try (repeatable). Bypasses the cached passphrase / unlock path for that key.]:value:' \
+        '*{-k,--key}[Add another identity to try (repeatable). Bypasses the cached passphrase / unlock path for that key.]:path:' \
         '{-p,--stdout}[Write decrypted bytes to stdout, not a file. Silent on success; status/errors go to stderr (e.g. decrypt -p secret.age | less).]' \
         '--no-cache[Don'\''t use the cached passphrase even if one exists. Lets age prompt directly (terminal only).]' \
         '*:The .age file(s) to decrypt:' \
@@ -76,10 +76,10 @@ _tools_suite_contract() {
       ;;
     dns-test)
       _arguments \
-        '-d[Domain to query (default: google.com)]:value:' \
-        '-n[Queries per path (default: 20)]:value:' \
-        '-a[AdGuard LAN IP (default: 192.168.1.233, env ADGUARD_IP)]:value:' \
-        '-b[Path label to use as delta baseline (default: "AdGuard LAN")]:value:' \
+        '-d[Domain to query (default: google.com)]:domain:' \
+        '-n[Queries per path (default: 20)]:runs:' \
+        '-a[AdGuard LAN IP (default: 192.168.1.233, env ADGUARD_IP)]:ip:' \
+        '-b[Path label to use as delta baseline (default: "AdGuard LAN")]:label:' \
         '(-h --help)'{-h,--help}'[show help]'
       ;;
     doc-to-pdf)
@@ -92,7 +92,7 @@ _tools_suite_contract() {
       _arguments \
         '{-c,--copy}[Keep the original file (encrypt a copy)]' \
         '{-f,--force}[Overwrite existing .age output files]' \
-        '*{-k,--key}[Add another public key as a recipient (repeatable)]:value:' \
+        '*{-k,--key}[Add another public key as a recipient (repeatable)]:path:' \
         '*:File(s) to encrypt:' \
         '(-h --help)'{-h,--help}'[show help]'
       ;;
@@ -123,8 +123,8 @@ _tools_suite_contract() {
             sync) _arguments '--prune[Delete orphan DocumentationRecord rows (doc_ids in HQ but not in the manifest), plus ContentItems linked only to them. Use after a doc_id rename or retirement]' '--no-update[Only create new records; never update existing ones]' ;;
             schema) _arguments '--check[Verify the HQ schema.json and the vault schema doc match the MCP; exit 1 on drift without writing (CI / pre-deploy gate)]' ;;
             create) _arguments '1:What to create:(project asset)' '2:Registry slug (the create_project / create_asset key):' ;;
-            ship) _arguments '{-m,--message}[Commit message for the HQ repo change (required)]:value:' ;;
-            logs) _arguments '{-f,--follow}[Stream live output until Ctrl-C]' '--tail[Number of lines to show (default 50; ignored with --follow)]:value:' ;;
+            ship) _arguments '{-m,--message}[Commit message for the HQ repo change (required)]:text:' ;;
+            logs) _arguments '{-f,--follow}[Stream live output until Ctrl-C]' '--tail[Number of lines to show (default 50; ignored with --follow)]:n:' ;;
             export) _arguments '1:Year to export (default: current year):' '2:Output format (default: md):(md json)' ;;
           esac
           ;;
@@ -161,14 +161,14 @@ _tools_suite_contract() {
       ;;
     remember)
       _arguments \
-        '{-d,--description}[Frontmatter description (default: title)]:value:' \
-        '{-k,--hook}[MEMORY.md one-liner hook (default: title)]:value:' \
-        '{-b,--body}[Body text in lieu of stdin]:value:' \
-        '{-f,--body-file}[Body text from file]:value:' \
+        '{-d,--description}[Frontmatter description (default: title)]:str:' \
+        '{-k,--hook}[MEMORY.md one-liner hook (default: title)]:str:' \
+        '{-b,--body}[Body text in lieu of stdin]:str:' \
+        '{-f,--body-file}[Body text from file]:file:' \
         '{-F,--force}[Overwrite an existing memory (update in place)]' \
-        '--dir[Memory dir. Default: CLAUDE_MEMORY_DIR, else CLAUDE_PROJECT_DIR, else $PWD — encoded to ~/.claude/projects/<enc>/memory. No flag needed inside a Claude project.]:value:' \
+        '--dir[Memory dir. Default: CLAUDE_MEMORY_DIR, else CLAUDE_PROJECT_DIR, else $PWD — encoded to ~/.claude/projects/<enc>/memory. No flag needed inside a Claude project.]:path:' \
         '--list[Show the MEMORY.md index]' \
-        '--forget[Delete the memory and its index entry]:value:' \
+        '--forget[Delete the memory and its index entry]:slug:' \
         '1:user | feedback | project | reference:' \
         '2:kebab- or snake-case identifier (becomes '\''name:'\'' in frontmatter; underscored in filename):' \
         '3:text shown as the link in MEMORY.md:' \
@@ -226,7 +226,7 @@ _tools_suite_contract() {
             new-writeup) _arguments '1:Lowercase-kebab-case slug; becomes the /portfolio/<slug>/ URL path:' ;;
             seo) _arguments '1:Full URL, domain, absolute path, page slug, or writeup slug:' '{-r,--result}[Show only the Google-style result preview]' ;;
             dev) _arguments '--drafts[Sync and render published: false content for local preview (never in a build)]' ;;
-            compare) _arguments '1:Route to compare (default: /):' '--dev[Development origin]:value:' '--live[Production origin]:value:' '--mobile[Start with phone-width panes]' '--desktop[Start with fluid panes]' '--compact[Collapse the review chrome]' '--expanded[Expand the review chrome]' '--link-scroll[Synchronize proportional scrolling]' '--no-link-scroll[Start with independent scrolling]' '--scroll-mode[exact single-controller lock (default) or ratio]:value:(exact ratio)' '--mirror-links[Open internal link clicks on both sides]' '--no-mirror-links[Keep link navigation independent]' '--split[Initial desktop divider position (15-85)]:value:' '--swap[Start with LIVE on the left]' '--solo[Show one pane and use Swap to flip DEV/LIVE]' '--split-view[Show both panes]' '--overlay[Stack panes and blend the top one (onion-skin)]' '--overlay-diff[Overlay in difference mode (changed pixels light up)]' '--focus[Side initially visible in Solo mode]:value:(dev live)' '--notes[Open the review-notes drawer]' '*--note[Add a review note; repeat for a change list]:value:' '--notes-out[Write the current notes to FILE as Markdown]:value:' '--clear-notes[Empty the shared notes file before starting]' '--brand[Strip "| NAME" from titles in pane headers]:value:' '--http[Serve over http without the homelab certificate]' '--no-open[Print the URL without opening the browser]' ;;
+            compare) _arguments '1:Route to compare (default: /):' '--dev[Development origin]:url:' '--live[Production origin]:url:' '--mobile[Start with phone-width panes]' '--desktop[Start with fluid panes]' '--compact[Collapse the review chrome]' '--expanded[Expand the review chrome]' '--link-scroll[Synchronize proportional scrolling]' '--no-link-scroll[Start with independent scrolling]' '--scroll-mode[exact single-controller lock (default) or ratio]:value:(exact ratio)' '--mirror-links[Open internal link clicks on both sides]' '--no-mirror-links[Keep link navigation independent]' '--split[Initial desktop divider position (15-85)]:percent:' '--swap[Start with LIVE on the left]' '--solo[Show one pane and use Swap to flip DEV/LIVE]' '--split-view[Show both panes]' '--overlay[Stack panes and blend the top one (onion-skin)]' '--overlay-diff[Overlay in difference mode (changed pixels light up)]' '--focus[Side initially visible in Solo mode]:value:(dev live)' '--notes[Open the review-notes drawer]' '*--note[Add a review note; repeat for a change list]:text:' '--notes-out[Write the current notes to FILE as Markdown]:file:' '--clear-notes[Empty the shared notes file before starting]' '--brand[Strip "| NAME" from titles in pane headers]:name:' '--http[Serve over http without the homelab certificate]' '--no-open[Print the URL without opening the browser]' ;;
           esac
           ;;
       esac

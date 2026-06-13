@@ -589,6 +589,7 @@ _describe_arg_json() {
         else
             out+=',"takes_value":false'
         fi
+        [[ -n "$metavar" ]] && out+=',"metavar":"'"$(json_escape "$metavar")"'"'
     fi
     [[ -n "$choices" ]] && out+=$(_describe_choices_json "$choices")
     (( repeat )) && out+=',"repeatable":true'

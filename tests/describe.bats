@@ -87,6 +87,7 @@ g={x["name"]:x for x in o["global_options"]}
 assert g["--copy"]["flags"]==["-c","--copy"]
 assert g["--copy"]["takes_value"] is False
 assert g["--key"]["takes_value"] is True
+assert g["--key"]["metavar"]=="PATH"
 assert g["--key"]["repeatable"] is True
 assert g["--filter"]["choices"]==["all","published","draft"]
 assert "repeatable" not in g["--copy"]
@@ -290,6 +291,13 @@ for c in o.get("commands",[]):
 @test "README inventory is derived from tools and repository directories" {
     run bash -c 'grep -q "schemas/.*machine-enforced" "$TOOLS_HOME/README.md" &&
                  grep -q "doc-to-pdf.*Render a Markdown file" "$TOOLS_HOME/README.md"'
+    [ "$status" -eq 0 ]
+}
+
+@test "README reference renders contract prose, examples, and metavariables" {
+    run bash -c 'grep -q "encrypt -k ~/keys/coworker.pub notes.md" "$TOOLS_HOME/README.md" &&
+                 grep -q -- "--key <PATH>" "$TOOLS_HOME/README.md" &&
+                 grep -q "site featured my-writeup top" "$TOOLS_HOME/README.md"'
     [ "$status" -eq 0 ]
 }
 

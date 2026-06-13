@@ -75,7 +75,8 @@ Every tool emits its command surface as one structured JSON document — the
   global_options:[<opt>], positionals:[<arg>], paras:[<prose>],
   examples:[{command,comment}], commands:[{name, summary, args:[<opt>|<arg>],
   effect, network?, interactive?, paras:[<prose>], examples:[…],
-  delegates?:"<owner>"}] }`, with `variadic:true` on variadic positionals. v2
+  delegates?:"<owner>"}] }`, with option `metavar` and `variadic:true` on
+  variadic positionals. v2
   added per-scope `paras`/`examples` and
   `delegates`; v3 added the **effect triple** (always emits `effect`; the lean
   boolean tags only when true) so an agent reads a command's intent, usage,
