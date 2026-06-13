@@ -141,9 +141,10 @@ EOF
     [[ "$output" == *"in sync"* ]]
 }
 
-@test "pull: stamps last_reviewed via the vault-mcp touch-reviewed CLI" {
-    # Stub the MCP binary; record argv so we can assert the subcommand and the
-    # vault-relative path drift.sh hands it.
+@test "pull: routes the write through the vault-mcp update-mirror-block CLI" {
+    # Stub the MCP binary; record argv so we can assert the subcommand, the
+    # vault-relative path, and the heading drift.sh hands it. The stub answers
+    # the --help support probe and the real call alike; the last write wins.
     local stub="$DRIFT_DIR/severino-vault-mcp"
     cat > "$stub" <<EOF
 #!/usr/bin/env bash
@@ -171,16 +172,70 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"reviewed"* ]]
     run cat "$DRIFT_DIR/mcp.args"
-    [ "$output" = "touch-reviewed sub/doc.md" ]
+    [ "$output" = "update-mirror-block sub/doc.md --heading ## Mirror --touch-reviewed" ]
 }
 
-@test "pull: review stamp is skipped cleanly when the MCP binary is absent" {
+@test "pull: falls back to the awk writer cleanly when the MCP binary is absent" {
     export DRIFT_REVIEW_BIN="$DRIFT_DIR/no-such-mcp"
     write_doc '[]'
     run "$TOOL" pull
     [ "$status" -eq 0 ]
-    [[ "$output" == *"pulled"* ]]
     [[ "$output" != *"reviewed"* ]]
+    run "$TOOL" diff
+    [ "$status" -eq 0 ]
+}
+
+# Regression pair: the old awk matched the first ```json block anywhere after
+# the heading, so a mirror under a *different* heading could be read or
+# clobbered. Both paths are now scoped to the heading's own section.
+
+@test "diff: a mirror under a different heading is never matched" {
+    cat > "$VAULT_DOC" <<'EOF'
+---
+doc_id: test
+---
+
+## Mirror
+
+no block here yet.
+
+## Other
+
+```json
+[{"id":"z","val":9}]
+```
+EOF
+    run "$TOOL" diff
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"no ## Mirror"* ]]
+}
+
+@test "pull: inserts under its own heading, leaving another section's mirror alone" {
+    cat > "$VAULT_DOC" <<'EOF'
+---
+doc_id: test
+---
+
+## Mirror
+
+no block here yet.
+
+## Other
+
+```json
+[{"id":"z","val":9}]
+```
+EOF
+    run "$TOOL" pull
+    [ "$status" -eq 0 ]
+    grep -q '"id":"z"' "$VAULT_DOC"            # other section untouched
+    new_line="$(grep -n '"id": "a"' "$VAULT_DOC" | head -1 | cut -d: -f1)"
+    other_line="$(grep -n '^## Other' "$VAULT_DOC" | cut -d: -f1)"
+    [ -n "$new_line" ]
+    [ "$new_line" -lt "$other_line" ]          # new block landed in ## Mirror
+    run "$TOOL" diff
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"in sync"* ]]
 }
 
 @test "pull: clean teardown — no set -u unbound-variable error" {

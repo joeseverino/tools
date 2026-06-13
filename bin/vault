@@ -10,7 +10,8 @@ Usage: vault <command>
 
 Commands:
   sync          Pull and push the vault repo
-  status        Working tree, inbox count, and remote sync state
+  status        Working tree, inbox count, remote sync state, and whether
+                doc metadata changed since the last hq sync
   inbox         List notes currently in the inbox
   -h, --help    Show this help
 
@@ -74,6 +75,17 @@ vault_status() {
     else
         msg "$YELLOW" "remote" "$remote"
     fi
+
+    # Vault → HQ freshness: exact (manifest hash), so prose-only edits never
+    # flag. `skip` (no MCP, state from another vault) prints nothing.
+    local hq_state
+    hq_state="$(hq_sync_freshness "$VAULT")"
+    case "$hq_state" in
+        never)  msg "$YELLOW" "hq" "never synced — run \`hq sync\`" ;;
+        skip)   ;;
+        fresh*) msg "$GREEN"  "hq" "in sync (last sync ${hq_state#fresh })" ;;
+        stale*) msg "$YELLOW" "hq" "doc metadata changed since last sync (${hq_state#stale }) — run \`hq sync\`" ;;
+    esac
 
     echo
 }

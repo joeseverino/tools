@@ -77,9 +77,17 @@ if (( STDOUT )); then
     exec 1>&2
 fi
 
-# One prompt (if needed) for the whole batch.
-if ! unlock_age_key "${NO_CACHE:+1}"; then
-    case $? in
+# One prompt (if needed) for the whole batch. NO_CACHE is a 0/1 flag, so the
+# no-cache argument needs an explicit if — `${NO_CACHE:+1}` is non-empty for
+# "0" too, which bypassed the Keychain cache on every run. The status is
+# captured with `|| rc=$?` because `if ! cmd` negates $? to 0, which made the
+# per-cause error branches below unreachable.
+no_cache_arg=""
+if (( NO_CACHE )); then no_cache_arg=1; fi
+rc=0
+unlock_age_key "$no_cache_arg" || rc=$?
+if (( rc != 0 )); then
+    case $rc in
         1) die "error" "no passphrase provided" ;;
         2) die "error" "wrong passphrase for $AGE_KEY (try: tools key cache)" ;;
         3) die "error" "no private key at: $AGE_KEY" ;;

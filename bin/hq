@@ -29,7 +29,8 @@ Commands:
                        and stale mirrored ContentItems tied only to those rows.
 
   doctor               Report vault docs that are missing or have invalid
-                       frontmatter — the gap between vault state and HQ state.
+                       frontmatter, and whether HQ's last-synced manifest is
+                       stale — the gap between vault state and HQ state.
 
   schema [--check]     Regenerate HQ's docs_index/schema.json from the installed
                        MCP — the one canonical frontmatter contract both share.
@@ -46,14 +47,13 @@ Commands:
                        \`hq create project --help\` / \`hq create asset --help\`
                        for the full flag list. Idempotent (upserts by slug).
 
-  deploy [--no-build]  git pull on $HQ_SSH_HOST and \`docker compose up -d --build\`.
-                       --no-build skips the rebuild (use when only env/data changed,
-                       not for code changes — image must be rebuilt for new code).
+  deploy               Fallback: manually re-pull the latest scanned image
+                       from GHCR and restart the container (CI's deploy step).
+                       Normal deploys happen automatically on push to main.
 
-  ship -m MESSAGE [--no-sync]
-                       Commit + push local HQ changes, deploy, run remote
-                       Django checks, then hq sync. The common "small HQ fix"
-                       path in one command.
+  ship -m MESSAGE      Commit + push a small HQ change. The push IS the deploy:
+                       it triggers the gated pipeline (build -> scan -> deploy
+                       on green). The common "small HQ fix" path.
 
   logs [-f] [--tail N] Show app container logs. Default tail is 50.
                        -f / --follow streams live output until Ctrl-C.
@@ -288,6 +288,35 @@ if missing or (orphans and not prune):
 else:
     print("Done      HQ is in sync")
 PY
+
+    # Record what shipped — manifest hash plus the exact inputs — so
+    # `vault status` and `hq doctor` can detect staleness deterministically
+    # (see hq_sync_freshness in lib/common.sh).
+    local state_file vault_head
+    state_file="$(hq_sync_state_file)"
+    mkdir -p "$(dirname "$state_file")"
+    vault_head="$(git -C "$VAULT" rev-parse HEAD 2>/dev/null || echo unknown)"
+    python3 -c '
+import hashlib, json, sys
+from datetime import datetime, timezone
+
+manifest, state, vault, dirs, head = sys.argv[1:6]
+with open(manifest, "rb") as fh:
+    sha = hashlib.sha256(fh.read()).hexdigest()
+with open(state, "w", encoding="utf-8") as fh:
+    json.dump(
+        {
+            "manifest_sha256": sha,
+            "vault": vault,
+            "vault_dirs": dirs,
+            "vault_head": head,
+            "synced_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        },
+        fh,
+        indent=2,
+    )
+    fh.write("\n")
+' "$tmp" "$state_file" "$VAULT" "$HQ_VAULT_DIRS" "$vault_head"
 }
 
 cmd_doctor() {
@@ -301,6 +330,7 @@ cmd_doctor() {
     [[ -n "$report" ]] \
         || die "error" "hq-manifest --report returned nothing; run \`site reinstall-mcp\`"
 
+    local rc=0
     printf '%s' "$report" | python3 -c '
 import json, sys
 
@@ -321,7 +351,20 @@ if missing:
     for path in missing:
         print("  - " + path)
 sys.exit(1)
-'
+' || rc=1
+
+    # The other half of "the gap between vault state and HQ state": is the
+    # manifest HQ holds the one the vault produces right now?
+    local fresh
+    fresh="$(hq_sync_freshness "$VAULT")"
+    case "$fresh" in
+        never)  msg "$YELLOW" "sync" "no recorded hq sync yet — run \`hq sync\`" ;;
+        skip)   ;;
+        fresh*) msg "$GREEN"  "sync" "HQ matches the vault manifest (last sync ${fresh#fresh })" ;;
+        stale*) msg "$YELLOW" "sync" "doc metadata changed since the last sync (${fresh#stale }) — run \`hq sync\`"
+                rc=1 ;;
+    esac
+    return "$rc"
 }
 
 cmd_validate() {
@@ -411,56 +454,59 @@ HELP
 }
 
 cmd_deploy() {
-    local build_flag="--build"
-    while [ "$#" -gt 0 ]; do
-        case "$1" in
-            --no-build) build_flag=""; shift ;;
-            -h|--help)
-                cat <<HELP
-Usage: hq deploy [--no-build]
+    case "${1:-}" in
+        "") ;;
+        -h|--help)
+            cat <<HELP
+Usage: hq deploy
 
-git pull on $HQ_SSH_HOST then \`docker compose up -d --build\`. The container
-entrypoint reruns migrate + collectstatic on every boot.
+Manually re-pull the latest scanned image from GHCR and restart the
+container — the same step CI's self-hosted deploy job runs
+(\`docker compose pull app && up -d --no-build app\`). The entrypoint reruns
+migrate + collectstatic on boot.
 
-  --no-build   Skip the image rebuild. Only safe when no source files
-               changed (e.g. you just edited the .env on the server).
+The box only ever runs an image that CI built and security-scanned; nothing
+is built on the VM. Normal deploys happen automatically when you push to
+main — use this only to re-deploy the last published image (e.g. after a
+runner hiccup) or to roll the container without a new commit.
 HELP
-                return 0 ;;
-            *) die "unknown flag: $1 (try \`hq deploy --help\`)" ;;
-        esac
-    done
+            return 0 ;;
+        *) die "unknown flag: $1 (try \`hq deploy --help\`)" ;;
+    esac
 
-    msg "$DIM" "deploying" "$HQ_SSH_HOST:$HQ_REMOTE_PATH"
-    ssh "$HQ_SSH_HOST" "cd '$HQ_REMOTE_PATH' && git pull --ff-only && sudo docker compose up -d $build_flag"
-    msg "$GREEN" "deployed" "severino-hq"
+    msg "$DIM" "deploying" "$HQ_SSH_HOST: pull scanned GHCR image + restart"
+    ssh "$HQ_SSH_HOST" "cd '$HQ_REMOTE_PATH' && sudo docker compose pull app && sudo docker compose up -d --no-build app"
+    msg "$GREEN" "deployed" "severino-hq (last published image)"
 }
 
 cmd_ship() {
     local message=""
-    local no_sync=""
     while [ "$#" -gt 0 ]; do
         case "$1" in
             -m|--message) message="${2:?--message needs text}"; shift 2 ;;
             --message=*) message="${1#--message=}"; shift ;;
-            --no-sync) no_sync="1"; shift ;;
             -h|--help)
                 cat <<HELP
-Usage: hq ship -m "commit message" [--no-sync]
+Usage: hq ship -m "commit message"
 
-One-command path for small HQ corrections:
+Ship a small HQ code fix: commit local changes and push. The push IS the
+deploy — pushing main triggers the gated GitHub Actions pipeline, which
+lints, tests, and security-scans, then (only on green) the self-hosted
+runner on the homelab pulls the scanned GHCR image and restarts the
+container. ship never touches the box; a red commit can't reach it.
 
-  1. Run lightweight local Python syntax checks.
-  2. Commit tracked/known HQ repo changes.
-  3. Push the HQ repo.
-  4. Deploy HQ on $HQ_SSH_HOST.
-  5. Run remote \`manage.py check\`.
-  6. Run \`hq sync\` unless --no-sync is set.
+  1. Local Python syntax check (py_compile) as a pre-push sanity pass.
+  2. Commit tracked changes + new files under known HQ app dirs.
+  3. Push main (this triggers the build -> scan -> deploy pipeline).
 
-Only files already tracked by git plus new files under known app directories are
-staged. Local scratch like .claude/ is ignored.
+Only files already tracked by git plus new files under known app directories
+are staged. Local scratch like .claude/ is ignored.
+
+  Watch the deploy:            gh run watch   (or the Actions tab)
+  Manual re-deploy (fallback): hq deploy
+  Vault docs -> HQ index:      hq sync   (separate concern)
 
   -m, --message TEXT   Commit message for HQ repo changes.
-  --no-sync            Skip the final vault → HQ manifest sync.
 HELP
                 return 0 ;;
             *) die "unknown flag: $1 (try \`hq ship --help\`)" ;;
@@ -470,51 +516,40 @@ HELP
     [[ -n "$message" ]] || die "usage" "missing -m \"commit message\""
     [[ -d "$HQ_LOCAL_PATH/.git" ]] || die "error" "HQ_LOCAL_PATH is not a git repo: $HQ_LOCAL_PATH"
 
-    msg "$DIM" "checking" "$HQ_LOCAL_PATH"
+    msg "$DIM" "checking" "$HQ_LOCAL_PATH (py_compile)"
     (
         cd "$HQ_LOCAL_PATH"
         git ls-files '*.py' | xargs python3 -m py_compile
     )
 
-    local before
-    before="$(git -C "$HQ_LOCAL_PATH" status --porcelain)"
-    if [[ -n "$before" ]]; then
-        msg "$DIM" "staging" "tracked changes + known HQ app files"
-        (
-            cd "$HQ_LOCAL_PATH"
-            git add -u
-            git add \
-                assets content core docs docs_index expenses projects receipts reports \
-                static templates \
-                2>/dev/null || true
-        )
-
-        if git -C "$HQ_LOCAL_PATH" diff --cached --quiet; then
-            msg "$YELLOW" "skipped" "no committable HQ changes staged"
-        else
-            git -C "$HQ_LOCAL_PATH" commit -m "$message"
-            git -C "$HQ_LOCAL_PATH" push
-        fi
-    else
+    if [[ -z "$(git -C "$HQ_LOCAL_PATH" status --porcelain)" ]]; then
         msg "$GREEN" "clean" "no local HQ changes to commit"
+        return 0
     fi
 
-    cmd_deploy
+    msg "$DIM" "staging" "tracked changes + known HQ app files"
+    (
+        cd "$HQ_LOCAL_PATH"
+        git add -u
+        git add \
+            assets content core docs docs_index expenses projects receipts reports \
+            static templates \
+            2>/dev/null || true
+    )
 
-    msg "$DIM" "checking" "remote Django system check"
-    ssh "$HQ_SSH_HOST" "cd '$HQ_REMOTE_PATH' && sudo docker compose exec -T app python manage.py check"
-
-    if [[ -z "$no_sync" ]]; then
-        cmd_sync
-    else
-        msg "$YELLOW" "sync" "skipped (--no-sync)"
+    if git -C "$HQ_LOCAL_PATH" diff --cached --quiet; then
+        msg "$YELLOW" "skipped" "no committable HQ changes staged"
+        return 0
     fi
+
+    git -C "$HQ_LOCAL_PATH" commit -m "$message"
+    git -C "$HQ_LOCAL_PATH" push
+    msg "$GREEN" "pushed" "the pipeline will build -> scan -> deploy on green"
+    msg "$DIM"   "watch"  "gh run watch   (or the Actions tab)"
 
     if [[ -n "$(git -C "$VAULT" status --porcelain 2>/dev/null || true)" ]]; then
         msg "$YELLOW" "vault" "has uncommitted changes; run vault status/sync when ready"
     fi
-
-    msg "$GREEN" "shipped" "HQ correction complete"
 }
 
 cmd_logs() {
