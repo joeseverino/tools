@@ -2,7 +2,7 @@
 # backup — mirror the items listed in config/backup.sh into $BACKUPS_HOME
 set -euo pipefail
 
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" backup
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" backup "$@"
 
 describe_spec() {
     desc_tool "backup" "Mirror the items in config/backup.sh into \$BACKUPS_HOME."

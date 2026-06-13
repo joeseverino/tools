@@ -2,7 +2,7 @@
 # encrypt <file>... — age-encrypt files to your public key, remove originals
 set -euo pipefail
 
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" crypt
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" crypt "$@"
 
 # The single source of truth for encrypt's surface (lib/describe.sh renders
 # both this -h text and the --describe JSON from it).

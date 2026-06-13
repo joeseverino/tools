@@ -3,7 +3,7 @@
 # remove the temp when the app closes the file.
 set -euo pipefail
 
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" crypt
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" crypt "$@"
 
 describe_spec() {
     desc_tool "open-age" "Decrypt a .age file to a temp file and open it in the default app."

@@ -2,7 +2,7 @@
 # site <command> — public jseverino.com Astro site workflow
 set -euo pipefail
 
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" ""
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 
 CODE_HOME="${CODE_HOME:-$HOME/Documents/Code}"
 SITE_HOME="${SITE_HOME:-$CODE_HOME/Projects/jseverino.com}"

@@ -2,7 +2,7 @@
 # vault <command> — operations on the vault repo
 set -euo pipefail
 
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" vault
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" vault "$@"
 
 describe_spec() {
     desc_tool "vault" "Operations on the vault git repo."
