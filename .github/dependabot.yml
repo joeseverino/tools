@@ -1,0 +1,23 @@
+version: 2
+updates:
+  # The Node toolchain deps (doc-to-pdf's markdown-it/mermaid, the site/describe
+  # TUIs) pinned in the root package.json.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "javascript"
+
+  # The CI workflow's actions (keeps the SHA-pinned uses: current).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "github-actions"
