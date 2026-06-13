@@ -104,11 +104,12 @@ vault_inbox() {
     echo
 }
 
+# All help + the machine surface render from the one spec via the shared
+# intercept (main `-h`, `--describe`, focused `<cmd> -h`).
+desc_help_intercept "$@"
 case "${1:-}" in
     sync)              shift; vault_sync   "$@" ;;
     status)            shift; vault_status "$@" ;;
     inbox)             shift; vault_inbox  "$@" ;;
-    --describe)        describe_emit "$@"; exit 0 ;;
-    -h|--help|"")      usage; exit 0 ;;
-    *)                 die "usage" "unknown command: $1 (try -h)" 2 ;;
+    *)                 die_unknown command "$1" ;;
 esac

@@ -55,7 +55,7 @@ while [[ $# -gt 0 ]]; do
         -F|--force)         FORCE=1; shift ;;
         --dir)              TARGET_DIR="${2:?--dir needs a path}"; shift 2 ;;
         --)                 shift; break ;;
-        -*)                 die "usage" "unknown option: $1 (try -h)" 2 ;;
+        -*)                 die_unknown option "$1" ;;
         *)                  POSITIONAL+=("$1"); shift ;;
     esac
 done

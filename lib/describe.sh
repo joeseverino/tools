@@ -25,19 +25,25 @@
 #   describe_emit            the standard `--describe` handler: reset, run the
 #                            tool's describe_spec, print JSON, honor --pretty.
 #
-# The JSON contract (a faithful superset of `severino-vault-mcp describe`):
+# The JSON contract (schema_version 2 — a superset of `severino-vault-mcp describe`):
 #
 #   { ok, schema_version, name, description,
 #     global_options:[ <opt> ],   # flags valid everywhere (declared before any cmd)
 #     positionals:[ <arg> ],      # leaf-tool direct positionals
-#     commands:[ { name, summary, args:[ <arg> ] } ] }
+#     paras:[ "<prose>" ],        # tool-level prose (global-scope desc_para)
+#     examples:[ <example> ],     # tool-level examples (global-scope desc_example)
+#     commands:[ { name, summary, args:[ <arg> ],
+#                  paras:[ "<prose>" ], examples:[ <example> ],
+#                  delegates?: "<owner>" } ] }    # delegates = flags owned elsewhere
 #
 #   <opt>/<arg> = { name, positional, required, help,
 #                   flags?, choices?, takes_value?, repeatable? }
+#   <example>   = { command, comment }
 #
-# desc_env / desc_example / desc_para are human-help only — environment and
-# examples are guidance, not command surface, so (matching the MCP) they never
-# enter the JSON.
+# v2 adds paras / examples / delegates so an agent can read a command's intent,
+# usage, and external flag-ownership from the JSON alone (without re-reading the
+# handler). desc_env stays human-help only. desc_para / desc_example are scoped
+# to the current command, like desc_opt / desc_pos.
 #
 # Portability: this is sourced by every tool, including the one zsh tool
 # (dns-test). It is therefore written to run under bash AND zsh — no numeric
@@ -45,7 +51,7 @@
 # into single array elements with a control-char separator and unpacked with
 # IFS-`read`, which behaves the same in both shells.
 
-DESCRIBE_SCHEMA_VERSION=1
+DESCRIBE_SCHEMA_VERSION=2
 
 # Field separator for the encoded records below (a control char that can't
 # appear in option flags, help text, or names).
@@ -58,12 +64,13 @@ describe_reset() {
     _D_DESC=""
     _D_CUR_CMD=""          # "" = top-level scope; else the open command name
     _D_SYNOPSIS=()
-    _D_PARA=()
+    _D_PARA=()             # scope <sep> paragraph
     _D_CMDS=()             # name <sep> summary
     _D_OPTS=()             # scope <sep> short <sep> long <sep> metavar <sep> choices <sep> repeat <sep> help
     _D_POS=()              # scope <sep> name <sep> required <sep> variadic <sep> choices <sep> help
     _D_ENV=()              # var <sep> help
-    _D_EX=()               # command <sep> comment
+    _D_EX=()               # scope <sep> command <sep> comment
+    _D_DELEGATE=()         # scope <sep> owner (command's flags owned by another repo)
 }
 
 # desc_tool <name> <one-line description>
@@ -75,8 +82,10 @@ desc_tool() {
 # desc_synopsis <usage line, sans the leading "Usage: ">
 desc_synopsis() { _D_SYNOPSIS+=("$1"); }
 
-# desc_para <paragraph> — human description blurb (usage only).
-desc_para() { _D_PARA+=("$1"); }
+# desc_para <paragraph> — human prose, usage only. Scoped like desc_opt/desc_pos:
+# before any desc_cmd it is the tool blurb (main screen); after a desc_cmd it is
+# that command's prose (focused screen). So per-command help is spec-derived too.
+desc_para() { _D_PARA+=("${_D_CUR_CMD}${_DSEP}$1"); }
 
 # desc_cmd <name> -- <summary> — declare a subcommand and open its scope, so
 # subsequent desc_opt/desc_pos attach to it.
@@ -128,6 +137,17 @@ desc_pos() {
     _D_POS+=("${_D_CUR_CMD}${_DSEP}${name}${_DSEP}${required}${_DSEP}${variadic}${_DSEP}${choices}${_DSEP}${*:-}")
 }
 
+# desc_delegate <owner...> — declare (after a desc_cmd) that this command's flag
+# surface is OWNED by another repo and is not enumerated here, to avoid drift
+# (e.g. `hq create` → HQ's manage.py; site's npm-script wrappers). It is
+# structured, not prose: it renders in the command's focused help AND rides into
+# the JSON as "delegates", so an agent can see ownership without reading handlers.
+desc_delegate() {
+    local owner="$1"; shift || true
+    [[ "${1:-}" == "--" ]] && shift
+    _D_DELEGATE+=("${_D_CUR_CMD}${_DSEP}${owner}")
+}
+
 # desc_env <VAR> -- <help...> — human help only.
 desc_env() {
     local var="$1"; shift
@@ -135,11 +155,13 @@ desc_env() {
     _D_ENV+=("${var}${_DSEP}${*:-}")
 }
 
-# desc_example <command> [-- <comment>] — human help only.
+# desc_example <command> [-- <comment>] — human help only. Scoped like desc_para:
+# before any desc_cmd it shows on the main screen; after one, in that command's
+# focused help.
 desc_example() {
     local cmd="$1"; shift
     [[ "${1:-}" == "--" ]] && shift
-    _D_EX+=("${cmd}${_DSEP}${*:-}")
+    _D_EX+=("${_D_CUR_CMD}${_DSEP}${cmd}${_DSEP}${*:-}")
 }
 
 # ---------- usage renderer ----------
@@ -227,12 +249,9 @@ describe_render_usage() {
         printf 'Usage: %s [options]\n' "$_D_NAME"
     fi
 
-    # Description blurb.
-    if (( ${#_D_PARA[@]} )); then
-        printf '\n'
-        for rec in "${_D_PARA[@]}"; do printf '%s\n' "$rec"; done
-    elif [[ -n "$_D_DESC" ]]; then
-        printf '\n%s\n' "$_D_DESC"
+    # Description blurb: tool-level (global-scope) prose, else the one-liner.
+    if ! _describe_render_para_section ""; then
+        [[ -n "$_D_DESC" ]] && printf '\n%s\n' "$_D_DESC"
     fi
 
     # Commands.
@@ -284,23 +303,8 @@ describe_render_usage() {
         done
     fi
 
-    # Examples.
-    if (( ${#_D_EX[@]} )); then
-        local w=0
-        for rec in "${_D_EX[@]}"; do
-            cmd="${rec%%"$_DSEP"*}"
-            (( ${#cmd} > w )) && w=${#cmd}
-        done
-        printf '\nExamples:\n'
-        for rec in "${_D_EX[@]}"; do
-            cmd="${rec%%"$_DSEP"*}"; comment="${rec#*"$_DSEP"}"
-            if [[ -n "$comment" ]]; then
-                printf '  %-*s  # %s\n' "$w" "$cmd" "$comment"
-            else
-                printf '  %s\n' "$cmd"
-            fi
-        done
-    fi
+    # Examples (tool-level / global scope).
+    _describe_render_example_section ""
 }
 
 # Positional placeholders for a scope's synopsis line: "<name>", "[<name>]",
@@ -342,8 +346,12 @@ describe_render_usage_for() {
     local pos; pos="$(_describe_pos_synopsis "$want")"
     printf 'Usage: %s %s [options]%s\n' "$_D_NAME" "$want" "${pos:+ $pos}"
     [[ -n "$summary" ]] && printf '\n%s\n' "$summary"
+    _describe_render_para_section "$want" || true
+    local owner; owner="$(_describe_delegate_for "$want")"
+    [[ -n "$owner" ]] && printf '\nFlags are owned elsewhere: %s\n' "$owner"
     _describe_render_pos_section "$want" "Arguments:"
     _describe_render_opt_section "$want" "Options:" 1
+    _describe_render_example_section "$want"
 }
 
 # usage_command <cmd> — the focused-help counterpart of usage(): a tool routes
@@ -368,6 +376,57 @@ _describe_scope_has_args() {
         done
     fi
     return 1
+}
+
+# _describe_render_para_section <scope> — print the prose paragraphs declared for
+# a scope, each preceded by a blank line. Same scope-filter shape as the pos/opt
+# sections. Returns 0 if any printed, 1 if none (lets usage fall back to _D_DESC).
+_describe_render_para_section() {
+    local want="$1" rec scope text printed=0
+    (( ${#_D_PARA[@]} )) || return 1
+    for rec in "${_D_PARA[@]}"; do
+        scope="${rec%%"$_DSEP"*}"; text="${rec#*"$_DSEP"}"
+        [[ "$scope" == "$want" ]] || continue
+        printf '\n%s\n' "$text"
+        printed=1
+    done
+    (( printed )) || return 1
+    return 0
+}
+
+# _describe_delegate_for <scope> — print the owner string for a scope (or ""),
+# so a command whose flags live in another repo names the owner once.
+_describe_delegate_for() {
+    local want="$1" rec scope owner
+    (( ${#_D_DELEGATE[@]} )) || return 0
+    for rec in "${_D_DELEGATE[@]}"; do
+        scope="${rec%%"$_DSEP"*}"; owner="${rec#*"$_DSEP"}"
+        [[ "$scope" == "$want" ]] || continue
+        printf '%s' "$owner"; return 0
+    done
+}
+
+# _describe_render_example_section <scope> — the Examples block for a scope.
+_describe_render_example_section() {
+    local want="$1" rec scope cmd comment w=0 any=0
+    (( ${#_D_EX[@]} )) || return 0
+    for rec in "${_D_EX[@]}"; do
+        IFS="$_DSEP" read -r scope cmd comment <<<"$rec"
+        [[ "$scope" == "$want" ]] || continue
+        any=1
+        (( ${#cmd} > w )) && w=${#cmd}
+    done
+    (( any )) || return 0
+    printf '\nExamples:\n'
+    for rec in "${_D_EX[@]}"; do
+        IFS="$_DSEP" read -r scope cmd comment <<<"$rec"
+        [[ "$scope" == "$want" ]] || continue
+        if [[ -n "$comment" ]]; then
+            printf '  %-*s  # %s\n' "$w" "$cmd" "$comment"
+        else
+            printf '  %s\n' "$cmd"
+        fi
+    done
 }
 
 # _describe_render_pos_section <scope> <header|"">
@@ -524,6 +583,32 @@ _describe_global_pos_json() {
     printf '%s' "$items"
 }
 
+# Paragraphs (prose) for a scope, as a JSON string array. Human-help that now
+# also rides into the JSON so an agent can read a command's intent.
+_describe_paras_json() {
+    local want="$1" rec scope text items=""
+    (( ${#_D_PARA[@]} )) || { printf ''; return 0; }
+    for rec in "${_D_PARA[@]}"; do
+        scope="${rec%%"$_DSEP"*}"; text="${rec#*"$_DSEP"}"
+        [[ "$scope" == "$want" ]] || continue
+        items="${items:+$items,}\"$(json_escape "$text")\""
+    done
+    printf '%s' "$items"
+}
+
+# Examples for a scope, as a JSON array of {command, comment}.
+_describe_examples_json() {
+    local want="$1" rec scope cmd comment items=""
+    (( ${#_D_EX[@]} )) || { printf ''; return 0; }
+    for rec in "${_D_EX[@]}"; do
+        IFS="$_DSEP" read -r scope cmd comment <<<"$rec"
+        [[ "$scope" == "$want" ]] || continue
+        items="${items:+$items,}$(printf '{"command":"%s","comment":"%s"}' \
+            "$(json_escape "$cmd")" "$(json_escape "$comment")")"
+    done
+    printf '%s' "$items"
+}
+
 # describe_render_json [--pretty] — print the contract for the current spec.
 describe_render_json() {
     local pretty=0
@@ -534,13 +619,27 @@ describe_render_json() {
         "$DESCRIBE_SCHEMA_VERSION" "$(json_escape "$_D_NAME")" "$(json_escape "$_D_DESC")")
     out+=$(printf ',"global_options":[%s]' "$(_describe_global_opts_json)")
     out+=$(printf ',"positionals":[%s]' "$(_describe_global_pos_json)")
+    # Tool-level (global-scope) prose + examples — the signals an agent uses to
+    # understand a tool without reading its source.
+    out+=$(printf ',"paras":[%s]' "$(_describe_paras_json "")")
+    out+=$(printf ',"examples":[%s]' "$(_describe_examples_json "")")
 
     if (( ${#_D_CMDS[@]} )); then
+        local owner delegate_json
         for rec in "${_D_CMDS[@]}"; do
             name="${rec%%"$_DSEP"*}"; summary="${rec#*"$_DSEP"}"
-            cmds="${cmds:+$cmds,}$(printf '{"name":"%s","summary":"%s","args":[%s]}' \
+            owner="$(_describe_delegate_for "$name")"
+            if [[ -n "$owner" ]]; then
+                delegate_json=$(printf ',"delegates":"%s"' "$(json_escape "$owner")")
+            else
+                delegate_json=""
+            fi
+            cmds="${cmds:+$cmds,}$(printf '{"name":"%s","summary":"%s","args":[%s],"paras":[%s],"examples":[%s]%s}' \
                 "$(json_escape "$name")" "$(json_escape "$summary")" \
-                "$(_describe_args_for_scope "$name")")"
+                "$(_describe_args_for_scope "$name")" \
+                "$(_describe_paras_json "$name")" \
+                "$(_describe_examples_json "$name")" \
+                "$delegate_json")"
         done
     fi
     out+=$(printf ',"commands":[%s]}' "$cmds")
@@ -566,4 +665,30 @@ describe_emit() {
     describe_reset
     describe_spec
     describe_render_json $pretty
+}
+
+# desc_help_intercept "$@" — the whole help + machine surface of a subcommand
+# tool, derived from the one describe_spec, in ONE place. Call it first in the
+# dispatch, then write only the command→action mapping:
+#
+#     desc_help_intercept "$@"
+#     case "${1:-}" in
+#         build) shift; cmd_build "$@" ;;
+#         ...
+#     esac
+#
+# It renders and exits 0 when the args are a help/describe request — so no tool
+# hand-routes help, and a help flag can never fall through to run an action:
+#   (no args | -h | --help | help)  -> usage              (main screen)
+#   --describe [--pretty]           -> describe_emit       (JSON contract)
+#   <cmd> (-h | --help)             -> usage_command <cmd> (focused screen)
+# Otherwise it returns, and the caller dispatches the real command.
+desc_help_intercept() {
+    case "${1:-}" in
+        ''|-h|--help|help) usage; exit 0 ;;
+        --describe)        describe_emit "$@"; exit 0 ;;
+    esac
+    case "${2:-}" in
+        -h|--help)         usage_command "$1"; exit 0 ;;
+    esac
 }

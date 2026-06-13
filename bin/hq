@@ -17,6 +17,12 @@ describe_spec() {
     desc_para "Severino HQ glue. Reads YAML frontmatter from the vault and upserts the"
     desc_para "HQ docs index. Also wraps the routine ssh + docker compose calls for"
     desc_para "managing the HQ deployment."
+    # Tool-level examples: declared at global scope (before the first desc_cmd),
+    # like global desc_opt/desc_pos — otherwise they'd attach to the last command.
+    desc_example "hq sync"                    -- "most common — push vault → HQ"
+    desc_example "hq manifest | jq '.[] | .doc_id'"
+    desc_example "hq doctor"                  -- "find docs missing frontmatter"
+    desc_example "hq export 2026"             -- "download year-summary-2026.md"
     desc_cmd manifest  -- "Print the manifest JSON (frontmatter from every doc) to stdout — for inspection or piping elsewhere"
 
     desc_cmd sync      -- "Pipe the manifest into HQ's import_docs_manifest; upserts by doc_id, safe to re-run"
@@ -30,9 +36,12 @@ describe_spec() {
 
     desc_cmd validate  -- "Report HQ registry entries (Projects/Assets) that no vault doc references. Read-only"
 
-    desc_cmd create    -- "Create or update a Project or Asset in HQ (idempotent upsert by slug). Run 'hq create -h' for the management-command flags"
+    desc_cmd create    -- "Create or update a Project or Asset in HQ (idempotent upsert by slug)"
     desc_pos kind "{project,asset}" -- "What to create"
     desc_pos slug      -- "Registry slug (the create_project / create_asset key)"
+    desc_delegate "HQ's create_project / create_asset management commands (derived from the Django models) — run \`hq create <kind> -h\` for the live flag list (it reaches manage.py); an invalid value prints the allowed set"
+    desc_example "hq create project my-site --name \"My Site\" --category cloudflare --status published --url https://example.com"
+    desc_example "hq create asset example-com --name \"example.com\" --category domain"
 
     desc_cmd deploy    -- "Fallback: re-pull the latest scanned GHCR image and restart the container (CI's deploy step)"
 
@@ -60,10 +69,6 @@ describe_spec() {
     desc_env HQ_REMOTE_PATH -- "HQ checkout path on the server"
     desc_env HQ_LOCAL_PATH -- "Local HQ checkout"
     desc_env HQ_URL        -- "Public URL of HQ"
-    desc_example "hq sync"                    -- "most common — push vault → HQ"
-    desc_example "hq manifest | jq '.[] | .doc_id'"
-    desc_example "hq doctor"                  -- "find docs missing frontmatter"
-    desc_example "hq export 2026"             -- "download year-summary-2026.md"
 }
 
 require_manifest_mcp() {
@@ -89,9 +94,8 @@ cmd_schema() {
     local check=0
     case "${1:-}" in
         --check) check=1 ;;
-        -h|--help) usage_command schema; return 0 ;;
         "") : ;;
-        *) die "error" "unknown flag: $1 (try \`hq schema --help\`)" ;;
+        *) die_unknown flag "$1" schema ;;
     esac
 
     require_manifest_mcp
@@ -160,8 +164,7 @@ cmd_sync() {
         case "$1" in
             --prune) extra_flags="$extra_flags --prune"; prune="1"; shift ;;
             --no-update) extra_flags="$extra_flags --no-update"; shift ;;
-            -h|--help) usage_command sync; return 0 ;;
-            *) die "unknown flag: $1 (try \`hq sync --help\`)" ;;
+            *) die_unknown flag "$1" sync ;;
         esac
     done
 
@@ -318,10 +321,6 @@ sys.exit(1)
 }
 
 cmd_validate() {
-    case "${1:-}" in
-        -h|--help) usage_command validate; return 0 ;;
-    esac
-
     msg "$DIM" "validate" "HQ registry ↔ vault docs"
     # Logic lives in the testable manage.py audit_registry command, not an
     # inline ORM script piped into `manage.py shell`.
@@ -334,51 +333,13 @@ cmd_create() {
     case "$kind" in
         project) shift; mgmt="create_project" ;;
         asset)   shift; mgmt="create_asset" ;;
-        ""|-h|--help|help)
-            cat <<HELP
-Usage: hq create project <slug> --name "<name>" [flags]
-       hq create asset   <slug> --name "<name>" [flags]
-
-Common Project flags:
-  --name TEXT           (required) Display name
-  --category CHOICE     project category
-  --status CHOICE       project lifecycle status
-  --description TEXT
-  --technologies TEXT   Comma-separated
-  --repo URL
-  --url URL             Public-facing URL
-  --notes TEXT
-
-Common Asset flags:
-  --name TEXT           (required) Display name
-  --category CHOICE     asset category
-  --status CHOICE       asset lifecycle status
-  --vendor TEXT
-  --purchase-date YYYY-MM-DD
-  --cost DECIMAL
-  --business-use INT    0-100 (default 100)
-  --payment CHOICE      payment method
-  --serial TEXT
-  --warranty-date YYYY-MM-DD
-  --notes TEXT
-
-The CHOICE lists are owned by HQ's create_project / create_asset management
-commands (derived from the Django models) — they aren't duplicated here to
-avoid drift. Pass an invalid value and the command prints the allowed set.
-
-Examples:
-  hq create project my-site --name "My Site" \\
-      --category cloudflare --status published \\
-      --repo https://github.com/you/your-repo \\
-      --url https://example.com
-
-  hq create asset example-com --name "example.com" --category domain
-HELP
-            return 0 ;;
-        *) die "unknown kind: $kind (use 'project' or 'asset')" ;;
+        # `hq create` (no kind) shows the spec-derived help; `hq create -h` is
+        # handled centrally; `hq create <kind> -h` falls through to manage.py.
+        "")      usage_command create; return 0 ;;
+        *) die_unknown kind "$kind" create ;;
     esac
 
-    [ "$#" -ge 1 ] || die "missing <slug>; try \`hq create $kind --help\`"
+    [ "$#" -ge 1 ] || die "missing <slug>; try \`hq create $kind -h\`"
 
     local remote_cmd="cd '$HQ_REMOTE_PATH' && sudo docker compose exec -T app python manage.py $mgmt"
     local arg
@@ -393,8 +354,7 @@ HELP
 cmd_deploy() {
     case "${1:-}" in
         "") ;;
-        -h|--help) usage_command deploy; return 0 ;;
-        *) die "unknown flag: $1 (try \`hq deploy --help\`)" ;;
+        *) die_unknown flag "$1" deploy ;;
     esac
 
     msg "$DIM" "deploying" "$HQ_SSH_HOST: pull scanned GHCR image + restart"
@@ -408,8 +368,7 @@ cmd_ship() {
         case "$1" in
             -m|--message) message="${2:?--message needs text}"; shift 2 ;;
             --message=*) message="${1#--message=}"; shift ;;
-            -h|--help) usage_command ship; return 0 ;;
-            *) die "unknown flag: $1 (try \`hq ship --help\`)" ;;
+            *) die_unknown flag "$1" ship ;;
         esac
     done
 
@@ -460,8 +419,7 @@ cmd_logs() {
             -f|--follow) follow="-f"; shift ;;
             --tail) tail="${2:?--tail needs a number}"; shift 2 ;;
             --tail=*) tail="${1#--tail=}"; shift ;;
-            -h|--help) usage_command logs; return 0 ;;
-            *) die "unknown flag: $1 (try \`hq logs --help\`)" ;;
+            *) die_unknown flag "$1" logs ;;
         esac
     done
 
@@ -495,13 +453,12 @@ cmd_superuser() {
 }
 
 cmd_export() {
-    case "${1:-}" in -h|--help) usage_command export; return 0 ;; esac
     local year="${1:-$(date +%Y)}"
     local fmt="${2:-md}"
     case "$fmt" in
         md|markdown) ext="md"; route="year-summary.md" ;;
         json) ext="json"; route="year-summary.json" ;;
-        *) die "unknown format: $fmt (use md or json)" ;;
+        *) die_unknown format "$fmt" export ;;
     esac
     local out="year-summary-$year.$ext"
     msg "$DIM" "fetching" "$HQ_URL/reports/export/$route?year=$year"
@@ -515,9 +472,12 @@ cmd_export() {
     printf '%s\n' "$out"
 }
 
+# All help + the machine surface (main `-h`, `--describe`, focused `<cmd> -h`)
+# render from the one spec via the shared intercept; below is just command →
+# action. `hq create <kind> -h` still reaches manage.py (the owner of those
+# flags), since the intercept only fires when the help flag is the 2nd arg.
+desc_help_intercept "$@"
 case "${1:-}" in
-    ""|-h|--help|help) usage; exit 0 ;;
-    --describe) describe_emit "$@"; exit 0 ;;
     manifest)   shift; cmd_manifest "$@" ;;
     sync)       shift; cmd_sync "$@" ;;
     doctor)     shift; cmd_doctor "$@" ;;
@@ -532,5 +492,5 @@ case "${1:-}" in
     shell)      shift; cmd_shell "$@" ;;
     superuser)  shift; cmd_superuser "$@" ;;
     export)     shift; cmd_export "$@" ;;
-    *) die "unknown command: $1 (try \`hq --help\`)" ;;
+    *) die_unknown command "$1" ;;
 esac

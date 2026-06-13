@@ -18,35 +18,102 @@ fi
 describe_spec() {
     desc_tool "site" "Public jseverino.com Astro site workflow."
     desc_synopsis "site <command>"
+    # One spec, every view. Each command's flags/args (desc_opt/desc_pos) AND its
+    # prose/examples (desc_para/desc_example) live here, so the main -h, the
+    # focused `site <cmd> -h`, the --describe JSON, and --tui all render from it —
+    # zero hand-written sub-help. The npm-script pass-throughs (scaffold-*,
+    # draft-alt, diagnose) carry only a summary: their flags are owned by the site
+    # repo's package.json scripts (run those with --help for the live list).
     desc_cmd status         -- "Show repo location, git state, and build-output state"
     desc_cmd sync           -- "Sync public pages/writeups from the vault into the site repo"
     desc_cmd check          -- "Run Astro diagnostics"
     desc_cmd contrast       -- "Compute WCAG ratios for every text/background pair in base.css"
     desc_cmd parity         -- "Assert vault Frontmatter Schema, Zod, and MCP agree on writeup fields"
     desc_cmd build          -- "Run the full Astro build"
-    desc_cmd publish        -- "THE ship command, no slug needed: gate every published writeup, hq sync, build + audits, auto-commit, push, then verify each affected writeup live. --no-push stops after the local build."
+    desc_cmd publish        -- "Ship every change: gate published writeups, hq sync, build + audits, auto-commit, push, then verify each affected writeup live"
+    desc_opt --no-push      -- "Stop after the local build — no commit, no push (inspect the diff first)"
+    desc_para "Runs the whole vault-to-live flow: gate every published writeup, hq sync, build + audits, auto-commit the synced snapshot, push (Cloudflare Pages rebuilds), then verify each affected writeup live. Only the generated snapshot is committed; drafts stay in the vault and are never pushed."
     desc_cmd sign-security  -- "Clear-sign public/.well-known/security.txt with the security@ key"
     desc_cmd check-security -- "Verify signature, required fields, Expires, and WKD file"
-    desc_cmd scaffold-primer -- "scaffold-primer <title> [--tags a,b] — scaffold a new 04 Reference/ primer with slim frontmatter"
-    desc_cmd scaffold-field -- "scaffold-field --name X --description Y [--apply] — patch every layer needed for a new writeup field (dry-run by default)"
-    desc_cmd draft-alt      -- "draft-alt <slug>|--all [--apply] — use the Claude API to draft cover_alt from the cover image"
-    desc_cmd publish-all    -- "Alias of publish."
-    desc_cmd publish-writeup -- "publish-writeup <slug> — full publish flow with the named writeup highlighted. The all-published gate runs once before any sync, build, commit, or push."
-    desc_cmd validate       -- "validate <slug> [--draft] — run the writeup publish gate standalone (report only, no build/commit). --draft tolerates the published/published_at blockers."
-    desc_cmd tech           -- "tech [query] — list technology slugs from the vault catalog, filtered by slug/label/group when a query is given."
-    desc_cmd featured       -- "featured [<slug> <slot|up|down|top|bottom|off>] — show the home-page featured order, or move one writeup and renumber automatically."
-    desc_cmd manage         -- "Interactive manager: every writeup on one screen — reorder featured, feature/unfeature, publish/unpublish. Nothing written until you save."
-    desc_cmd verify         -- "verify <slug> — post-publish live check: page status, OG image, tag pages, and home placement on the live site."
-    desc_cmd diagnose       -- "diagnose [--fast|--json] — the collect-all gate: run every audit and report all failures in one pass (.validation-report.md on failure)."
-    desc_cmd release        -- "release <version> [--ship] — bump package.json, run publish:check, commit + signed tag, push, create the GitHub release. Dry-run by default."
-    desc_cmd test           -- "test [--visual|--ui|--update] — run the Playwright suite (full, visual-only, UI mode, or update visual baselines)."
-    desc_cmd doctor         -- "Pre-flight health check: CLI→npm script drift, vault-mcp install drift, security, contrast, parity, type check, npm audit/outdated. No build."
-    desc_cmd reinstall-mcp  -- "Reinstall the severino-vault-mcp package from source. Use \`/mcp\` Reconnect afterward in Claude Code."
-    desc_cmd new-writeup    -- "new-writeup <slug> — scaffold a new vault writeup folder from the template (05 Writeups/<slug>/ with index.md + images/). Starts published: false."
-    desc_cmd seo            -- "seo <url|path|slug> — preview the Google-style search result snippet for built HTML."
-    desc_cmd dev            -- "Start the local Astro dev server (--drafts previews drafts)"
+    desc_cmd scaffold-primer -- "Scaffold a new 04 Reference/ primer with slim frontmatter"
+    desc_delegate "the site repo's \`npm run scaffold:primer\` — run it with --help for flags"
+    desc_cmd scaffold-field -- "Patch every layer needed for a new writeup field (dry-run by default)"
+    desc_delegate "the site repo's \`npm run scaffold:writeup-field\` — run it with --help for flags"
+    desc_cmd draft-alt      -- "Use the Claude API to draft cover_alt from a writeup's cover image"
+    desc_delegate "the site repo's \`npm run draft:cover-alt\` — run it with --help for flags"
+    desc_cmd publish-all    -- "Alias of publish"
+    desc_opt --no-push      -- "Stop after the local build — no commit, no push (inspect the diff first)"
+    desc_cmd publish-writeup -- "Full publish flow with the named writeup highlighted; the all-published gate runs once first"
+    desc_pos slug           -- "Writeup slug to highlight in the publish run"
+    desc_para "The same gate as \`site publish\` validates every published writeup once before any sync, build, commit, or push. Requires the severino-vault-mcp console script on PATH."
+    desc_cmd validate       -- "Run the writeup publish gate standalone — report only, no build/commit"
+    desc_pos slug           -- "Writeup slug to gate-check"
+    desc_opt --draft        -- "Tolerate the published / published_at blockers so a draft can be gate-checked mid-authoring"
+    desc_cmd tech           -- "List technology slugs from the vault catalog, filtered when a query is given"
+    desc_pos query +optional -- "Filter by slug, label, or group (case-insensitive)"
+    desc_para "Catalog source: 06 Pages/_technology-groups.md. Featured slugs surface in the home-page cloud."
+    desc_cmd featured       -- "Show the home-page featured order, or move one writeup and renumber automatically"
+    desc_pos slug +optional -- "Writeup to move; omit to print the current featured order"
+    desc_pos target +optional -- "Destination: a slot number, or up | down | top | bottom | off"
+    desc_para "No args prints the order the home page renders; a slug + target moves that writeup and renumbers 1..N (inserting one sets featured: true). The new order ships on the next \`site publish\`."
+    desc_example "site featured my-writeup top" -- "move to slot 1"
+    desc_example "site featured my-writeup off" -- "unfeature; others close the gap"
+    desc_cmd manage         -- "Interactive manager: every writeup on one screen — reorder, feature, publish. Nothing written until you save"
+    desc_para "Full-screen manager (keys shown in-app): reorder featured, feature/unfeature, publish/unpublish across every writeup; saving submits one transactional plan. Ship with \`site publish\`."
+    desc_cmd verify         -- "Post-publish live check: page status, OG image, tag pages, and home placement"
+    desc_pos slug           -- "Writeup slug to verify on the live site"
+    desc_para "Checks the live site: /portfolio/<slug>/ is 200, the og:image resolves, every tag page lists it, and the home page shows it when featured. Run ~30s after publishing (Cloudflare rebuild)."
+    desc_cmd diagnose       -- "The collect-all gate: run every audit and report all failures in one pass"
+    desc_delegate "the site repo's \`npm run diagnose\` — run it with --help for flags (--fast, --json)"
+    desc_cmd release        -- "Bump package.json, run publish:check, commit + signed tag, push, create the GitHub release"
+    desc_pos version        -- "Target version, e.g. 1.4.0"
+    desc_opt --ship         -- "Execute the release (dry-run prints the plan and stops without it)"
+    desc_cmd test           -- "Run the Playwright end-to-end suite"
+    desc_opt --visual       -- "Run only the visual-regression specs"
+    desc_opt --ui           -- "Open Playwright's interactive UI mode"
+    desc_opt --update       -- "Update the visual baselines"
+    desc_cmd doctor         -- "Pre-flight health check: CLI/npm drift, vault-mcp install, security, contrast, parity, type check, audit. No build"
+    desc_cmd reinstall-mcp  -- "Reinstall the severino-vault-mcp package from source"
+    desc_cmd new-writeup    -- "Scaffold a new vault writeup folder from the template (starts published: false)"
+    desc_pos slug           -- "Lowercase-kebab-case slug; becomes the /portfolio/<slug>/ URL path"
+    desc_para "Creates 05 Writeups/<slug>/index.md (published: false) and an images/ folder; stays out of the build until you set published: true."
+    desc_cmd seo            -- "Preview the Google-style search result snippet for a built page"
+    desc_pos page           -- "Full URL, domain, absolute path, page slug, or writeup slug"
+    desc_opt -r --result    -- "Show only the Google-style result preview"
+    desc_para "Reads dist.nosync — run \`site build\` first if the page is missing."
+    desc_example "site seo portfolio"
+    desc_example "site seo --result architecting-a-custom-detection-engine"
+    desc_cmd dev            -- "Start the local Astro dev server"
+    desc_opt --drafts       -- "Sync and render published: false content for local preview (never in a build)"
     desc_cmd open           -- "Open the local dev URL in the browser"
-    desc_cmd compare        -- "compare [path] — open a resizable dev-vs-live browser comparison"
+    desc_cmd compare        -- "Open a resizable dev-vs-live browser comparison"
+    desc_pos path +optional -- "Route to compare (default: /)"
+    desc_opt --dev URL      -- "Development origin"
+    desc_opt --live URL     -- "Production origin"
+    desc_opt --mobile       -- "Start with phone-width panes"
+    desc_opt --desktop      -- "Start with fluid panes"
+    desc_opt --compact      -- "Collapse the review chrome"
+    desc_opt --expanded     -- "Expand the review chrome"
+    desc_opt --link-scroll  -- "Synchronize proportional scrolling"
+    desc_opt --no-link-scroll -- "Start with independent scrolling"
+    desc_opt --scroll-mode "{exact,ratio}" -- "exact single-controller lock (default) or ratio"
+    desc_opt --mirror-links -- "Open internal link clicks on both sides"
+    desc_opt --no-mirror-links -- "Keep link navigation independent"
+    desc_opt --split PERCENT -- "Initial desktop divider position (15-85)"
+    desc_opt --swap         -- "Start with LIVE on the left"
+    desc_opt --solo         -- "Show one pane and use Swap to flip DEV/LIVE"
+    desc_opt --split-view   -- "Show both panes"
+    desc_opt --overlay      -- "Stack panes and blend the top one (onion-skin)"
+    desc_opt --overlay-diff -- "Overlay in difference mode (changed pixels light up)"
+    desc_opt --focus "{dev,live}" -- "Side initially visible in Solo mode"
+    desc_opt --notes        -- "Open the review-notes drawer"
+    desc_opt --note TEXT +repeat -- "Add a review note; repeat for a change list"
+    desc_opt --notes-out FILE -- "Write the current notes to FILE as Markdown"
+    desc_opt --clear-notes  -- "Empty the shared notes file before starting"
+    desc_opt --brand NAME   -- "Strip \"| NAME\" from titles in pane headers"
+    desc_opt --http         -- "Serve over http without the homelab certificate"
+    desc_opt --no-open      -- "Print the URL without opening the browser"
+    desc_para "Both panes share a route and a draggable divider; the viewer documents its own keys. Review notes live in a shared file the viewer polls, so a teammate or an AI session can leave notes live — set SITE_COMPARE_VAULT (defaults to the vault 00 Inbox) for the drawer's Send-to-vault button."
     desc_cmd og             -- "Regenerate the Open Graph social card (public/assets/og/)"
     desc_env CODE_HOME      -- "Defaults to ~/Documents/Code"
     desc_env SITE_HOME      -- "Defaults to \$CODE_HOME/Projects/jseverino.com"
@@ -107,17 +174,7 @@ cmd_dev() {
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
             --drafts) drafts="1"; shift ;;
-            -h|--help)
-                cat <<HELP
-Usage: site dev [--drafts]
-
-Start the local Astro dev server at http://$SITE_DEV_HOST:$SITE_DEV_PORT/.
-
-  --drafts   Sync and render published: false writeups and pages too, for
-             local preview. Drafts render in dev only — never in a build.
-HELP
-                return 0 ;;
-            *) die "error" "unknown flag: $1 (try \`site dev --help\`)" ;;
+            *) die_unknown flag "$1" dev ;;
         esac
     done
 
@@ -214,55 +271,7 @@ cmd_compare() {
                 shift 2
                 ;;
             --no-open) should_open=""; shift ;;
-            -h|--help)
-                cat <<HELP
-Usage: site compare [path] [options]
-
-Open a polished split-screen comparison of local development and the live site.
-Both panes stay on the same route and share a draggable center divider.
-
-  path                 Route to compare (default: /)
-  --dev URL            Development origin (default: $dev_url)
-  --live URL           Production origin (default: $live_url)
-  --mobile|--desktop   Start with phone-width or fluid panes
-  --compact|--expanded Collapse or expand the review chrome
-  --link-scroll        Synchronize proportional scrolling
-  --no-link-scroll     Start with independent scrolling
-  --scroll-mode MODE   exact single-controller lock (default) or ratio
-  --mirror-links       Open internal link clicks on both sides
-  --no-mirror-links    Keep link navigation independent
-  --split PERCENT      Initial desktop divider position (15-85)
-  --swap               Start with LIVE on the left
-  --solo               Show one pane and use Swap to flip DEV/LIVE
-  --split-view         Show both panes
-  --overlay            Stack panes and blend the top one (onion-skin)
-  --overlay-diff       Overlay in difference mode (changed pixels light up)
-  --focus dev|live     Side initially visible in Solo mode
-  --notes              Open the review-notes drawer
-  --note TEXT          Add a review note; repeat for a change list
-  --notes-out FILE     Write the current notes to FILE as Markdown
-  --clear-notes        Empty the shared notes file before starting
-  --brand NAME         Strip "| NAME" from titles in pane headers
-  --http               Serve over http without the homelab certificate
-  --no-open            Print the URL without opening Safari
-
-Review notes are stored in a shared file ($notes_file) that the viewer polls,
-so a teammate or an AI session can leave notes that show up live in the drawer.
-Set SITE_COMPARE_VAULT (defaults to the vault 00 Inbox) to enable the drawer's
-"Send to vault" button.
-
-Viewer controls:
-  Split / Solo / Overlay  One view switch; in Overlay, Diff lights up changed pixels
-  SEO                  Snippet preview + ~13-point SEO checklist per pane
-  Notes                Author-tagged, clickable (jumps to the route), per-note
-                       copy link; dock or float; Send to vault / Export .md
-  Mirror links         Apply internal link clicks to both sides
-  Status / ≠ meta      Per-pane HTTP status and metadata-diff badges
-  Caret                Collapse to a compact row (keeps the view switch)
-  O / D / S / R / 0 / / Overlay / Diff / swap / reload / reset split / focus route
-HELP
-                return 0 ;;
-            --*) die "error" "unknown flag: $1 (try \`site compare --help\`)" ;;
+            --*) die_unknown flag "$1" compare ;;
             *) path="$1"; shift ;;
         esac
     done
@@ -439,25 +448,8 @@ HELP
 }
 
 cmd_seo() {
-    if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "$#" -eq 0 ]]; then
-        cat <<HELP
-Usage: site seo [--result] <url|path|slug>
-
-Preview the Google-style search result snippet and key SEO metadata for a built page.
-Input may be a full URL, domain, absolute path, page slug, or writeup slug.
-
-Examples:
-  site seo jseverino.com
-  site seo portfolio
-  site seo --result portfolio
-  site seo /portfolio/architecting-a-custom-detection-engine/
-  site seo architecting-a-custom-detection-engine
-
-Options:
-  -r, --result   Show only the Google-style result preview
-
-Reads dist.nosync. Run site build first if the page is missing.
-HELP
+    if [[ "$#" -eq 0 ]]; then
+        usage_command seo
         return 0
     fi
 
@@ -467,19 +459,8 @@ HELP
 
 cmd_new_writeup() {
     local slug="${1:-}"
-    if [[ -z "$slug" || "$slug" == "-h" || "$slug" == "--help" ]]; then
-        cat <<HELP
-Usage: site new-writeup <slug>
-
-Scaffold a new vault writeup at 05 Writeups/<slug>/ from the Writeup template.
-The slug becomes the public URL path: jseverino.com/portfolio/<slug>/
-
-Created files:
-  05 Writeups/<slug>/index.md     # frontmatter pre-filled; published: false
-  05 Writeups/<slug>/images/      # empty; drop cover.png + screenshots here
-
-The writeup stays out of the site build until you flip published: true.
-HELP
+    if [[ -z "$slug" ]]; then
+        usage_command new-writeup
         return 0
     fi
 
@@ -586,20 +567,7 @@ cmd_validate() {
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
             --draft) draft="1"; shift ;;
-            -h|--help)
-                cat <<HELP
-Usage: site validate <slug> [--draft]
-
-Run the severino-vault-mcp publish gate for one writeup and print the
-report — no build, no commit, no push. The same gate \`site publish-writeup\`
-enforces, available standalone while writing.
-
-  --draft   Tolerate the published / published_at blockers so a draft can
-            be gate-checked mid-authoring. Tech slugs, images, and
-            related_* refs are still enforced.
-HELP
-                return 0 ;;
-            -*) die "error" "unknown flag: $1 (try \`site validate --help\`)" ;;
+            -*) die_unknown flag "$1" validate ;;
             *) slug="$1"; shift ;;
         esac
     done
@@ -656,17 +624,6 @@ HELP
 
 cmd_tech() {
     local query="${1:-}"
-    if [[ "$query" == "-h" || "$query" == "--help" ]]; then
-        cat <<HELP
-Usage: site tech [query]
-
-List the technology slug catalog from 06 Pages/_technology-groups.md —
-the slugs a writeup's technologies: list may use. A query filters by
-slug, label, or group (case-insensitive). Featured slugs surface in the
-home-page technology cloud.
-HELP
-        return 0
-    fi
     require_mcp
     local report
     report="$(svmc technology-catalog)" \
@@ -722,70 +679,12 @@ featured_render() {
 }
 
 cmd_manage() {
-    if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-        cat <<HELP
-Usage: site manage
-
-Interactive writeup manager — every writeup on one screen:
-
-  - the FEATURED list in the exact order the home page renders
-  - everything else below the line, then a "new writeup…" row
-  - ● published · ◌ draft · red ! = the publish gate would reject it
-    (open the writeup to see exactly why)
-
-Keys:
-
-  ↑/↓          select a writeup
-  enter        open it — view and edit its frontmatter fields in place,
-               with its gate issues listed; on the + row, create new
-  space        pick it up; ↑/↓ moves it, crossing the line features or
-               unfeatures it; space drops it
-  f            feature ↔ unfeature where it stands
-  p            publish ↔ unpublish (publishing sets published_at if empty)
-  n            scaffold a new writeup (site new-writeup) and open it
-  o            open the writeup in Obsidian to write the body
-  s            save — nothing is written until you do
-  q / esc      quit (asks first if changes are staged)
-  ←/→ or tab   switch between the Writeups and Site tabs; the Site tab
-               shows server/git/build status and runs dev, compare,
-               doctor, diagnose, build, test, and publish in place
-
-Loading uses one severino-vault-mcp dashboard snapshot. Saving submits one
-transactional writeup plan, so scalar edits and the complete featured order
-either all apply or roll back together. The featured list remains sequential
-1..N and YAML edits are format-preserving. Ship with \`site publish\`.
-HELP
-        return 0
-    fi
     require_mcp
     SVMC_VAULT_PATH="$NOTES_HOME" node "$TOOLS_HOME/lib/site/manage-tui.mjs"
 }
 
 cmd_featured() {
     local slug="${1:-}" target="${2:-}"
-    if [[ "$slug" == "-h" || "$slug" == "--help" ]]; then
-        cat <<HELP
-Usage: site featured [<slug> <slot|up|down|top|bottom|off>]
-
-With no arguments: show the featured writeup order — the exact order the
-home page renders (featured: true, published, featured_order ascending).
-
-With a slug and a target: move that writeup and renumber the whole list
-sequentially 1..N — no hand-editing featured_order across files.
-
-  site featured my-writeup 2       put it in slot 2
-  site featured my-writeup up      one slot toward the top
-  site featured my-writeup down    one slot toward the bottom
-  site featured my-writeup top     slot 1
-  site featured my-writeup bottom  last slot
-  site featured my-writeup off     unfeature it (others close the gap)
-
-A writeup not currently featured can be inserted by number, top, or
-bottom — featured: true is set on it automatically. The new order goes
-live on the next \`site publish\`.
-HELP
-        return 0
-    fi
     require_mcp
 
     if [[ -z "$slug" ]]; then
@@ -848,21 +747,8 @@ HELP
 
 cmd_verify() {
     local slug="${1:-}"
-    if [[ -z "$slug" || "$slug" == "-h" || "$slug" == "--help" ]]; then
-        cat <<HELP
-Usage: site verify <slug>
-
-Post-publish live check for one writeup. Confirms on the live site:
-
-  - /portfolio/<slug>/ returns 200
-  - the page og:image resolves
-  - every tag page (/tag/<tech>/) lists the writeup
-  - the home page shows it when featured
-
-Run after \`site publish-writeup <slug>\` once Cloudflare rebuilds (~30s).
-For metadata details use \`site seo <slug>\`; for a visual pass use
-\`site compare /portfolio/<slug>/\`.
-HELP
+    if [[ -z "$slug" ]]; then
+        usage_command verify
         return 0
     fi
     if [[ ! "$slug" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
@@ -970,20 +856,8 @@ verify_writeup_live() {
 
 cmd_publish_writeup() {
     local slug="${1:-}"
-    if [[ -z "$slug" || "$slug" == "-h" || "$slug" == "--help" ]]; then
-        cat <<HELP
-Usage: site publish-writeup <slug>
-
-Run the full publish workflow with one writeup highlighted. The same
-authoritative gate as \`site publish\` validates every published writeup
-exactly once before any sync, build, commit, or push.
-
-Exits before mutation if any published writeup has blockers, missing tech
-slugs or images, or unresolved related_projects / related_assets.
-
-Requires the \`severino-vault-mcp\` console script on PATH (installed via
-\`uv tool install ~/Documents/Code/Assets/severino-vault-mcp\`).
-HELP
+    if [[ -z "$slug" ]]; then
+        usage_command publish-writeup
         return 0
     fi
 
@@ -1004,37 +878,7 @@ cmd_publish_all() {
         case "$1" in
             --no-push) skip_push="1"; shift ;;
             --focus-slug) focus_slug="${2:-}"; shift 2 ;;
-            -h|--help)
-                cat <<HELP
-Usage: site publish [--no-push]        (alias: site publish-all)
-
-The full vault-to-live-edge orchestrator. No slug needed — the system
-figures out what changed. Runs:
-
-  1. writeup gate            validate EVERY published writeup (severino-vault-mcp)
-  2. hq sync                 vault frontmatter → HQ
-  3. build + audits          clean + sync + astro check + build + audit
-  4. commit + push           auto-commit the synced snapshot, then push to
-                             trigger the Cloudflare Pages build
-  5. verify live             confirm each affected writeup on the live site
-                             (page, og:image, tag pages, home placement)
-
-This is the whole vault-to-live flow in one command — the common case
-"I edited a writeup or page; ship it."
-
-Only the generated snapshot (src/content, public/assets) is committed. The
-commit message is built from the diff — it names each slug as published
-(new), edited, or removed. Code or config edits are left for you to commit
-deliberately.
-
-  --no-push   Stop after the local build — no commit, no push. Use it to
-              inspect the diff first.
-
-Drafts (published: false) are kept in the vault, surface in HQ as Draft,
-and are NOT pushed to the site repo.
-HELP
-                return 0 ;;
-            *) die "error" "unknown flag: $1 (try \`site publish --help\`)" ;;
+            *) die_unknown flag "$1" publish ;;
         esac
     done
 
@@ -1307,7 +1151,7 @@ cmd_test() {
         --ui) script="test:e2e:ui" ;;
         --update) script="test:e2e:visual:update" ;;
         '') ;;
-        *) die "usage" "unknown test mode: $1 (--visual | --ui | --update)" ;;
+        *) die_unknown "test mode" "$1" test ;;
     esac
     run_npm "$script"
 }
@@ -1401,6 +1245,11 @@ cmd_reinstall_mcp() {
     msg "$DIM" "note" "reconnect long-running MCP clients only if their tool schema must refresh"
 }
 
+# All help + the machine surface render from the one spec via the shared
+# intercept (main `-h`, `--describe`, focused `<cmd> -h`); the dispatch is just
+# command → action. npm pass-throughs render their summary here; their flags
+# live in the site repo's package.json scripts (run those with --help).
+desc_help_intercept "$@"
 case "${1:-}" in
     status)         shift; cmd_status "$@" ;;
     sync)           shift; run_npm sync:content "$@" ;;
@@ -1432,7 +1281,5 @@ case "${1:-}" in
     open)           shift; cmd_open "$@" ;;
     compare)        shift; cmd_compare "$@" ;;
     og)             shift; run_npm make:og "$@" ;;
-    --describe)     describe_emit "$@"; exit 0 ;;
-    -h|--help|"")   usage; exit 0 ;;
-    *)              die "usage" "unknown command: $1 (try -h)" 2 ;;
+    *)              die_unknown command "$1" ;;
 esac
