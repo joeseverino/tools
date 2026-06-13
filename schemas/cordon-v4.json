@@ -1,7 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://jseverino.com/schemas/tools-describe-v4.json",
-  "title": "Severino tools describe contract",
+  "$id": "https://jseverino.com/schemas/cordon-v4.json",
+  "$comment": "Canonical source: the cordon repo at schema/cordon-v4.json. Published copies (jseverino.com, consumer repos) are derived from this file — edit here.",
+  "title": "Cordon command-surface contract (schema_version 4)",
   "type": "object",
   "additionalProperties": false,
   "required": [

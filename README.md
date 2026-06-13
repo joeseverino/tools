@@ -601,7 +601,7 @@ and cron). `TOOLS_INSTALL_DIR` overrides the install target.
 lives in one place. It discovers scripts by shebang (`bash -n`, `zsh -n`,
 `node --check`), runs shellcheck over the tracked shell sources, the
 bats test suite in `tests/`, validates every describe document against
-`schemas/describe-v4.schema.json`, checks generated surfaces, and runs the bench
+`schemas/cordon-v4.json`, checks generated surfaces, and runs the bench
 assertions in `bench/`.
 `tools new <name>` drops a canonical skeleton in `bin/` — init.sh
 sourcing, usage block, arg loop, correct exit codes — and prints the
