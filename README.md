@@ -215,7 +215,7 @@ nothing). Either way the loop is `<tool> diff` → reconcile the prose →
 
 Every tool emits its command surface as one structured JSON document, and
 three consumers render from that single source: an AI session reads it,
-a TUI can build a picker from it, and CI guards diff it. This is
+the `--tui` explorer builds a picker from it, and CI guards diff it. This is
 **emit-once, render-many** — a tool declares its surface once in a
 `describe_spec()` (the `desc_*` DSL in `lib/describe.sh`), and *both*
 `-h`/`--help` and `--describe` are derived from it, so the human help and
@@ -227,7 +227,15 @@ tools describe                # federated: every tool, one document
 tools describe --pretty       # indented, for reading
 tools describe encrypt        # just one tool
 tools describe --repos        # also fold in sibling repos (severino-vault-mcp)
+tools describe --tui          # full-screen explorer: browse + copy invocations
 ```
+
+`--tui` is the human tier of the contract: a two-pane explorer (tools | the
+selected tool's commands/options/args) over the same federated document.
+`Tab`/`←→` switch panes, `↑/↓` move, `/` filters tools *and* commands across the
+whole toolchain, `Enter` copies a ready-to-paste invocation, `q` quits.
+Aggregate only — a single tool stays the clean `<tool> -h`. It shares the
+`site manage` look via the common TUI library (`lib/tui.mjs`).
 
 The contract — a superset of what `severino-vault-mcp describe` emits:
 

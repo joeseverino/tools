@@ -9,8 +9,12 @@ load helpers
 # Run a synthetic describe_spec through the engine and capture either the JSON
 # (mode=json) or the usage text (mode=usage). Keeps the spec in one place so the
 # two renderers are exercised from identical input.
+# render <mode> [command]
+#   json            → the --describe JSON
+#   usage           → the main human help
+#   usage <command> → the focused per-command help (usage_command)
 render() {
-    local mode="$1"
+    local mode="$1" cmd="${2:-}"
     bash -c '
         source "$TOOLS_HOME/lib/common.sh"
         source "$TOOLS_HOME/lib/describe.sh"
@@ -28,8 +32,10 @@ render() {
             desc_env DEMO_HOME -- "Where demo lives"
             desc_example "demo a.txt" -- "the common case"
         }
-        if [ "$1" = json ]; then describe_emit; else usage; fi
-    ' _ "$mode"
+        if [ "$1" = json ]; then describe_emit
+        elif [ -n "$2" ]; then usage_command "$2"
+        else usage; fi
+    ' _ "$mode" "$cmd"
 }
 
 @test "describe_render_json emits the versioned contract envelope" {
@@ -90,9 +96,20 @@ assert "target" in names and "--fast" in names
     [[ "$output" == *"Examples:"* ]]
 }
 
-@test "round-trip invariant: every JSON option/command appears in usage" {
+@test "round-trip invariant: every JSON option/command appears in some help view" {
     json=$(render json)
-    usage=$(render usage)
+    # The human surface is the main usage plus each command's focused help —
+    # command options now live in `<tool> <cmd> -h`, not the main screen.
+    help=$(render usage)
+    cmds=$(printf '%s' "$json" | python3 -c '
+import json,sys
+for c in json.load(sys.stdin)["commands"]: print(c["name"])
+')
+    while IFS= read -r c; do
+        [ -n "$c" ] || continue
+        help+=$'\n'"$(render usage "$c")"
+    done <<<"$cmds"
+
     # Collect every long flag and command name from the JSON contract.
     tokens=$(printf '%s' "$json" | python3 -c '
 import json,sys
@@ -109,11 +126,33 @@ print("\n".join(sorted(toks)))
 ')
     while IFS= read -r tok; do
         [ -n "$tok" ] || continue
-        if [[ "$usage" != *"$tok"* ]]; then
-            echo "JSON token not present in usage: $tok"
+        if [[ "$help" != *"$tok"* ]]; then
+            echo "JSON token not present in any help view: $tok"
             return 1
         fi
     done <<<"$tokens"
+}
+
+@test "usage_command renders one command's options and args (focused help)" {
+    run render usage run
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Usage: demo run [options] <target>"* ]]
+    [[ "$output" == *"Run it"* ]]
+    [[ "$output" == *"Arguments:"* ]]
+    [[ "$output" == *"target"* ]]
+    [[ "$output" == *"--fast"* ]]
+    [[ "$output" == *"-h, --help"* ]]
+}
+
+@test "main usage stays a scannable command list with a focused-help pointer" {
+    run render usage
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Commands:"* ]]
+    [[ "$output" == *"run"* ]]
+    # command-scoped detail is NOT inlined on the main screen…
+    [[ "$output" != *"--fast"* ]]
+    # …but the pointer to it is.
+    [[ "$output" == *"demo <command> -h"* ]]
 }
 
 @test "engine is byte-identical under bash and zsh" {

@@ -61,7 +61,7 @@ describe_reset() {
     _D_PARA=()
     _D_CMDS=()             # name <sep> summary
     _D_OPTS=()             # scope <sep> short <sep> long <sep> metavar <sep> choices <sep> repeat <sep> help
-    _D_POS=()              # scope <sep> name <sep> required <sep> variadic <sep> help
+    _D_POS=()              # scope <sep> name <sep> required <sep> variadic <sep> choices <sep> help
     _D_ENV=()              # var <sep> help
     _D_EX=()               # command <sep> comment
 }
@@ -108,19 +108,24 @@ desc_opt() {
     _D_OPTS+=("${_D_CUR_CMD}${_DSEP}${short}${_DSEP}${long}${_DSEP}${metavar}${_DSEP}${choices}${_DSEP}${repeat}${_DSEP}${*:-}")
 }
 
-# desc_pos <name> [+optional] [+variadic] -- <help...>
+# desc_pos <name> [+optional] [+variadic] [{a,b,c}] -- <help...>
+#   A quoted "{a,b,c}" token marks a fixed choice set (same as desc_opt — quote
+#   it so the shell doesn't brace-expand it). Choices ride into the JSON and
+#   show in the usage label, so an action positional (e.g. cache|forget|status)
+#   is structured surface, not prose.
 desc_pos() {
     local name="$1"; shift
-    local required=1 variadic=0
+    local required=1 variadic=0 choices=""
     while [[ $# -gt 0 && "$1" != "--" ]]; do
         case "$1" in
             +optional)  required=0 ;;
             +variadic)  variadic=1 ;;
+            \{*\})      choices="${1#\{}"; choices="${choices%\}}" ;;
         esac
         shift
     done
     [[ "${1:-}" == "--" ]] && shift
-    _D_POS+=("${_D_CUR_CMD}${_DSEP}${name}${_DSEP}${required}${_DSEP}${variadic}${_DSEP}${*:-}")
+    _D_POS+=("${_D_CUR_CMD}${_DSEP}${name}${_DSEP}${required}${_DSEP}${variadic}${_DSEP}${choices}${_DSEP}${*:-}")
 }
 
 # desc_env <VAR> -- <help...> — human help only.
@@ -250,15 +255,17 @@ describe_render_usage() {
     # Options: declared top-level options, then the universal -h/--help.
     _describe_render_opt_section "" "Options:" 1
 
-    # Per-command args (positionals then options), for subcommand tools that
-    # documented them.
+    # Per-command detail (options + args) is reachable as focused help — git
+    # style: the main screen stays a scannable command list regardless of how
+    # many commands a tool has; `<tool> <cmd> -h` renders one command's scope
+    # from the same spec (describe_render_usage_for). Surface the pointer only
+    # when some command actually has documented args.
     if (( ${#_D_CMDS[@]} )); then
         for rec in "${_D_CMDS[@]}"; do
             name="${rec%%"$_DSEP"*}"
             if _describe_scope_has_args "$name"; then
-                printf '\n%s:\n' "$name"
-                _describe_render_pos_section "$name" ""
-                _describe_render_opt_section "$name" "" 0
+                printf "\nRun '%s <command> -h' for a command's options and arguments.\n" "$_D_NAME"
+                break
             fi
         done
     fi
@@ -296,6 +303,57 @@ describe_render_usage() {
     fi
 }
 
+# Positional placeholders for a scope's synopsis line: "<name>", "[<name>]",
+# "<name>..." — built from _D_POS so the focused Usage line matches the spec.
+_describe_pos_synopsis() {
+    local want="$1" rec scope name required variadic choices help out=""
+    (( ${#_D_POS[@]} )) || return 0
+    for rec in "${_D_POS[@]}"; do
+        IFS="$_DSEP" read -r scope name required variadic choices help <<<"$rec"
+        [[ "$scope" == "$want" ]] || continue
+        local token="<$name>"
+        [[ -n "$choices" ]] && token="{${choices//,/|}}"
+        (( ! required )) && token="[$token]"
+        (( variadic )) && token="${token}..."
+        out="${out:+$out }$token"
+    done
+    printf '%s' "$out"
+}
+
+# describe_render_usage_for <cmd> — focused help for a single command's scope:
+# its summary, arguments, and options, rendered from the same spec the main
+# usage and the JSON come from. Falls back to the full usage for an unknown
+# command so `<tool> bogus -h` still helps.
+describe_render_usage_for() {
+    local want="$1"
+    local _D_WIDTH; _D_WIDTH=$(_describe_termwidth)
+    local rec name summary="" found=0
+    if (( ${#_D_CMDS[@]} )); then
+        for rec in "${_D_CMDS[@]}"; do
+            name="${rec%%"$_DSEP"*}"
+            if [[ "$name" == "$want" ]]; then found=1; summary="${rec#*"$_DSEP"}"; break; fi
+        done
+    fi
+    if (( ! found )); then
+        describe_render_usage
+        return
+    fi
+
+    local pos; pos="$(_describe_pos_synopsis "$want")"
+    printf 'Usage: %s %s [options]%s\n' "$_D_NAME" "$want" "${pos:+ $pos}"
+    [[ -n "$summary" ]] && printf '\n%s\n' "$summary"
+    _describe_render_pos_section "$want" "Arguments:"
+    _describe_render_opt_section "$want" "Options:" 1
+}
+
+# usage_command <cmd> — the focused-help counterpart of usage(): a tool routes
+# its `<tool> <cmd> -h` here so per-command help is derived, never hand-written.
+usage_command() {
+    describe_reset
+    describe_spec
+    describe_render_usage_for "$1"
+}
+
 # True if any opt/pos is scoped to the given command.
 _describe_scope_has_args() {
     local want="$1" rec
@@ -314,20 +372,22 @@ _describe_scope_has_args() {
 
 # _describe_render_pos_section <scope> <header|"">
 _describe_render_pos_section() {
-    local want="$1" header="$2" rec scope name required variadic help w=0 any=0
+    local want="$1" header="$2" rec scope name required variadic choices help label w=0 any=0
     (( ${#_D_POS[@]} )) || return 0
     for rec in "${_D_POS[@]}"; do
-        IFS="$_DSEP" read -r scope name required variadic help <<<"$rec"
+        IFS="$_DSEP" read -r scope name required variadic choices help <<<"$rec"
         [[ "$scope" == "$want" ]] || continue
         any=1
-        (( ${#name} > w )) && w=${#name}
+        label="$name"; [[ -n "$choices" ]] && label="$name {$choices}"
+        (( ${#label} > w )) && w=${#label}
     done
     (( any )) || return 0
     [[ -n "$header" ]] && printf '\n%s\n' "$header"
     for rec in "${_D_POS[@]}"; do
-        IFS="$_DSEP" read -r scope name required variadic help <<<"$rec"
+        IFS="$_DSEP" read -r scope name required variadic choices help <<<"$rec"
         [[ "$scope" == "$want" ]] || continue
-        _describe_row 2 "$w" "$name" "$help"
+        label="$name"; [[ -n "$choices" ]] && label="$name {$choices}"
+        _describe_row 2 "$w" "$label" "$help"
     done
 }
 
@@ -417,9 +477,9 @@ _describe_args_for_scope() {
     local name required variadic help short long metavar choices repeat optname item
     if (( ${#_D_POS[@]} )); then
         for rec in "${_D_POS[@]}"; do
-            IFS="$_DSEP" read -r scope name required variadic help <<<"$rec"
+            IFS="$_DSEP" read -r scope name required variadic choices help <<<"$rec"
             [[ "$scope" == "$want" ]] || continue
-            item="$(_describe_arg_json 1 "$name" "$required" "$help")"
+            item="$(_describe_arg_json 1 "$name" "$required" "$help" "" "" "" "$choices")"
             items="${items:+$items,}$item"
         done
     fi
@@ -453,12 +513,12 @@ _describe_global_opts_json() {
 
 # Top-level positionals only.
 _describe_global_pos_json() {
-    local rec scope name required variadic help item items=""
+    local rec scope name required variadic choices help item items=""
     (( ${#_D_POS[@]} )) || return 0
     for rec in "${_D_POS[@]}"; do
-        IFS="$_DSEP" read -r scope name required variadic help <<<"$rec"
+        IFS="$_DSEP" read -r scope name required variadic choices help <<<"$rec"
         [[ -z "$scope" ]] || continue
-        item="$(_describe_arg_json 1 "$name" "$required" "$help")"
+        item="$(_describe_arg_json 1 "$name" "$required" "$help" "" "" "" "$choices")"
         items="${items:+$items,}$item"
     done
     printf '%s' "$items"

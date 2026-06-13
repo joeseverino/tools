@@ -17,20 +17,43 @@ describe_spec() {
     desc_para "Severino HQ glue. Reads YAML frontmatter from the vault and upserts the"
     desc_para "HQ docs index. Also wraps the routine ssh + docker compose calls for"
     desc_para "managing the HQ deployment."
-    desc_cmd manifest  -- "Print the manifest JSON (frontmatter from every doc) to stdout. Useful for inspection or piping elsewhere."
-    desc_cmd sync      -- "Pipe the manifest into HQ's import_docs_manifest. Upserts by doc_id; safe to re-run. --prune deletes orphan rows and stale mirrored ContentItems."
-    desc_cmd doctor    -- "Report vault docs that are missing or have invalid frontmatter, and whether HQ's last-synced manifest is stale."
-    desc_cmd schema    -- "Regenerate HQ's docs_index/schema.json from the installed MCP. --check verifies it's current (exit 1 on drift) without writing."
-    desc_cmd validate  -- "Report HQ registry entries (Projects/Assets) that no vault doc references. Catches stale slugs and duplicate rows. Read-only."
-    desc_cmd create    -- "Create or update a Project or Asset in HQ. \`hq create project --help\` / \`hq create asset --help\` for flags. Idempotent (upserts by slug)."
-    desc_cmd deploy    -- "Fallback: manually re-pull the latest scanned image from GHCR and restart the container (CI's deploy step)."
-    desc_cmd ship      -- "Commit + push a small HQ change. The push IS the deploy: it triggers the gated pipeline (build -> scan -> deploy on green)."
-    desc_cmd logs      -- "Show app container logs. Default tail is 50. -f / --follow streams live output until Ctrl-C."
-    desc_cmd restart   -- "\`docker compose restart app\` — no rebuild, no migrations. For picking up env changes or clearing stuck state."
-    desc_cmd open      -- "Open \$HQ_URL in the browser."
-    desc_cmd shell     -- "ssh -t into the HQ Django shell. Handy for poking the ORM."
-    desc_cmd superuser -- "ssh -t into HQ and run createsuperuser interactively."
-    desc_cmd export    -- "export <year> [md|json] — download the year summary to ./ and print the path. Defaults to current year and md."
+    desc_cmd manifest  -- "Print the manifest JSON (frontmatter from every doc) to stdout — for inspection or piping elsewhere"
+
+    desc_cmd sync      -- "Pipe the manifest into HQ's import_docs_manifest; upserts by doc_id, safe to re-run"
+    desc_opt --prune     -- "Delete orphan DocumentationRecord rows (doc_ids in HQ but not in the manifest), plus ContentItems linked only to them. Use after a doc_id rename or retirement"
+    desc_opt --no-update -- "Only create new records; never update existing ones"
+
+    desc_cmd doctor    -- "Report vault docs missing or with invalid frontmatter, and whether HQ's last-synced manifest is stale"
+
+    desc_cmd schema    -- "Regenerate HQ's docs_index/schema.json from the installed MCP (the canonical frontmatter contract)"
+    desc_opt --check     -- "Verify the HQ schema.json and the vault schema doc match the MCP; exit 1 on drift without writing (CI / pre-deploy gate)"
+
+    desc_cmd validate  -- "Report HQ registry entries (Projects/Assets) that no vault doc references. Read-only"
+
+    desc_cmd create    -- "Create or update a Project or Asset in HQ (idempotent upsert by slug). Run 'hq create -h' for the management-command flags"
+    desc_pos kind "{project,asset}" -- "What to create"
+    desc_pos slug      -- "Registry slug (the create_project / create_asset key)"
+
+    desc_cmd deploy    -- "Fallback: re-pull the latest scanned GHCR image and restart the container (CI's deploy step)"
+
+    desc_cmd ship      -- "Commit + push a small HQ change. The push IS the deploy: it triggers the gated pipeline (build → scan → deploy on green)"
+    desc_opt -m --message TEXT -- "Commit message for the HQ repo change (required)"
+
+    desc_cmd logs      -- "Show app container logs (default tail 50)"
+    desc_opt -f --follow -- "Stream live output until Ctrl-C"
+    desc_opt --tail N    -- "Number of lines to show (default 50; ignored with --follow)"
+
+    desc_cmd restart   -- "\`docker compose restart app\` — no rebuild, no migrations. For env changes or stuck state"
+
+    desc_cmd open      -- "Open \$HQ_URL in the browser"
+
+    desc_cmd shell     -- "ssh -t into the HQ Django shell (poke the ORM)"
+
+    desc_cmd superuser -- "ssh -t into HQ and run createsuperuser interactively"
+
+    desc_cmd export    -- "Download the year summary to ./ and print the path"
+    desc_pos year +optional             -- "Year to export (default: current year)"
+    desc_pos format +optional "{md,json}" -- "Output format (default: md)"
     desc_env NOTES_HOME    -- "Vault root"
     desc_env HQ_VAULT_DIRS -- "Colon-separated subdirs to index"
     desc_env HQ_SSH_HOST   -- "SSH alias of the HQ server"
@@ -66,20 +89,7 @@ cmd_schema() {
     local check=0
     case "${1:-}" in
         --check) check=1 ;;
-        -h|--help)
-            cat <<HELP
-Usage: hq schema [--check]
-
-Regenerate HQ's docs_index/schema.json from the installed severino-vault-mcp,
-which is the single canonical frontmatter contract. The MCP validates vault
-writes against it; HQ's importer validates the manifest against the committed
-copy. Also checks the vault's human Frontmatter Schema doc for stale enum lists.
-
-  --check   Verify both downstream copies (HQ schema.json and the vault schema
-            doc) match the MCP and exit 1 on drift, without writing. For CI or
-            a pre-deploy gate.
-HELP
-            return 0 ;;
+        -h|--help) usage_command schema; return 0 ;;
         "") : ;;
         *) die "error" "unknown flag: $1 (try \`hq schema --help\`)" ;;
     esac
@@ -150,23 +160,7 @@ cmd_sync() {
         case "$1" in
             --prune) extra_flags="$extra_flags --prune"; prune="1"; shift ;;
             --no-update) extra_flags="$extra_flags --no-update"; shift ;;
-            -h|--help)
-                cat <<HELP
-Usage: hq sync [--prune] [--no-update]
-
-Walk the vault, build a manifest, push it to HQ. Upserts DocumentationRecord
-rows by doc_id (and ContentItem rows for site CMS docs by slug). Re-runs
-are idempotent.
-
-  --prune       Delete orphan DocumentationRecord rows (doc_ids in HQ but
-                not in the current manifest). Use after a doc_id rename or
-                a doc retirement. Mirrored ContentItems that are only linked
-                to pruned docs are removed with them.
-  --no-update   Only create new records; never update existing ones.
-
-Without flags, sync reports orphans but doesn't delete them.
-HELP
-                return 0 ;;
+            -h|--help) usage_command sync; return 0 ;;
             *) die "unknown flag: $1 (try \`hq sync --help\`)" ;;
         esac
     done
@@ -325,20 +319,7 @@ sys.exit(1)
 
 cmd_validate() {
     case "${1:-}" in
-        -h|--help)
-            cat <<HELP
-Usage: hq validate
-
-Read-only audit of the HQ Project/Asset registries against the docs that
-reference them. \`hq sync\` already reports vault relations that point at a
-missing registry slug; this reports the *inverse* — registry rows that no
-doc references (zero documentation_records).
-
-A zero-doc row is not always wrong (a freshly registered project may not have
-a doc yet), but it is the fingerprint of a rename that left a stale slug or a
-duplicate row (e.g. the 2026-06-04 jseverino-public-site dedup). Review each.
-HELP
-            return 0 ;;
+        -h|--help) usage_command validate; return 0 ;;
     esac
 
     msg "$DIM" "validate" "HQ registry ↔ vault docs"
@@ -412,21 +393,7 @@ HELP
 cmd_deploy() {
     case "${1:-}" in
         "") ;;
-        -h|--help)
-            cat <<HELP
-Usage: hq deploy
-
-Manually re-pull the latest scanned image from GHCR and restart the
-container — the same step CI's self-hosted deploy job runs
-(\`docker compose pull app && up -d --no-build app\`). The entrypoint reruns
-migrate + collectstatic on boot.
-
-The box only ever runs an image that CI built and security-scanned; nothing
-is built on the VM. Normal deploys happen automatically when you push to
-main — use this only to re-deploy the last published image (e.g. after a
-runner hiccup) or to roll the container without a new commit.
-HELP
-            return 0 ;;
+        -h|--help) usage_command deploy; return 0 ;;
         *) die "unknown flag: $1 (try \`hq deploy --help\`)" ;;
     esac
 
@@ -441,30 +408,7 @@ cmd_ship() {
         case "$1" in
             -m|--message) message="${2:?--message needs text}"; shift 2 ;;
             --message=*) message="${1#--message=}"; shift ;;
-            -h|--help)
-                cat <<HELP
-Usage: hq ship -m "commit message"
-
-Ship a small HQ code fix: commit local changes and push. The push IS the
-deploy — pushing main triggers the gated GitHub Actions pipeline, which
-lints, tests, and security-scans, then (only on green) the self-hosted
-runner on the homelab pulls the scanned GHCR image and restarts the
-container. ship never touches the box; a red commit can't reach it.
-
-  1. Local Python syntax check (py_compile) as a pre-push sanity pass.
-  2. Commit tracked changes + new files under known HQ app dirs.
-  3. Push main (this triggers the build -> scan -> deploy pipeline).
-
-Only files already tracked by git plus new files under known app directories
-are staged. Local scratch like .claude/ is ignored.
-
-  Watch the deploy:            gh run watch   (or the Actions tab)
-  Manual re-deploy (fallback): hq deploy
-  Vault docs -> HQ index:      hq sync   (separate concern)
-
-  -m, --message TEXT   Commit message for HQ repo changes.
-HELP
-                return 0 ;;
+            -h|--help) usage_command ship; return 0 ;;
             *) die "unknown flag: $1 (try \`hq ship --help\`)" ;;
         esac
     done
@@ -516,17 +460,7 @@ cmd_logs() {
             -f|--follow) follow="-f"; shift ;;
             --tail) tail="${2:?--tail needs a number}"; shift 2 ;;
             --tail=*) tail="${1#--tail=}"; shift ;;
-            -h|--help)
-                cat <<HELP
-Usage: hq logs [-f|--follow] [--tail N]
-
-Show the severino-hq app container logs.
-
-  -f, --follow   Stream live until Ctrl-C.
-  --tail N       Number of lines to show (default 50). Ignored with --follow
-                 — Docker's follow streams from "now" by design.
-HELP
-                return 0 ;;
+            -h|--help) usage_command logs; return 0 ;;
             *) die "unknown flag: $1 (try \`hq logs --help\`)" ;;
         esac
     done
@@ -561,6 +495,7 @@ cmd_superuser() {
 }
 
 cmd_export() {
+    case "${1:-}" in -h|--help) usage_command export; return 0 ;; esac
     local year="${1:-$(date +%Y)}"
     local fmt="${2:-md}"
     case "$fmt" in

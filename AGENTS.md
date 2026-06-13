@@ -18,6 +18,22 @@ Every tool emits its command surface as one structured JSON document — the
   DSL in `lib/describe.sh`). Both `-h`/`--help` (generic `usage()`) **and**
   `--describe` (JSON) render from it, so the human and machine views *cannot*
   drift — there is no prose to parse. New tools get this from `tools new`.
+- **Three human renderers, one spec — no hand-written sub-help.** `usage()` is
+  the git-style main screen (a scannable command list + a `Run '<tool> <cmd> -h'`
+  pointer; it does *not* inline per-command options). `usage_command <cmd>`
+  renders one command's focused detail (summary, arguments, options), so a
+  subcommand tool routes `<tool> <cmd> -h) usage_command <cmd>` instead of a
+  heredoc — `tools`, `brand`, and `hq` carry zero hand-written sub-help. Declare
+  a command's flags with `desc_opt`/`desc_pos` *after* its `desc_cmd` and all
+  four views (main `-h`, focused `-h`, JSON, `--tui`) light up at once.
+  `desc_pos … "{a,b,c}"` gives a positional a fixed choice set (e.g. an action
+  arg like `key {cache,forget,status,test}`), structured into the JSON the same
+  way `desc_opt` choices are. *Exception:* a command whose real flag surface is
+  owned by another repo keeps a curated heredoc (e.g. `hq create` → HQ's
+  `manage.py`), to point at the owner rather than duplicate it (drift).
+  **Still on prose-summary flags:** `bin/site` (30 commands) is the one tool not
+  yet migrated to per-command `desc_opt`/`desc_pos` — a focused follow-up against
+  its own bats suite (accurate flag extraction needs per-handler care).
 - **Wiring.** Source `lib/init.sh` (it sources `lib/describe.sh`), define
   `describe_spec`, and add `--describe) describe_emit "$@"; exit 0 ;;` to the
   dispatch. Drift guards get show/diff/pull from `drift_describe_commands` and
@@ -37,24 +53,29 @@ Every tool emits its command surface as one structured JSON document — the
   the same engine. `tests/describe.bats` asserts the round-trip invariant and
   bash/zsh byte-parity.
 
-## Active work — next branch: `tools describe --tui`
+## `tools describe --tui` — the human tier (shipped 2026-06-13)
 
-The command-surface contract above is already the data model for an interactive
-browser. The next branch builds **`tools describe --tui`**: a full-screen
-Node/Ink explorer that reads the same `tools describe` JSON, sharing the
-`site manage` look + polish bar (see `[[feedback_tui_polish]]`).
+`tools describe --tui` is the interactive consumer of the contract above: a
+full-screen Node explorer over the same `tools describe` JSON
+(`lib/tools/describe-tui.mjs`), sharing the `site manage` look + polish bar (see
+`[[feedback_tui_polish]]`). The three tiers stay cleanly separated: `-h` (clean
+text) · `--describe` (JSON) · `--tui` (this).
 
-- **Scope: aggregate only.** Full-screen tabs/nav earn their keep across 17
-  tools / ~90 commands; a single tool stays the clean wrapped `-h` (no per-tool
-  mini-TUIs). The three tiers stay cleanly separated: `-h` (clean text) ·
-  `--describe` (JSON) · `--tui` (this).
-- **Layout.** Left pane: tool list (Tab / ↑↓ to switch). Right pane: the
-  selected tool's commands / options / args. `/` filters, Enter copies a
-  ready-to-paste invocation, Esc quits. Keep the interactive piece *purposeful*
-  (find-and-use a command), not decorative.
-- **Reuse, don't fork.** Build on `lib/site/manage-tui.mjs` patterns and the
-  `{ok}`/`{error}` envelope; don't introduce a second visual language. Node is
-  already the TUI/JSON tool here.
+- **Scope: aggregate only.** A single tool stays the clean wrapped `-h` (no
+  per-tool mini-TUIs); `tools describe <tool> --tui` is a usage error.
+- **Layout.** Left pane: tool list. Right pane: the selected tool's commands /
+  options / args. `Tab`/`←→` switch panes, `↑↓` move, `/` filters tools *and*
+  commands across the whole toolchain, `Enter` copies a ready-to-paste
+  invocation (pbcopy), `q`/Esc quits. Purposeful (find-and-use a command), not
+  decorative.
+- **Reuse, don't fork — shared `lib/tui.mjs`.** The visual language and input
+  plumbing (palette, grapheme-aware width/clip, `lineEditor`, `fitFrame`, the
+  alt-screen/title polish bar, the escape-sequence input pump + replay key map)
+  live in **`lib/tui.mjs`**, imported by both `manage-tui.mjs` and
+  `describe-tui.mjs` — one implementation of the look, not two that drift. A new
+  Node TUI imports it; it does **not** copy these helpers. `tests/describe-tui.bats`
+  mirrors `site-manage.bats`'s `*_SMOKE` (static frame) / `*_KEYS` (replay)
+  harness; `site-manage.bats` is the regression net for changes to `lib/tui.mjs`.
 - Decision record (the "render-many" consumers):
   `read_doc('report-emit-once-render-many')`.
 

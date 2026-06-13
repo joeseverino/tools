@@ -43,15 +43,7 @@ cmd_build() {
 
 cmd_kit() {
     if [[ "$#" -lt 3 || "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-        cat <<HELP
-Usage: brand kit <slug> <hex> <initials> ["Wordmark"] [--font f] [--only a,b] [--out d]
-
-Render a one-off kit (mark, wordmark, sheet, web) into \$BRAND_HOME/kits/<slug>.
-
-Examples:
-  brand kit chris-blake 6D28D9 CB "Chris Blake"
-  brand kit acme ff5733 AC "Acme Corp" --only mark,wordmark
-HELP
+        usage_command kit
         return 0
     fi
     require_brand
