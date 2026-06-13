@@ -7,6 +7,7 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" crypt "$@"
 
 describe_spec() {
     desc_tool "open-age" "Decrypt a .age file to a temp file and open it in the default app."
+    desc_inventory "Cryptography" 40
     desc_effect local_write +interactive
     desc_synopsis "open-age [options] <file.age>"
     desc_para "Decrypts a .age file to a temporary file under \$TMPDIR (mode 600,"

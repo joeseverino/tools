@@ -14,6 +14,7 @@ BASELINE="AdGuard LAN"
 # self-describes from the same one declaration as the bash tools.
 describe_spec() {
     desc_tool "dns-test" "Compare DNS resolver latency across paths."
+    desc_inventory "Diagnostics" 80
     desc_effect read +network
     desc_synopsis "dns-test [-d domain] [-n runs] [-a adguard_ip] [-b baseline] [-h]"
     desc_para "Measures DNS latency across System DNS, a LAN AdGuard resolver,"

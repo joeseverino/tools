@@ -7,7 +7,7 @@ though each tool is a standalone script.
 
 **Design docs:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (the repo map)
 and [`docs/command-surface-contract.md`](docs/command-surface-contract.md) (the
-emit-once `describe` contract + the v3 effect model, with diagrams). House rules
+emit-once `describe` contract + the effect model, with diagrams). House rules
 for editing are in [`AGENTS.md`](AGENTS.md).
 
 **Platform:** macOS only. The crypt tools rely on `/usr/bin/security`
@@ -24,7 +24,7 @@ equivalents in-tree.
 - An age-compatible identity (SSH ed25519 is fine).
 - `node` ≥ 20 — only for the Node-based tools (`doc-to-pdf`,
   `site manage`, `site compare`). Run `npm ci` once to fetch their
-  pinned deps.
+  pinned deps and the JSON Schema validator used by `tools check`.
 - `shellcheck` + `bats-core` — only to run `tools check` (the CI suite)
   locally. The macOS system `/usr/bin/expect` runs the real-PTY coverage for
   `site manage`.
@@ -36,23 +36,31 @@ equivalents in-tree.
 ```text
 tools/
   bin/                   # public command surface
-    adguard     # Fetch the live AdGuard Home DNS rewrites and diff them against the vault mirror.
-    backup      # Mirror the items in config/backup.sh into $BACKUPS_HOME.
-    brand       # Render Joe's brand kits via the branding-engine.
-    cf-dns      # Fetch the live Cloudflare DNS records and diff them against the vault mirror.
-    decrypt     # Age-decrypt .age files with your private key; restore originals.
-    dns-test    # Compare DNS resolver latency across paths.
-    doc-to-pdf  # Render a Markdown file (with Mermaid) to PDF via the system Chrome, offline.
-    encrypt     # Age-encrypt files to your public key; remove originals.
-    hq          # Sync vault frontmatter to Severino HQ, plus routine HQ deployment ops.
-    inbox       # Quick-capture a note into the vault inbox.
-    nginx       # Fetch the live Nginx Proxy Manager proxy hosts and diff them against the vault mirror.
-    open-age    # Decrypt a .age file to a temp file and open it in the default app.
-    remember    # Write a Claude memory file + MEMORY.md index entry in one shot.
-    site        # Public jseverino.com Astro site workflow.
+    # Core
     tools       # Umbrella command for the personal CLI toolchain.
-    ts-acl      # Fetch the live Tailscale ACL policy and diff it against the vault mirror.
+    # Cryptography
+    encrypt     # Age-encrypt files to your public key; remove originals.
+    decrypt     # Age-decrypt .age files with your private key; restore originals.
+    open-age    # Decrypt a .age file to a temp file and open it in the default app.
+    # Vault
+    inbox       # Quick-capture a note into the vault inbox.
     vault       # Operations on the vault git repo.
+    # Backup
+    backup      # Mirror the items in config/backup.sh into $BACKUPS_HOME.
+    # Diagnostics
+    dns-test    # Compare DNS resolver latency across paths.
+    # Drift guards
+    ts-acl      # Fetch the live Tailscale ACL policy and diff it against the vault mirror.
+    cf-dns      # Fetch the live Cloudflare DNS records and diff them against the vault mirror.
+    adguard     # Fetch the live AdGuard Home DNS rewrites and diff them against the vault mirror.
+    nginx       # Fetch the live Nginx Proxy Manager proxy hosts and diff them against the vault mirror.
+    # Integrations
+    hq          # Sync vault frontmatter to Severino HQ, plus routine HQ deployment ops.
+    site        # Public jseverino.com Astro site workflow.
+    brand       # Render Joe's brand kits via the branding-engine.
+    # Authoring
+    remember    # Write a Claude memory file + MEMORY.md index entry in one shot.
+    doc-to-pdf  # Render a Markdown file (with Mermaid) to PDF via the system Chrome, offline.
   .github/               # CI workflows and repository automation
   archive/               # retired scripts kept for reference
   bench/                 # measured claims asserted in CI
@@ -155,74 +163,60 @@ This reference is generated from the same `--describe` contracts as `-h`,
 zsh completion, and the TUI. Run `tools generate readme` after changing a
 command surface.
 
-#### `adguard`
+#### `tools`
 
-Fetch the live AdGuard Home DNS rewrites and diff them against the vault mirror.
-
-Rewrites are normalized to domain/answer, sorted by domain.
+Umbrella command for the personal CLI toolchain.
 
 | Invocation | Arguments / options | Effect | Summary |
 |---|---|---|---|
-| `adguard show` | — | `read + network` | Fetch and print the live state (normalized, sorted JSON) |
-| `adguard diff` | — | `read + network` | Diff live vs the vault mirror; exit 1 on drift |
-| `adguard pull` | — | `vault_write + network` | Regenerate the vault mirror block from live (accept drift) |
+| `tools status` | `--json` | `read + network` | One-screen health check across vault, inbox, backup, keys |
+| `tools doctor` | `--all`<br>`--live`<br>`--json` | `read` | Verify environment, deps, and installed symlinks |
+| `tools check` | `--no-bench` | `read` | Run the full CI suite locally: lint, tests, bench |
+| `tools new <name>` | `<name>`<br>`--drift` | `local_write` | Scaffold a new tool in bin/ with the house conventions |
+| `tools install` | — | `local_write` | Create symlinks in $INSTALL_DIR for every tool |
+| `tools key [cache|forget|status|test]` | `[cache\|forget\|status\|test]` | `local_write + interactive` | Cache / forget / test the age key passphrase in Keychain |
+| `tools watch [enable|disable|status|run-now]` | `[enable\|disable\|status\|run-now]` | `local_write` | Manage the optional launchd auto-sync agent (off by default) |
+| `tools describe [tool] [command]` | `[tool]`<br>`[command]`<br>`--pretty`<br>`--repos`<br>`--tui` | `read` | Emit the command surface of every tool as one JSON document (the emit-once contract) |
+| `tools generate [all|completions|readme]` | `[all\|completions\|readme]`<br>`--check` | `local_write` | Regenerate contract-derived completions and README reference/inventory |
 
-#### `backup`
+**`tools describe` details**
 
-Mirror the items in config/backup.sh into $BACKUPS_HOME.
+**Examples**
 
-Mirror each tracked file into $BACKUPS_HOME using the mapping in
+```sh
+tools describe hq restart  # one command's contract — effect, args, examples
+tools describe --tui  # interactive explorer over the whole toolchain
+```
 
-config/backup.sh. Uses rsync, so permissions, xattrs, and timestamps
+#### `encrypt`
 
-are preserved and unchanged files are skipped at the byte level.
+Age-encrypt files to your public key; remove originals.
 
+Encrypts files to your default age public key (and any extras passed
 
+with -k). The original file is removed on success unless -c is given.
 
-If $BACKUPS_HOME is a git repo, an auto-commit is made after the copy
-
-so each backup run leaves a point-in-time entry in the local history.
-
-
-
-Add or remove items by editing tools/config/backup.sh.
-
-Usage: `backup`
+Usage: `encrypt <file>...`
 
 | Argument | Description |
 |---|---|
-| `-n, --dry-run` | Show what would be copied; do not write |
-| `--no-commit` | Skip the auto-commit step |
+| `-c, --copy` | Keep the original file (encrypt a copy) |
+| `-f, --force` | Overwrite existing .age output files |
+| `-k, --key <PATH>` | Add another public key as a recipient (repeatable) |
+| `<file>...` | File(s) to encrypt |
 
 Effect: `local_write`
 
-#### `brand`
+**Examples**
 
-Render Joe's brand kits via the branding-engine.
-
-Kits land in $BRAND_HOME/kits. The engine lives in $ENGINE_HOME and comes in
-
-as a dependency of the brand repo; see its README for all flags.
-
-| Invocation | Arguments / options | Effect | Summary |
-|---|---|---|---|
-| `brand build` | — | `local_write` | Rebuild every kit from brand/ + the social cards |
-| `brand kit <slug> <hex> <initials> [wordmark]` | `<slug>`<br>`<hex>`<br>`<initials>`<br>`[wordmark]`<br>`--font <FONT>`<br>`--only <LIST>`<br>`--out <DIR>` | `local_write` | Render a one-off kit into severino-brand/kits/<slug> |
-| `brand status` | — | `read` | Show engine + brand locations and git state |
-
-#### `cf-dns`
-
-Fetch the live Cloudflare DNS records and diff them against the vault mirror.
-
-Records are normalized to type/name/content/proxied (+ priority for MX);
-
-Cloudflare-internal fields (id, timestamps, meta) are dropped.
-
-| Invocation | Arguments / options | Effect | Summary |
-|---|---|---|---|
-| `cf-dns show` | — | `read + network` | Fetch and print the live state (normalized, sorted JSON) |
-| `cf-dns diff` | — | `read + network` | Diff live vs the vault mirror; exit 1 on drift |
-| `cf-dns pull` | — | `vault_write + network` | Regenerate the vault mirror block from live (accept drift) |
+```sh
+encrypt notes.md  # original removed
+encrypt -c ~/.ssh/id_ed25519  # original kept (backup pattern)
+encrypt -k ~/keys/coworker.pub notes.md
+encrypt -k a.pub -k b.pub *.md
+encrypt -f *.txt
+encrypt -- -starts-with-dash.md
+```
 
 #### `decrypt`
 
@@ -259,6 +253,107 @@ decrypt -f *.age
 decrypt -p secret.age | less
 ```
 
+#### `open-age`
+
+Decrypt a .age file to a temp file and open it in the default app.
+
+Decrypts a .age file to a temporary file under $TMPDIR (mode 600,
+
+owner-only), opens it in the default macOS app for the underlying
+
+extension via 'open -W', then deletes the temporary file when the app
+
+finishes with it.
+
+
+
+The plaintext never lands in the source directory or anywhere persistent.
+
+$TMPDIR is per-user and cleared by macOS on reboot.
+
+
+
+Set as the default opener for .age files via:
+
+  duti -s <bundle.id.of.this.script> .age all
+
+…or wrap this script in a tiny .app bundle (Automator: Run Shell Script).
+
+Usage: `open-age <file>`
+
+| Argument | Description |
+|---|---|
+| `--no-cache` | Skip the cached passphrase, let age prompt directly |
+| `<file>` | The .age file to open |
+
+Effect: `local_write + interactive`
+
+#### `inbox`
+
+Quick-capture a note into the vault inbox.
+
+Capture a quick note into your vault inbox folder. The filename is
+
+"YYYY-MM-DD HHMMSS <first words>.md" and the body is the captured text.
+
+Usage: `inbox [text]...`
+
+| Argument | Description |
+|---|---|
+| `-e, --edit` | Open the captured note in $EDITOR after writing. With no text/stdin, creates an empty note, opens the editor, then renames the file from its first non-empty content line on save. |
+| `[text]...` | Note text (joined). Omitted when piping stdin. |
+
+Effect: `vault_write`
+
+**Examples**
+
+```sh
+inbox "remember to update the homelab certs"
+pbpaste | inbox
+echo "lookup later" | inbox
+inbox -e  # blank note, opens editor
+inbox -e "draft: post-mortem template"  # seed + open editor
+```
+
+#### `vault`
+
+Operations on the vault git repo.
+
+| Invocation | Arguments / options | Effect | Summary |
+|---|---|---|---|
+| `vault sync` | — | `remote_write + network` | Pull and push the vault repo |
+| `vault status` | — | `read + network` | Working tree, inbox count, remote sync state, and whether doc metadata changed since the last hq sync |
+| `vault inbox` | — | `read` | List notes currently in the inbox |
+
+#### `backup`
+
+Mirror the items in config/backup.sh into $BACKUPS_HOME.
+
+Mirror each tracked file into $BACKUPS_HOME using the mapping in
+
+config/backup.sh. Uses rsync, so permissions, xattrs, and timestamps
+
+are preserved and unchanged files are skipped at the byte level.
+
+
+
+If $BACKUPS_HOME is a git repo, an auto-commit is made after the copy
+
+so each backup run leaves a point-in-time entry in the local history.
+
+
+
+Add or remove items by editing tools/config/backup.sh.
+
+Usage: `backup`
+
+| Argument | Description |
+|---|---|
+| `-n, --dry-run` | Show what would be copied; do not write |
+| `--no-commit` | Skip the auto-commit step |
+
+Effect: `local_write`
+
 #### `dns-test`
 
 Compare DNS resolver latency across paths.
@@ -286,48 +381,55 @@ Usage: `dns-test`
 
 Effect: `read + network`
 
-#### `doc-to-pdf`
+#### `ts-acl`
 
-Render a Markdown file (with Mermaid) to PDF via the system Chrome, offline.
+Fetch the live Tailscale ACL policy and diff it against the vault mirror.
 
-Usage: `doc-to-pdf <input.md> [output.pdf]`
+| Invocation | Arguments / options | Effect | Summary |
+|---|---|---|---|
+| `ts-acl show` | — | `read + network` | Fetch and print the live state (normalized, sorted JSON) |
+| `ts-acl diff` | — | `read + network` | Diff live vs the vault mirror; exit 1 on drift |
+| `ts-acl pull` | — | `vault_write + network` | Regenerate the vault mirror block from live (accept drift) |
 
-| Argument | Description |
-|---|---|
-| `<input.md>` | Markdown file to render. |
-| `[output.pdf]` | Output path (default: <input>.pdf beside the input). |
+#### `cf-dns`
 
-Effect: `local_write`
+Fetch the live Cloudflare DNS records and diff them against the vault mirror.
 
-#### `encrypt`
+Records are normalized to type/name/content/proxied (+ priority for MX);
 
-Age-encrypt files to your public key; remove originals.
+Cloudflare-internal fields (id, timestamps, meta) are dropped.
 
-Encrypts files to your default age public key (and any extras passed
+| Invocation | Arguments / options | Effect | Summary |
+|---|---|---|---|
+| `cf-dns show` | — | `read + network` | Fetch and print the live state (normalized, sorted JSON) |
+| `cf-dns diff` | — | `read + network` | Diff live vs the vault mirror; exit 1 on drift |
+| `cf-dns pull` | — | `vault_write + network` | Regenerate the vault mirror block from live (accept drift) |
 
-with -k). The original file is removed on success unless -c is given.
+#### `adguard`
 
-Usage: `encrypt <file>...`
+Fetch the live AdGuard Home DNS rewrites and diff them against the vault mirror.
 
-| Argument | Description |
-|---|---|
-| `-c, --copy` | Keep the original file (encrypt a copy) |
-| `-f, --force` | Overwrite existing .age output files |
-| `-k, --key <PATH>` | Add another public key as a recipient (repeatable) |
-| `<file>...` | File(s) to encrypt |
+Rewrites are normalized to domain/answer, sorted by domain.
 
-Effect: `local_write`
+| Invocation | Arguments / options | Effect | Summary |
+|---|---|---|---|
+| `adguard show` | — | `read + network` | Fetch and print the live state (normalized, sorted JSON) |
+| `adguard diff` | — | `read + network` | Diff live vs the vault mirror; exit 1 on drift |
+| `adguard pull` | — | `vault_write + network` | Regenerate the vault mirror block from live (accept drift) |
 
-**Examples**
+#### `nginx`
 
-```sh
-encrypt notes.md  # original removed
-encrypt -c ~/.ssh/id_ed25519  # original kept (backup pattern)
-encrypt -k ~/keys/coworker.pub notes.md
-encrypt -k a.pub -k b.pub *.md
-encrypt -f *.txt
-encrypt -- -starts-with-dash.md
-```
+Fetch the live Nginx Proxy Manager proxy hosts and diff them against the vault mirror.
+
+Proxy hosts are normalized to domain_names / forward_scheme / forward_host /
+
+forward_port / enabled, sorted by domain.
+
+| Invocation | Arguments / options | Effect | Summary |
+|---|---|---|---|
+| `nginx show` | — | `read + network` | Fetch and print the live state (normalized, sorted JSON) |
+| `nginx diff` | — | `read + network` | Diff live vs the vault mirror; exit 1 on drift |
+| `nginx pull` | — | `vault_write + network` | Regenerate the vault mirror block from live (accept drift) |
 
 #### `hq`
 
@@ -372,119 +474,6 @@ hq sync  # most common — push vault → HQ
 hq manifest | jq '.[] | .doc_id'
 hq doctor  # find docs missing frontmatter
 hq export 2026  # download year-summary-2026.md
-```
-
-#### `inbox`
-
-Quick-capture a note into the vault inbox.
-
-Capture a quick note into your vault inbox folder. The filename is
-
-"YYYY-MM-DD HHMMSS <first words>.md" and the body is the captured text.
-
-Usage: `inbox [text]...`
-
-| Argument | Description |
-|---|---|
-| `-e, --edit` | Open the captured note in $EDITOR after writing. With no text/stdin, creates an empty note, opens the editor, then renames the file from its first non-empty content line on save. |
-| `[text]...` | Note text (joined). Omitted when piping stdin. |
-
-Effect: `vault_write`
-
-**Examples**
-
-```sh
-inbox "remember to update the homelab certs"
-pbpaste | inbox
-echo "lookup later" | inbox
-inbox -e  # blank note, opens editor
-inbox -e "draft: post-mortem template"  # seed + open editor
-```
-
-#### `nginx`
-
-Fetch the live Nginx Proxy Manager proxy hosts and diff them against the vault mirror.
-
-Proxy hosts are normalized to domain_names / forward_scheme / forward_host /
-
-forward_port / enabled, sorted by domain.
-
-| Invocation | Arguments / options | Effect | Summary |
-|---|---|---|---|
-| `nginx show` | — | `read + network` | Fetch and print the live state (normalized, sorted JSON) |
-| `nginx diff` | — | `read + network` | Diff live vs the vault mirror; exit 1 on drift |
-| `nginx pull` | — | `vault_write + network` | Regenerate the vault mirror block from live (accept drift) |
-
-#### `open-age`
-
-Decrypt a .age file to a temp file and open it in the default app.
-
-Decrypts a .age file to a temporary file under $TMPDIR (mode 600,
-
-owner-only), opens it in the default macOS app for the underlying
-
-extension via 'open -W', then deletes the temporary file when the app
-
-finishes with it.
-
-
-
-The plaintext never lands in the source directory or anywhere persistent.
-
-$TMPDIR is per-user and cleared by macOS on reboot.
-
-
-
-Set as the default opener for .age files via:
-
-  duti -s <bundle.id.of.this.script> .age all
-
-…or wrap this script in a tiny .app bundle (Automator: Run Shell Script).
-
-Usage: `open-age <file>`
-
-| Argument | Description |
-|---|---|
-| `--no-cache` | Skip the cached passphrase, let age prompt directly |
-| `<file>` | The .age file to open |
-
-Effect: `local_write + interactive`
-
-#### `remember`
-
-Write a Claude memory file + MEMORY.md index entry in one shot.
-
-Compress the two-step "write file + edit MEMORY.md" loop into one command.
-
-Body content is read from stdin unless --body is given. Frontmatter is
-
-generated from the args.
-
-Usage: `remember <type> <slug> <title>`
-
-| Argument | Description |
-|---|---|
-| `-d, --description <STR>` | Frontmatter description (default: title) |
-| `-k, --hook <STR>` | MEMORY.md one-liner hook (default: title) |
-| `-b, --body <STR>` | Body text in lieu of stdin |
-| `-f, --body-file <FILE>` | Body text from file |
-| `-F, --force` | Overwrite an existing memory (update in place) |
-| `--dir <PATH>` | Memory dir. Default: CLAUDE_MEMORY_DIR, else CLAUDE_PROJECT_DIR, else $PWD — encoded to ~/.claude/projects/<enc>/memory. No flag needed inside a Claude project. |
-| `--list` | Show the MEMORY.md index |
-| `--forget <SLUG>` | Delete the memory and its index entry |
-| `<type>` | user \| feedback \| project \| reference |
-| `<slug>` | kebab- or snake-case identifier (becomes 'name:' in frontmatter; underscored in filename) |
-| `<title>` | text shown as the link in MEMORY.md |
-
-Effect: `local_write`
-
-**Examples**
-
-```sh
-echo "rule body here" | remember feedback use-rg-and-fd "Use rg and fd"
-remember feedback use-rg-and-fd "Use rg and fd" -F < updated-body  # update
-remember --list
-remember --forget use-rg-and-fd
 ```
 
 #### `site`
@@ -574,50 +563,69 @@ site seo --result architecting-a-custom-detection-engine
 
 Both panes share a route and a draggable divider; the viewer documents its own keys. Review notes live in a shared file the viewer polls, so a teammate or an AI session can leave notes live — set SITE_COMPARE_VAULT (defaults to the vault 00 Inbox) for the drawer's Send-to-vault button.
 
-#### `tools`
+#### `brand`
 
-Umbrella command for the personal CLI toolchain.
+Render Joe's brand kits via the branding-engine.
+
+Kits land in $BRAND_HOME/kits. The engine lives in $ENGINE_HOME and comes in
+
+as a dependency of the brand repo; see its README for all flags.
 
 | Invocation | Arguments / options | Effect | Summary |
 |---|---|---|---|
-| `tools status` | `--json` | `read + network` | One-screen health check across vault, inbox, backup, keys |
-| `tools doctor` | `--all`<br>`--live`<br>`--json` | `read` | Verify environment, deps, and installed symlinks |
-| `tools check` | `--no-bench` | `read` | Run the full CI suite locally: lint, tests, bench |
-| `tools new <name>` | `<name>`<br>`--drift` | `local_write` | Scaffold a new tool in bin/ with the house conventions |
-| `tools install` | — | `local_write` | Create symlinks in $INSTALL_DIR for every tool |
-| `tools key [cache|forget|status|test]` | `[cache\|forget\|status\|test]` | `local_write + interactive` | Cache / forget / test the age key passphrase in Keychain |
-| `tools watch [enable|disable|status|run-now]` | `[enable\|disable\|status\|run-now]` | `local_write` | Manage the optional launchd auto-sync agent (off by default) |
-| `tools describe [tool] [command]` | `[tool]`<br>`[command]`<br>`--pretty`<br>`--repos`<br>`--tui` | `read` | Emit the command surface of every tool as one JSON document (the emit-once contract) |
-| `tools generate [all|completions|readme]` | `[all\|completions\|readme]`<br>`--check` | `local_write` | Regenerate contract-derived completions and README reference/inventory |
+| `brand build` | — | `local_write` | Rebuild every kit from brand/ + the social cards |
+| `brand kit <slug> <hex> <initials> [wordmark]` | `<slug>`<br>`<hex>`<br>`<initials>`<br>`[wordmark]`<br>`--font <FONT>`<br>`--only <LIST>`<br>`--out <DIR>` | `local_write` | Render a one-off kit into severino-brand/kits/<slug> |
+| `brand status` | — | `read` | Show engine + brand locations and git state |
 
-**`tools describe` details**
+#### `remember`
+
+Write a Claude memory file + MEMORY.md index entry in one shot.
+
+Compress the two-step "write file + edit MEMORY.md" loop into one command.
+
+Body content is read from stdin unless --body is given. Frontmatter is
+
+generated from the args.
+
+Usage: `remember <type> <slug> <title>`
+
+| Argument | Description |
+|---|---|
+| `-d, --description <STR>` | Frontmatter description (default: title) |
+| `-k, --hook <STR>` | MEMORY.md one-liner hook (default: title) |
+| `-b, --body <STR>` | Body text in lieu of stdin |
+| `-f, --body-file <FILE>` | Body text from file |
+| `-F, --force` | Overwrite an existing memory (update in place) |
+| `--dir <PATH>` | Memory dir. Default: CLAUDE_MEMORY_DIR, else CLAUDE_PROJECT_DIR, else $PWD — encoded to ~/.claude/projects/<enc>/memory. No flag needed inside a Claude project. |
+| `--list` | Show the MEMORY.md index |
+| `--forget <SLUG>` | Delete the memory and its index entry |
+| `<type>` | user \| feedback \| project \| reference |
+| `<slug>` | kebab- or snake-case identifier (becomes 'name:' in frontmatter; underscored in filename) |
+| `<title>` | text shown as the link in MEMORY.md |
+
+Effect: `local_write`
 
 **Examples**
 
 ```sh
-tools describe hq restart  # one command's contract — effect, args, examples
-tools describe --tui  # interactive explorer over the whole toolchain
+echo "rule body here" | remember feedback use-rg-and-fd "Use rg and fd"
+remember feedback use-rg-and-fd "Use rg and fd" -F < updated-body  # update
+remember --list
+remember --forget use-rg-and-fd
 ```
 
-#### `ts-acl`
+#### `doc-to-pdf`
 
-Fetch the live Tailscale ACL policy and diff it against the vault mirror.
+Render a Markdown file (with Mermaid) to PDF via the system Chrome, offline.
 
-| Invocation | Arguments / options | Effect | Summary |
-|---|---|---|---|
-| `ts-acl show` | — | `read + network` | Fetch and print the live state (normalized, sorted JSON) |
-| `ts-acl diff` | — | `read + network` | Diff live vs the vault mirror; exit 1 on drift |
-| `ts-acl pull` | — | `vault_write + network` | Regenerate the vault mirror block from live (accept drift) |
+Usage: `doc-to-pdf <input.md> [output.pdf]`
 
-#### `vault`
+| Argument | Description |
+|---|---|
+| `<input.md>` | Markdown file to render. |
+| `[output.pdf]` | Output path (default: <input>.pdf beside the input). |
 
-Operations on the vault git repo.
-
-| Invocation | Arguments / options | Effect | Summary |
-|---|---|---|---|
-| `vault sync` | — | `remote_write + network` | Pull and push the vault repo |
-| `vault status` | — | `read + network` | Working tree, inbox count, remote sync state, and whether doc metadata changed since the last hq sync |
-| `vault inbox` | — | `read` | List notes currently in the inbox |
+Effect: `local_write`
 <!-- END GENERATED CLI REFERENCE -->
 
 ### tools
@@ -642,7 +650,7 @@ and cron). `TOOLS_INSTALL_DIR` overrides the install target.
 lives in one place. It discovers scripts by shebang (`bash -n`, `zsh -n`,
 `node --check`), runs shellcheck over the tracked shell sources, the
 bats test suite in `tests/`, validates every describe document against
-`schemas/describe-v3.schema.json`, checks generated surfaces, and runs the bench
+`schemas/describe-v4.schema.json`, checks generated surfaces, and runs the bench
 assertions in `bench/`.
 `tools new <name>` drops a canonical skeleton in `bin/` — init.sh
 sourcing, usage block, arg loop, correct exit codes — and prints the
@@ -705,8 +713,8 @@ Aggregate only — a single tool stays the clean `<tool> -h`. It shares the
 The contract — a superset of what `severino-vault-mcp describe` emits:
 
 ```jsonc
-{ "ok": true, "schema_version": 3, "name": "encrypt",
-  "description": "…",
+{ "ok": true, "schema_version": 4, "name": "encrypt",
+  "description": "…", "group": "Cryptography", "order": 20,
   "effect": "local_write",
   "global_options": [ { "name": "--copy", "positional": false,
                         "required": false, "help": "…",
@@ -724,7 +732,7 @@ gate plus the round-trip test in `tests/describe.bats` keep the whole suite
 self-describing as it grows. `lib/describe.sh` runs under both bash and zsh,
 so the lone zsh tool (`dns-test`) self-describes from the same engine.
 
-For the full design — the DSL, the `schema_version 3` shape, the effect model,
+For the full design — the DSL, the `schema_version 4` shape, the effect model,
 scoped lookup, federation, and the diagrams — see
 [`docs/command-surface-contract.md`](docs/command-surface-contract.md). The
 repo map is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).

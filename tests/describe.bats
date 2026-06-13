@@ -20,6 +20,7 @@ render() {
         source "$TOOLS_HOME/lib/describe.sh"
         describe_spec() {
             desc_tool "demo" "A demo tool."
+            desc_inventory "Test" 10
             desc_synopsis "demo [options] <file>..."
             desc_para "First paragraph."
             desc_example "demo a.txt" -- "the common case"
@@ -49,16 +50,17 @@ render() {
 import json,sys
 o=json.load(sys.stdin)
 assert o["ok"] is True
-assert o["schema_version"] == 3
+assert o["schema_version"] == 4
 assert o["name"] == "demo"
 assert o["description"] == "A demo tool."
+assert o["group"] == "Test" and o["order"] == 10
 assert o["effect"] == "read"   # tool-level default for a command tool
 for k in ("global_options","positionals","commands"):
     assert isinstance(o[k], list), k
 '
 }
 
-@test "v3 effect triple: default read, declared class + network/interactive tags" {
+@test "effect triple: default read, declared class + network/interactive tags" {
     run render json
     [ "$status" -eq 0 ]
     echo "$output" | python3 -c '
@@ -283,6 +285,24 @@ for c in o.get("commands",[]):
     [[ "$output" == *"valid describe contracts: 17"* ]]
 }
 
+@test "aggregate validation rejects duplicate inventory order" {
+    run bash -c '
+        "$TOOLS_HOME/bin/tools" describe |
+        node -e '"'"'
+let input = "";
+process.stdin.on("data", chunk => input += chunk);
+process.stdin.on("end", () => {
+  const doc = JSON.parse(input);
+  doc.tools[1].order = doc.tools[0].order;
+  process.stdout.write(JSON.stringify(doc));
+});
+'"'"' |
+        node "$TOOLS_HOME/lib/tools/validate-describe.mjs"
+    '
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"duplicate tool order"* ]]
+}
+
 @test "contract-derived completions and README reference/inventory are current" {
     run "$TOOLS_HOME/bin/tools" generate --check
     [ "$status" -eq 0 ]
@@ -290,7 +310,17 @@ for c in o.get("commands",[]):
 
 @test "README inventory is derived from tools and repository directories" {
     run bash -c 'grep -q "schemas/.*machine-enforced" "$TOOLS_HOME/README.md" &&
-                 grep -q "doc-to-pdf.*Render a Markdown file" "$TOOLS_HOME/README.md"'
+                 grep -q "doc-to-pdf.*Render a Markdown file" "$TOOLS_HOME/README.md" &&
+                 python3 - "$TOOLS_HOME/README.md" <<"PY"
+import sys
+text=open(sys.argv[1]).read()
+block=text.split("<!-- BEGIN GENERATED REPO INVENTORY -->",1)[1].split("<!-- END GENERATED REPO INVENTORY -->",1)[0]
+names=["tools","encrypt","decrypt","open-age","inbox","vault","backup","dns-test",
+       "ts-acl","cf-dns","adguard","nginx","hq","site","brand","remember","doc-to-pdf"]
+positions=[block.index("\n    "+name) for name in names]
+assert positions == sorted(positions), positions
+assert "# Cryptography" in block and "# Drift guards" in block
+PY'
     [ "$status" -eq 0 ]
 }
 
@@ -299,6 +329,32 @@ for c in o.get("commands",[]):
                  grep -q -- "--key <PATH>" "$TOOLS_HOME/README.md" &&
                  grep -q "site featured my-writeup top" "$TOOLS_HOME/README.md"'
     [ "$status" -eq 0 ]
+}
+
+@test "surface generation fails closed when any tool cannot describe itself" {
+    fake="$BATS_TEST_TMPDIR/bin"
+    mkdir -p "$fake"
+    cat > "$fake/tools" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' '{"ok":true,"schema_version":4,"repo":"tools","tools":[{"ok":false,"name":"broken","error":"no contract"}]}'
+EOF
+    chmod +x "$fake/tools"
+    run env TOOLS_HOME="$BATS_TEST_TMPDIR" node "$TOOLS_HOME/lib/tools/generate-surfaces.mjs" completions
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"broken: no contract"* ]]
+}
+
+@test "surface generation validates contracts before rendering" {
+    fake="$BATS_TEST_TMPDIR/bin"
+    mkdir -p "$fake"
+    cat > "$fake/tools" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' '{"ok":true,"schema_version":4,"repo":"tools","tools":[{"ok":true,"name":"broken"}]}'
+EOF
+    chmod +x "$fake/tools"
+    run env TOOLS_HOME="$BATS_TEST_TMPDIR" node "$TOOLS_HOME/lib/tools/generate-surfaces.mjs" completions
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"broken/"* ]]
 }
 
 @test "tools describe <tool> <command> projects one command's contract (token-minimal AI path)" {

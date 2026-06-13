@@ -70,22 +70,26 @@ Every tool emits its command surface as one structured JSON document — the
   `drift_describe_commands` (show/diff read+network, pull vault_write+network),
   so all four inherit. This is what lets an agent risk-gate `hq restart`
   (`deploy`) vs `vault status` (`read`) before running either.
-- **Contract** (`schema_version 3`, a superset of the MCP's): `{ ok,
-  schema_version, name, description, effect, network?, interactive?,
+- **Contract** (`schema_version 4`, a superset of the MCP's): `{ ok,
+  schema_version, name, description, group, order, effect, network?, interactive?,
   global_options:[<opt>], positionals:[<arg>], paras:[<prose>],
   examples:[{command,comment}], commands:[{name, summary, args:[<opt>|<arg>],
   effect, network?, interactive?, paras:[<prose>], examples:[…],
   delegates?:"<owner>"}] }`, with option `metavar` and `variadic:true` on
-  variadic positionals. v2
-  added per-scope `paras`/`examples` and
-  `delegates`; v3 added the **effect triple** (always emits `effect`; the lean
+  variadic positionals. `desc_inventory "<group>" <order>` is required once
+  after `desc_tool`; `order` is globally unique and is the canonical workflow
+  order for every aggregate renderer (README, completions, TUI). v2 added
+  per-scope `paras`/`examples` and `delegates`; v3 added the **effect triple**
+  (always emits `effect`; the lean
   boolean tags only when true) so an agent reads a command's intent, usage,
   external flag-ownership, *and blast radius* from the JSON alone. `desc_para`,
   `desc_example`, and `desc_effect` are **scoped to the current command** (like
   `desc_opt`/`desc_pos`) — declare tool-level ones *before the first `desc_cmd`*
   or they attach to the last command. `desc_env` stays human-help only. Output
   is byte-deterministic (no timestamps) so guards can diff it; `describe.bats`
-  guards every emitted effect against the enum.
+  guards every emitted effect against the enum. v4 added required inventory
+  `group`/`order` plus explicit option metavariables and variadic positionals.
+  Schema validation rejects missing metadata and duplicate order values.
 - **`tools describe`** is the orchestrator: it federates every `bin/*`
   `--describe` into one document (`--pretty` to read, `--repos` to fold in
   sibling repos like the MCP, `tools describe <tool>` for one). **`tools describe

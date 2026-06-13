@@ -6,6 +6,7 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" vault "$@"
 
 describe_spec() {
     desc_tool "vault" "Operations on the vault git repo."
+    desc_inventory "Vault" 60
     desc_synopsis "vault <command>"
     desc_cmd sync   -- "Pull and push the vault repo"
     desc_effect remote_write +network

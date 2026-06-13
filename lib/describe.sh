@@ -25,9 +25,9 @@
 #   describe_emit            the standard `--describe` handler: reset, run the
 #                            tool's describe_spec, print JSON, honor --pretty.
 #
-# The JSON contract (schema_version 3 — a superset of `severino-vault-mcp describe`):
+# The JSON contract (schema_version 4 — a superset of `severino-vault-mcp describe`):
 #
-#   { ok, schema_version, name, description,
+#   { ok, schema_version, name, description, group, order,
 #     effect, network?, interactive?,   # tool-level blast radius (leaf tools)
 #     global_options:[ <opt> ],   # flags valid everywhere (declared before any cmd)
 #     positionals:[ <arg> ],      # leaf-tool direct positionals
@@ -51,6 +51,9 @@
 # one fact it can't derive from flags. effect is always emitted (default read);
 # network / interactive only when true. desc_env stays human-help only. desc_para
 # / desc_example / desc_effect are scoped to the current command, like desc_opt.
+# v4 adds required group / order inventory metadata and explicit metavar /
+# variadic fields. Aggregate renderers use order instead of inventing their own
+# sort, and validation rejects duplicate order values.
 #
 # Portability: this is sourced by every tool, including the one zsh tool
 # (dns-test). It is therefore written to run under bash AND zsh — no numeric
@@ -58,7 +61,7 @@
 # into single array elements with a control-char separator and unpacked with
 # IFS-`read`, which behaves the same in both shells.
 
-DESCRIBE_SCHEMA_VERSION=3
+DESCRIBE_SCHEMA_VERSION=4
 
 # Field separator for the encoded records below (a control char that can't
 # appear in option flags, help text, or names).
@@ -69,6 +72,8 @@ _DSEP=$'\037'
 describe_reset() {
     _D_NAME=""
     _D_DESC=""
+    _D_GROUP=""
+    _D_ORDER=""
     _D_CUR_CMD=""          # "" = top-level scope; else the open command name
     _D_SYNOPSIS=()
     _D_PARA=()             # scope <sep> paragraph
@@ -85,6 +90,14 @@ describe_reset() {
 desc_tool() {
     _D_NAME="$1"
     _D_DESC="${2:-}"
+}
+
+# desc_inventory <group> <order> — stable presentation metadata for aggregate
+# consumers. The order is global and unique across this repo; group preserves
+# the operator-facing information architecture instead of alphabetizing tools.
+desc_inventory() {
+    _D_GROUP="$1"
+    _D_ORDER="$2"
 }
 
 # desc_synopsis <usage line, sans the leading "Usage: ">
@@ -696,8 +709,9 @@ describe_render_json() {
     [[ "${1:-}" == "--pretty" ]] && pretty=1
 
     local out rec name summary cmds=""
-    out=$(printf '{"ok":true,"schema_version":%d,"name":"%s","description":"%s"' \
-        "$DESCRIBE_SCHEMA_VERSION" "$(json_escape "$_D_NAME")" "$(json_escape "$_D_DESC")")
+    out=$(printf '{"ok":true,"schema_version":%d,"name":"%s","description":"%s","group":"%s","order":%d' \
+        "$DESCRIBE_SCHEMA_VERSION" "$(json_escape "$_D_NAME")" "$(json_escape "$_D_DESC")" \
+        "$(json_escape "$_D_GROUP")" "${_D_ORDER:-0}")
     # Tool-level blast radius (meaningful for leaf tools; read for command tools).
     out+=$(_describe_effect_json "")
     out+=$(printf ',"global_options":[%s]' "$(_describe_global_opts_json)")

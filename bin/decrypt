@@ -7,6 +7,7 @@ source "$TOOLS_HOME/lib/key.sh"
 
 describe_spec() {
     desc_tool "decrypt" "Age-decrypt .age files with your private key; restore originals."
+    desc_inventory "Cryptography" 30
     desc_effect local_write +interactive
     desc_synopsis "decrypt [options] <file.age>..."
     desc_para "Decrypts .age files using your default age private key. If the key is an"

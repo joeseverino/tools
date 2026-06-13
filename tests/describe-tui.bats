@@ -35,18 +35,18 @@ tui() { node "$TOOLS_HOME/lib/tools/describe-tui.mjs"; }
     export DESCRIBE_TUI_KEYS='down'
     run tui
     [ "$status" -eq 0 ]
-    # The second tool (backup) is now selected (bold + cursor), not adguard.
+    # The second tool in the contract-defined workflow is encrypt.
     selected="$(printf '%s\n' "$output" | grep -- '▸')"
-    [[ "$selected" != *"adguard"* ]]
+    [[ "$selected" == *"encrypt"* ]]
 }
 
 @test "replay: Tab crosses focus into the command pane" {
     export DESCRIBE_TUI_KEYS='tab'
     run tui
     [ "$status" -eq 0 ]
-    # adguard's first command (show) now carries the ▸ cursor in the right pane.
+    # tools' first command (status) now carries the ▸ cursor in the right pane.
     cursor_line="$(printf '%s\n' "$output" | grep -- '▸')"
-    [[ "$cursor_line" == *"show"* ]]
+    [[ "$cursor_line" == *"status"* ]]
 }
 
 @test "replay: / filters tools by a command name across the toolchain" {
@@ -88,7 +88,7 @@ tui() { node "$TOOLS_HOME/lib/tools/describe-tui.mjs"; }
     export DESCRIBE_TUI_KEYS='tab,enter'
     run tui
     [ "$status" -eq 0 ]
-    [[ "$output" == *"copied: adguard show"* ]]
+    [[ "$output" == *"copied: tools status"* ]]
 }
 
 @test "replay: Enter on a leaf tool copies the tool + positional placeholder" {

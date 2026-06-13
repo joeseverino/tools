@@ -13,6 +13,7 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" hq "$@"
 
 describe_spec() {
     desc_tool "hq" "Sync vault frontmatter to Severino HQ, plus routine HQ deployment ops."
+    desc_inventory "Integrations" 130
     desc_synopsis "hq <command> [args]"
     desc_para "Severino HQ glue. Reads YAML frontmatter from the vault and upserts the"
     desc_para "HQ docs index. Also wraps the routine ssh + docker compose calls for"

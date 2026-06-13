@@ -20,6 +20,7 @@ source "$TOOLS_HOME/lib/site/compare.sh"
 
 describe_spec() {
     desc_tool "site" "Public jseverino.com Astro site workflow."
+    desc_inventory "Integrations" 140
     desc_synopsis "site <command>"
     # One spec, every view. Each command's flags/args (desc_opt/desc_pos) AND its
     # prose/examples (desc_para/desc_example) live here, so the main -h, the

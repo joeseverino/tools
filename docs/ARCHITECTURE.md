@@ -37,11 +37,14 @@ only thing not derivable from the spec — pure command→action wiring — and
 
 `tools generate` consumes the federated JSON to regenerate the zsh completion
 file and README CLI reference/inventory. `tools check` validates every emitter against
-`schemas/describe-v3.schema.json` and fails when either generated artifact is
-stale.
+`schemas/describe-v4.schema.json` and fails when either generated artifact is
+stale. Generation fails closed if any tool did not emit a valid contract; it
+never silently drops a broken tool from the generated surfaces.
 
-The v3 contract adds an **effect** to every command — a blast-radius class an
-agent risk-gates on before running. See
+The v4 contract also carries required, globally ordered inventory metadata.
+README, completions, and the TUI consume that one order; schema validation
+rejects missing metadata and duplicate positions. Every command also carries an
+**effect** — a blast-radius class an agent risk-gates on before running. See
 [`command-surface-contract.md`](command-surface-contract.md).
 
 ## Drift-guard family
