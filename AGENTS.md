@@ -57,21 +57,40 @@ Every tool emits its command surface as one structured JSON document — the
   surface from `drift_main` (it calls the intercept) for free. `bin/doc-to-pdf`
   (node) carries its own `SPEC` object that renders both its `--help` and
   `--describe`.
-- **Contract** (`schema_version 2`, a superset of the MCP's): `{ ok,
-  schema_version, name, description, global_options:[<opt>], positionals:[<arg>],
-  paras:[<prose>], examples:[{command,comment}], commands:[{name, summary,
-  args:[<opt>|<arg>], paras:[<prose>], examples:[…], delegates?:"<owner>"}] }`.
-  v2 added per-scope `paras`/`examples` and `delegates` so an agent can read a
-  command's intent, usage, and external flag-ownership from the JSON alone (the
-  signal it needs to spot cohesion/refactor opportunities). `desc_para` and
-  `desc_example` are **scoped to the current command** (like `desc_opt`/`desc_pos`)
-  — declare tool-level ones *before the first `desc_cmd`* or they attach to the
-  last command. `desc_env` stays human-help only. Output is byte-deterministic
-  (no timestamps) so guards can diff it.
+- **Effect = the risk signal an agent can't read off the flags — `desc_effect`.**
+  Every command (and every leaf tool) carries a *blast-radius* class:
+  `read | local_write | vault_write | remote_write | deploy` (escalating), plus
+  the boolean tags `+network` (reaches off-box) and `+interactive` (blocks on a
+  TTY). One line — `desc_effect deploy +network` after a `desc_cmd`, or after
+  `desc_tool` for a leaf — scoped like `desc_opt`. It renders a terse `Effect:`
+  line in the focused `-h` (only when non-trivial), a colored chip in `--tui`,
+  and rides into the JSON as `effect` / `network` / `interactive`. **Default is
+  `read`** (no mutation, no reach) — declare it on anything that mutates, hits
+  the network, or needs a TTY. The drift guards declare theirs **once** in
+  `drift_describe_commands` (show/diff read+network, pull vault_write+network),
+  so all four inherit. This is what lets an agent risk-gate `hq restart`
+  (`deploy`) vs `vault status` (`read`) before running either.
+- **Contract** (`schema_version 3`, a superset of the MCP's): `{ ok,
+  schema_version, name, description, effect, network?, interactive?,
+  global_options:[<opt>], positionals:[<arg>], paras:[<prose>],
+  examples:[{command,comment}], commands:[{name, summary, args:[<opt>|<arg>],
+  effect, network?, interactive?, paras:[<prose>], examples:[…],
+  delegates?:"<owner>"}] }`. v2 added per-scope `paras`/`examples` and
+  `delegates`; v3 added the **effect triple** (always emits `effect`; the lean
+  boolean tags only when true) so an agent reads a command's intent, usage,
+  external flag-ownership, *and blast radius* from the JSON alone. `desc_para`,
+  `desc_example`, and `desc_effect` are **scoped to the current command** (like
+  `desc_opt`/`desc_pos`) — declare tool-level ones *before the first `desc_cmd`*
+  or they attach to the last command. `desc_env` stays human-help only. Output
+  is byte-deterministic (no timestamps) so guards can diff it; `describe.bats`
+  guards every emitted effect against the enum.
 - **`tools describe`** is the orchestrator: it federates every `bin/*`
   `--describe` into one document (`--pretty` to read, `--repos` to fold in
-  sibling repos like the MCP, `tools describe <tool>` for one). `tools doctor`
-  gates that every tool self-describes.
+  sibling repos like the MCP, `tools describe <tool>` for one). **`tools describe
+  <tool> <command>`** projects the contract down to a single command object
+  (lifting in `tool` + `effect`) — the token-minimal path an agent fetches before
+  acting, instead of reading the whole surface. `tools doctor` gates that every
+  tool self-describes.
 - `lib/describe.sh` is written to run under **bash and zsh** (no numeric array
   indexing, no `read -ra`) so the lone zsh tool (`dns-test`) self-describes from
   the same engine. `tests/describe.bats` asserts the round-trip invariant and

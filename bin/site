@@ -26,24 +26,33 @@ describe_spec() {
     # repo's package.json scripts (run those with --help for the live list).
     desc_cmd status         -- "Show repo location, git state, and build-output state"
     desc_cmd sync           -- "Sync public pages/writeups from the vault into the site repo"
+    desc_effect local_write
     desc_cmd check          -- "Run Astro diagnostics"
     desc_cmd contrast       -- "Compute WCAG ratios for every text/background pair in base.css"
     desc_cmd parity         -- "Assert vault Frontmatter Schema, Zod, and MCP agree on writeup fields"
     desc_cmd build          -- "Run the full Astro build"
+    desc_effect local_write
     desc_cmd publish        -- "Ship every change: gate published writeups, hq sync, build + audits, auto-commit, push, then verify each affected writeup live"
+    desc_effect deploy +network
     desc_opt --no-push      -- "Stop after the local build — no commit, no push (inspect the diff first)"
     desc_para "Runs the whole vault-to-live flow: gate every published writeup, hq sync, build + audits, auto-commit the synced snapshot, push (Cloudflare Pages rebuilds), then verify each affected writeup live. Only the generated snapshot is committed; drafts stay in the vault and are never pushed."
     desc_cmd sign-security  -- "Clear-sign public/.well-known/security.txt with the security@ key"
+    desc_effect local_write +interactive
     desc_cmd check-security -- "Verify signature, required fields, Expires, and WKD file"
     desc_cmd scaffold-primer -- "Scaffold a new 04 Reference/ primer with slim frontmatter"
+    desc_effect vault_write
     desc_delegate "the site repo's \`npm run scaffold:primer\` — run it with --help for flags"
     desc_cmd scaffold-field -- "Patch every layer needed for a new writeup field (dry-run by default)"
+    desc_effect local_write
     desc_delegate "the site repo's \`npm run scaffold:writeup-field\` — run it with --help for flags"
     desc_cmd draft-alt      -- "Use the Claude API to draft cover_alt from a writeup's cover image"
+    desc_effect vault_write +network
     desc_delegate "the site repo's \`npm run draft:cover-alt\` — run it with --help for flags"
     desc_cmd publish-all    -- "Alias of publish"
+    desc_effect deploy +network
     desc_opt --no-push      -- "Stop after the local build — no commit, no push (inspect the diff first)"
     desc_cmd publish-writeup -- "Full publish flow with the named writeup highlighted; the all-published gate runs once first"
+    desc_effect deploy +network
     desc_pos slug           -- "Writeup slug to highlight in the publish run"
     desc_para "The same gate as \`site publish\` validates every published writeup once before any sync, build, commit, or push. Requires the severino-vault-mcp console script on PATH."
     desc_cmd validate       -- "Run the writeup publish gate standalone — report only, no build/commit"
@@ -53,19 +62,23 @@ describe_spec() {
     desc_pos query +optional -- "Filter by slug, label, or group (case-insensitive)"
     desc_para "Catalog source: 06 Pages/_technology-groups.md. Featured slugs surface in the home-page cloud."
     desc_cmd featured       -- "Show the home-page featured order, or move one writeup and renumber automatically"
+    desc_effect vault_write
     desc_pos slug +optional -- "Writeup to move; omit to print the current featured order"
     desc_pos target +optional -- "Destination: a slot number, or up | down | top | bottom | off"
     desc_para "No args prints the order the home page renders; a slug + target moves that writeup and renumbers 1..N (inserting one sets featured: true). The new order ships on the next \`site publish\`."
     desc_example "site featured my-writeup top" -- "move to slot 1"
     desc_example "site featured my-writeup off" -- "unfeature; others close the gap"
     desc_cmd manage         -- "Interactive manager: every writeup on one screen — reorder, feature, publish. Nothing written until you save"
+    desc_effect vault_write +interactive
     desc_para "Full-screen manager (keys shown in-app): reorder featured, feature/unfeature, publish/unpublish across every writeup; saving submits one transactional plan. Ship with \`site publish\`."
     desc_cmd verify         -- "Post-publish live check: page status, OG image, tag pages, and home placement"
+    desc_effect read +network
     desc_pos slug           -- "Writeup slug to verify on the live site"
     desc_para "Checks the live site: /portfolio/<slug>/ is 200, the og:image resolves, every tag page lists it, and the home page shows it when featured. Run ~30s after publishing (Cloudflare rebuild)."
     desc_cmd diagnose       -- "The collect-all gate: run every audit and report all failures in one pass"
     desc_delegate "the site repo's \`npm run diagnose\` — run it with --help for flags (--fast, --json)"
     desc_cmd release        -- "Bump package.json, run publish:check, commit + signed tag, push, create the GitHub release"
+    desc_effect deploy +network
     desc_pos version        -- "Target version, e.g. 1.4.0"
     desc_opt --ship         -- "Execute the release (dry-run prints the plan and stops without it)"
     desc_cmd test           -- "Run the Playwright end-to-end suite"
@@ -73,8 +86,11 @@ describe_spec() {
     desc_opt --ui           -- "Open Playwright's interactive UI mode"
     desc_opt --update       -- "Update the visual baselines"
     desc_cmd doctor         -- "Pre-flight health check: CLI/npm drift, vault-mcp install, security, contrast, parity, type check, audit. No build"
+    desc_effect read +network
     desc_cmd reinstall-mcp  -- "Reinstall the severino-vault-mcp package from source"
+    desc_effect local_write
     desc_cmd new-writeup    -- "Scaffold a new vault writeup folder from the template (starts published: false)"
+    desc_effect vault_write
     desc_pos slug           -- "Lowercase-kebab-case slug; becomes the /portfolio/<slug>/ URL path"
     desc_para "Creates 05 Writeups/<slug>/index.md (published: false) and an images/ folder; stays out of the build until you set published: true."
     desc_cmd seo            -- "Preview the Google-style search result snippet for a built page"
@@ -87,6 +103,7 @@ describe_spec() {
     desc_opt --drafts       -- "Sync and render published: false content for local preview (never in a build)"
     desc_cmd open           -- "Open the local dev URL in the browser"
     desc_cmd compare        -- "Open a resizable dev-vs-live browser comparison"
+    desc_effect read +interactive
     desc_pos path +optional -- "Route to compare (default: /)"
     desc_opt --dev URL      -- "Development origin"
     desc_opt --live URL     -- "Production origin"
@@ -115,6 +132,7 @@ describe_spec() {
     desc_opt --no-open      -- "Print the URL without opening the browser"
     desc_para "Both panes share a route and a draggable divider; the viewer documents its own keys. Review notes live in a shared file the viewer polls, so a teammate or an AI session can leave notes live — set SITE_COMPARE_VAULT (defaults to the vault 00 Inbox) for the drawer's Send-to-vault button."
     desc_cmd og             -- "Regenerate the Open Graph social card (public/assets/og/)"
+    desc_effect local_write
     desc_env CODE_HOME      -- "Defaults to ~/Documents/Code"
     desc_env SITE_HOME      -- "Defaults to \$CODE_HOME/Projects/jseverino.com"
     desc_env NOTES_HOME     -- "Defaults to \$CODE_HOME/Severino Labs (vault root)"

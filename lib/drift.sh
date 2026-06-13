@@ -208,9 +208,15 @@ drift_pull() {
 # describe_spec calls this after its own desc_tool / desc_synopsis, then adds
 # its config desc_env lines.
 drift_describe_commands() {
+    # Effects are declared once here and inherited by every guard (adguard,
+    # cf-dns, ts-acl, nginx) — the zero-duplication payoff: show/diff read the
+    # live API (network), pull rewrites the vault mirror block (vault_write).
     desc_cmd show -- "Fetch and print the live state (normalized, sorted JSON)"
+    desc_effect read +network
     desc_cmd diff -- "Diff live vs the vault mirror; exit 1 on drift"
+    desc_effect read +network
     desc_cmd pull -- "Regenerate the vault mirror block from live (accept drift)"
+    desc_effect vault_write +network
 }
 
 # Require the shared deps, then dispatch. Tools call this last with "$@".

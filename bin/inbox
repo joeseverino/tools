@@ -6,6 +6,7 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" vault
 
 describe_spec() {
     desc_tool "inbox" "Quick-capture a note into the vault inbox."
+    desc_effect vault_write
     desc_synopsis "inbox [options] [text...]"
     desc_synopsis "cmd | inbox [options]"
     desc_para "Capture a quick note into your vault inbox folder. The filename is"

@@ -226,9 +226,16 @@ encrypt --describe            # one tool's contract (compact JSON)
 tools describe                # federated: every tool, one document
 tools describe --pretty       # indented, for reading
 tools describe encrypt        # just one tool
+tools describe hq restart     # just one command — the token-minimal AI path
 tools describe --repos        # also fold in sibling repos (severino-vault-mcp)
 tools describe --tui          # full-screen explorer: browse + copy invocations
 ```
+
+Every command (and leaf tool) also declares its **effect** — a blast-radius
+class (`read | local_write | vault_write | remote_write | deploy`) plus
+`network` / `interactive` tags — via one `desc_effect` line. It's the signal an
+agent risk-gates on before running a command (a `deploy` vs a `read`), shown in
+the focused `-h`, colored in `--tui`, and carried in the JSON.
 
 `--tui` is the human tier of the contract: a two-pane explorer (tools | the
 selected tool's commands/options/args) over the same federated document.
@@ -240,14 +247,16 @@ Aggregate only — a single tool stays the clean `<tool> -h`. It shares the
 The contract — a superset of what `severino-vault-mcp describe` emits:
 
 ```jsonc
-{ "ok": true, "schema_version": 1, "name": "encrypt",
+{ "ok": true, "schema_version": 3, "name": "encrypt",
   "description": "…",
+  "effect": "local_write",
   "global_options": [ { "name": "--copy", "positional": false,
                         "required": false, "help": "…",
                         "flags": ["-c","--copy"], "takes_value": false } ],
   "positionals":   [ { "name": "file", "positional": true,
                        "required": true, "help": "…" } ],
-  "commands":      [ { "name": "…", "summary": "…", "args": [ … ] } ] }
+  "commands":      [ { "name": "…", "summary": "…", "args": [ … ],
+                       "effect": "deploy", "network": true } ] }
 ```
 
 Output is byte-deterministic (no timestamps), so a guard can diff it across

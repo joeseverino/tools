@@ -26,17 +26,21 @@ describe_spec() {
     desc_cmd manifest  -- "Print the manifest JSON (frontmatter from every doc) to stdout — for inspection or piping elsewhere"
 
     desc_cmd sync      -- "Pipe the manifest into HQ's import_docs_manifest; upserts by doc_id, safe to re-run"
+    desc_effect remote_write +network
     desc_opt --prune     -- "Delete orphan DocumentationRecord rows (doc_ids in HQ but not in the manifest), plus ContentItems linked only to them. Use after a doc_id rename or retirement"
     desc_opt --no-update -- "Only create new records; never update existing ones"
 
     desc_cmd doctor    -- "Report vault docs missing or with invalid frontmatter, and whether HQ's last-synced manifest is stale"
 
     desc_cmd schema    -- "Regenerate HQ's docs_index/schema.json from the installed MCP (the canonical frontmatter contract)"
+    desc_effect local_write
     desc_opt --check     -- "Verify the HQ schema.json and the vault schema doc match the MCP; exit 1 on drift without writing (CI / pre-deploy gate)"
 
     desc_cmd validate  -- "Report HQ registry entries (Projects/Assets) that no vault doc references. Read-only"
+    desc_effect read +network
 
     desc_cmd create    -- "Create or update a Project or Asset in HQ (idempotent upsert by slug)"
+    desc_effect remote_write +network
     desc_pos kind "{project,asset}" -- "What to create"
     desc_pos slug      -- "Registry slug (the create_project / create_asset key)"
     desc_delegate "HQ's create_project / create_asset management commands (derived from the Django models) — run \`hq create <kind> -h\` for the live flag list (it reaches manage.py); an invalid value prints the allowed set"
@@ -44,23 +48,30 @@ describe_spec() {
     desc_example "hq create asset example-com --name \"example.com\" --category domain"
 
     desc_cmd deploy    -- "Fallback: re-pull the latest scanned GHCR image and restart the container (CI's deploy step)"
+    desc_effect deploy +network
 
     desc_cmd ship      -- "Commit + push a small HQ change. The push IS the deploy: it triggers the gated pipeline (build → scan → deploy on green)"
+    desc_effect deploy +network
     desc_opt -m --message TEXT -- "Commit message for the HQ repo change (required)"
 
     desc_cmd logs      -- "Show app container logs (default tail 50)"
+    desc_effect read +network
     desc_opt -f --follow -- "Stream live output until Ctrl-C"
     desc_opt --tail N    -- "Number of lines to show (default 50; ignored with --follow)"
 
     desc_cmd restart   -- "\`docker compose restart app\` — no rebuild, no migrations. For env changes or stuck state"
+    desc_effect deploy +network
 
     desc_cmd open      -- "Open \$HQ_URL in the browser"
 
     desc_cmd shell     -- "ssh -t into the HQ Django shell (poke the ORM)"
+    desc_effect remote_write +network +interactive
 
     desc_cmd superuser -- "ssh -t into HQ and run createsuperuser interactively"
+    desc_effect remote_write +network +interactive
 
     desc_cmd export    -- "Download the year summary to ./ and print the path"
+    desc_effect local_write +network
     desc_pos year +optional             -- "Year to export (default: current year)"
     desc_pos format +optional "{md,json}" -- "Output format (default: md)"
     desc_env NOTES_HOME    -- "Vault root"

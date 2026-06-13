@@ -6,6 +6,7 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" backup
 
 describe_spec() {
     desc_tool "backup" "Mirror the items in config/backup.sh into \$BACKUPS_HOME."
+    desc_effect local_write
     desc_synopsis "backup [options]"
     desc_para "Mirror each tracked file into \$BACKUPS_HOME using the mapping in"
     desc_para "config/backup.sh. Uses rsync, so permissions, xattrs, and timestamps"
