@@ -587,7 +587,7 @@ Render Mermaid .mmd sources to neighboring PNG files.
 
 Each path may be an .mmd file or a directory. Directories render their top-level .mmd files.
 
-Rendering uses Mermaid CLI 11.15.0 with the toolchain's established settings: PNG output, 1100px width, 2x scale, and a white background.
+Rendering uses Mermaid CLI 11.15.0 with Joe Severino brand tokens, PNG output, 1100px width, 2x scale, and a white background. Set DIAGRAM_BRAND_KIT to override the kit directory.
 
 Usage: `diagram <path>...`
 

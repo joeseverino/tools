@@ -10,7 +10,7 @@ describe_spec() {
     desc_effect local_write
     desc_synopsis "diagram <path>..."
     desc_para "Each path may be an .mmd file or a directory. Directories render their top-level .mmd files."
-    desc_para "Rendering uses Mermaid CLI 11.15.0 with the toolchain's established settings: PNG output, 1100px width, 2x scale, and a white background."
+    desc_para "Rendering uses Mermaid CLI 11.15.0 with Joe Severino brand tokens, PNG output, 1100px width, 2x scale, and a white background. Set DIAGRAM_BRAND_KIT to override the kit directory."
     desc_pos path +variadic -- "Mermaid source file or directory"
     desc_example "diagram docs/diagrams/"
     desc_example "diagram docs/diagrams/architecture.mmd"
@@ -40,6 +40,10 @@ done
 
 command -v npx >/dev/null || die "error" "npx not installed (install Node.js)"
 
+config="$(mktemp "${TMPDIR:-/tmp}/diagram-config.XXXXXX.json")"
+trap 'rm -f "$config"' EXIT
+node "$TOOLS_HOME/lib/diagram/config.mjs" > "$config"
+
 header "rendering" "${#sources[@]}"
 failed=0
 for src in "${sources[@]}"; do
@@ -49,7 +53,7 @@ for src in "${sources[@]}"; do
     if (
         cd "$dir"
         npx -y -p @mermaid-js/mermaid-cli@11.15.0 mmdc \
-            -i "$name" -o "${name%.mmd}.png" -w 1100 -s 2 -b white
+            -i "$name" -o "${name%.mmd}.png" -c "$config" -w 1100 -s 2 -b white
     ); then
         msg "$GREEN" "rendered" "$src ${DIM}→${RESET} $out"
     else
