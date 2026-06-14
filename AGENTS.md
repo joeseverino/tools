@@ -9,10 +9,14 @@ Small bash/zsh/node tools that share one look and feel.
 
 ## Command-surface contract (`describe`)
 
-Every tool emits its command surface as one structured JSON document — the
-**emit-once, render-many** standard (vault decision record
-`read_doc('report-emit-once-render-many')`; the `.py` reference impl lives in
-`severino-vault-mcp` as `cli_introspect.describe_parser`).
+Every tool emits its command surface as one structured JSON document conforming
+to [**Cordon**](https://github.com/joeseverino/cordon) — the language-agnostic
+command-surface contract (the framework, schema, and emitter guide live there;
+read it first). This section is the rules for *this repo's* Bash implementation
+of it — the `desc_*` DSL and its renderers; the prose walkthrough is
+[`docs/command-surface-contract.md`](docs/command-surface-contract.md). (Vault
+decision record: `read_doc('report-emit-once-render-many')`; the Python sibling
+emitter is `severino-vault-mcp`'s `cli_introspect.describe_parser`.)
 
 - **One source, one dispatch line.** A tool defines a single `describe_spec()`
   (the `desc_*` DSL in `lib/describe.sh`) and calls **`desc_help_intercept "$@"`**
@@ -65,41 +69,34 @@ Every tool emits its command surface as one structured JSON document — the
   (node) carries its own `SPEC` object that renders both its `--help` and
   `--describe`.
 - **Effect = the risk signal an agent can't read off the flags — `desc_effect`.**
-  Every command (and every leaf tool) carries a *blast-radius* class:
-  `read | local_write | vault_write | remote_write | deploy` (escalating), plus
-  the boolean tags `+network` (the requested operation reaches off-box) and
-  `+interactive` (blocks on a TTY). Dependency installation and package-manager
-  cache misses do not count as the command's network effect. One line —
-  `desc_effect deploy +network` after a `desc_cmd`, or after
-  `desc_tool` for a leaf — scoped like `desc_opt`. It renders a terse `Effect:`
-  line in the focused `-h` (only when non-trivial), a colored chip in `--tui`,
-  and rides into the JSON as `effect` / `network` / `interactive`. **Default is
-  `read`** (no mutation, no reach) — declare it on anything that mutates,
-  reaches a remote as part of the requested operation, or needs a TTY. The
-  drift guards declare theirs **once** in
-  `drift_describe_commands` (show/diff read+network, pull vault_write+network),
-  so all four inherit. This is what lets an agent risk-gate `hq restart`
-  (`deploy`) vs `vault status` (`read`) before running either.
-- **Contract** (`schema_version 4`, a superset of the MCP's): `{ ok,
-  schema_version, name, description, group, order, effect, network?, interactive?,
-  global_options:[<opt>], positionals:[<arg>], paras:[<prose>],
-  examples:[{command,comment}], commands:[{name, summary, args:[<opt>|<arg>],
-  effect, network?, interactive?, paras:[<prose>], examples:[…],
-  delegates?:"<owner>"}] }`, with option `metavar` and `variadic:true` on
-  variadic positionals. `desc_inventory "<group>" <order>` is required once
-  after `desc_tool`; `order` is globally unique and is the canonical workflow
-  order for every aggregate renderer (README, completions, TUI). v2 added
-  per-scope `paras`/`examples` and `delegates`; v3 added the **effect triple**
-  (always emits `effect`; the lean
-  boolean tags only when true) so an agent reads a command's intent, usage,
-  external flag-ownership, *and blast radius* from the JSON alone. `desc_para`,
+  Every command (and leaf tool) carries a Cordon blast-radius class on the ladder
+  `read → local_write → vault_write → remote_write → deploy`, plus the `+network`
+  / `+interactive` tags. The ladder's definitions and the
+  network-vs-dependency-install rule live in
+  [cordon](https://github.com/joeseverino/cordon#the-effect-ladder) — don't
+  restate them here. Declare it in one line — `desc_effect deploy +network` after
+  a `desc_cmd`, or after `desc_tool` for a leaf — scoped like `desc_opt`.
+  **Default is `read`**; declare it on anything that mutates, reaches off-box, or
+  needs a TTY. It renders a terse `Effect:` line in the focused `-h`, a colored
+  chip in `--tui`, and rides into the JSON. The drift guards declare theirs
+  **once** in `drift_describe_commands` (show/diff read+network, pull
+  vault_write+network), so all four inherit. This is what lets an agent risk-gate
+  `hq restart` (`deploy`) vs `vault status` (`read`) before running either.
+- **Contract.** This repo emits the **complete** [Cordon `schema_version 4`](https://github.com/joeseverino/cordon#the-contract)
+  document — every optional field included (`paras`/`examples`/`delegates`,
+  option `metavar`/`repeatable`, positional `variadic`); the sibling
+  `severino-vault-mcp` emits the same schema minus the prose fields. The field
+  list, schema, and version history live in cordon; this repo's *rendering* of it
+  is [`docs/command-surface-contract.md`](docs/command-surface-contract.md).
+  Repo-specific rules: `desc_inventory "<group>" <order>` is required once after
+  `desc_tool`, and `order` is globally unique — the canonical workflow order for
+  every aggregate renderer (README, completions, TUI). `desc_para`,
   `desc_example`, and `desc_effect` are **scoped to the current command** (like
   `desc_opt`/`desc_pos`) — declare tool-level ones *before the first `desc_cmd`*
-  or they attach to the last command. `desc_env` stays human-help only. Output
-  is byte-deterministic (no timestamps) so guards can diff it; `describe.bats`
-  guards every emitted effect against the enum. v4 added required inventory
-  `group`/`order` plus explicit option metavariables and variadic positionals.
-  Schema validation rejects missing metadata and duplicate order values.
+  or they attach to the last command. `desc_env` stays human-help only. Output is
+  byte-deterministic (no timestamps) so guards can diff it; `describe.bats`
+  guards every emitted effect against the enum, and schema validation rejects
+  missing metadata and duplicate order values.
 - **`tools describe`** is the orchestrator: it federates every `bin/*`
   `--describe` into one document (`--pretty` to read, `--repos` to fold in
   sibling repos like the MCP, `tools describe <tool>` for one). **`tools describe
@@ -190,6 +187,11 @@ type; both stay in sync because there is only one implementation.
   `.example` are templates; their gitignored copies are user-specific.
 - `schemas/` — machine-enforced cross-tool contracts. Keep executable schemas
   here rather than under `docs/`; prose explaining them stays in `docs/`.
+  `cordon-v4.json` is vendored **verbatim** from the canonical cordon repo (the
+  single source of the command-surface contract) — edit it there, then re-vendor.
+  `tools check` / `tools doctor` diff this copy against the canonical source
+  (`cordon_schema_status`, resolved via `$CORDON_HOME` or the sibling checkout),
+  so the copy can't silently drift; absent cordon, the check warns, not fails.
 - `tests/` — bats suite. Hermetic: throwaway keys, tmpdirs, no Keychain.
 - `bench/` — every measured claim in the README has a script here that
   asserts it; they run in CI.

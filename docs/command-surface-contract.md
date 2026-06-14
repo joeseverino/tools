@@ -2,10 +2,20 @@
 
 > Emit once, render many. One declaration per tool; every view derived from it.
 
+This repo emits the [**Cordon**](https://github.com/joeseverino/cordon)
+command-surface contract — the language-agnostic standard for declaring a CLI's
+surface once and carrying each command's **blast radius**. Read Cordon for the
+framework itself: the [contract shape and schema](https://github.com/joeseverino/cordon#the-contract),
+the [effect ladder](https://github.com/joeseverino/cordon#the-effect-ladder), and
+[how to write an emitter](https://github.com/joeseverino/cordon/blob/main/docs/IMPLEMENTERS.md).
+**This page is the Bash *implementation* of that framework** — the `desc_*` DSL,
+the renderers, the runtime gate, and the federation that fold it into the wider
+toolchain.
+
 A tool's surface — its commands, flags, arguments, prose, examples, external
-flag-ownership, and **blast radius** — is declared exactly once in a
-`describe_spec()` function. Two pure renderers turn that into the human help and
-the machine JSON, so they can never drift (there is no prose to parse). See
+flag-ownership, and effect — is declared exactly once in a `describe_spec()`
+function. Two pure renderers turn that into the human help and the machine JSON,
+so they can never drift (there is no prose to parse). See
 [`ARCHITECTURE.md`](ARCHITECTURE.md) for where this sits in the repo, and
 [`../AGENTS.md`](../AGENTS.md) for the editing rules.
 
@@ -20,7 +30,7 @@ describe_spec() {
     desc_synopsis "hq <command>"
 
     desc_cmd restart -- "docker compose restart app — no rebuild, no migrations"
-    desc_effect deploy +network            # ← blast radius (v3)
+    desc_effect deploy +network            # ← blast radius
 
     desc_cmd create  -- "Create or update a Project or Asset in HQ"
     desc_effect remote_write +network
@@ -65,34 +75,27 @@ The main `-h` stays a scannable git-style command list with a
 `Run '<tool> <cmd> -h'` pointer; the focused `<cmd> -h` renders that one
 command's options, args, prose, examples, and effect line.
 
-## The JSON contract (`schema_version 4`)
+## The JSON contract
 
-```jsonc
-{ "ok": true, "schema_version": 4, "name": "hq", "description": "…",
-  "group": "Integrations", "order": 130,
-  "effect": "read",                         // tool-level (meaningful for leaf tools)
-  "global_options": [ <opt> ],
-  "positionals":    [ <arg> ],
-  "paras":     [ "<prose>" ],
-  "examples":  [ { "command": "…", "comment": "…" } ],
-  "commands":  [ { "name": "restart", "summary": "…", "args": [ … ],
-                   "effect": "deploy", "network": true,   // ← v3
-                   "paras": [ … ], "examples": [ … ],
-                   "delegates": "<owner>" } ] }
-```
+The wire format is **Cordon `schema_version 4`** — defined, with its full field
+list and `additionalProperties: false` schema, in the
+[Cordon repo](https://github.com/joeseverino/cordon#the-contract)
+([`cordon-v4.json`](https://github.com/joeseverino/cordon/blob/main/schema/cordon-v4.json)).
+This emitter produces the **complete** contract — every optional field included:
+per-scope `paras` / `examples` and `delegates`, option `metavar`, `repeatable`,
+and positional `variadic`. (The sibling `severino-vault-mcp` emitter targets the
+same schema but omits the prose fields argparse can't supply.) Output is
+byte-deterministic (no timestamps), so a guard can diff it.
 
-`<opt>`/`<arg>` = `{ name, positional, required, help, flags?, metavar?,
-choices?, takes_value?, repeatable?, variadic? }`. Output is byte-deterministic (no timestamps), so a
-guard can diff it. v2 added per-scope `paras` / `examples` / `delegates`; v3
-added the effect triple below; v4 added required inventory `group` / `order`
-plus explicit option metavariables and variadic positionals.
+## Effect: the risk signal an agent can't read off the flags
 
-## v3 — effect: the risk signal an agent can't read off the flags
-
-Every command (and leaf tool) carries a **blast-radius class** plus two boolean
-tags. It is the one fact an agent cannot infer from the flags, and the signal it
-gates on before running a command — `hq restart` (`deploy`) vs `vault status`
-(`read`).
+Cordon's [effect ladder](https://github.com/joeseverino/cordon#the-effect-ladder)
+— `read → local_write → vault_write → remote_write → deploy`, plus the optional
+`network` / `interactive` tags — is the one fact an agent cannot infer from the
+flags, and the signal it gates on before running a command (`hq restart`
+(`deploy`) vs `vault status` (`read`)). See Cordon for the ladder's definitions
+and the `network`-vs-dependency-install distinction; below is how this repo
+*declares and enforces* it.
 
 ![the effect contract](diagrams/effect-contract.png)
 
@@ -101,16 +104,8 @@ desc_effect deploy +network          # after a desc_cmd …
 desc_effect local_write              # … or after desc_tool, for a leaf tool
 ```
 
-- **class** — `read | local_write | vault_write | remote_write | deploy`
-  (escalating). **Default is `read`**; declare it on anything that mutates,
-  reaches off-box, or blocks on a TTY.
-- **`+network`** — the requested operation touches a remote / API / SSH. A
-  package-manager cache miss or dependency installation does not make an
-  otherwise local operation networked. Not derivable from the class (a `read`
-  `diff` over the network is real; a `vault_write` `pull` over the network is
-  too).
-- **`+interactive`** — blocks on a TTY (prompts, `ssh -t`, a full-screen UI).
-
+**Default is `read`** when undeclared; add `desc_effect` to anything that
+mutates, reaches off-box (`+network`), or blocks on a TTY (`+interactive`).
 It renders five ways from the one line: a terse `Effect:` line in the focused
 `-h` (only when non-trivial), `effect` / `network?` / `interactive?` in the JSON
 (`effect` always emitted; the boolean tags only when true, to stay lean), a
@@ -150,13 +145,14 @@ about to act on instead of the whole surface. An unknown command returns
 
 `tools describe` federates every `bin/*` emitter into one document; `--repos`
 folds in sibling repos that emit the same contract — today
-`severino-vault-mcp describe`, which emits the **same v4 shape verbatim**. The
-contract itself is the [**Cordon** spec](https://github.com/joeseverino/cordon);
-`schemas/cordon-v4.json` here is a copy vendored verbatim from it (kept
-byte-identical, so it can be diff-checked). `tools` is one conformant emitter,
+`severino-vault-mcp describe`. `schemas/cordon-v4.json` here is a copy vendored
+verbatim from the [Cordon repo](https://github.com/joeseverino/cordon) (the
+single source of the contract); `tools check` / `tools doctor` diff it against
+the canonical source (`cordon_schema_status`, via `$CORDON_HOME` or the sibling
+checkout) so the copy can't silently drift. `tools` is one conformant emitter,
 and `tools check` runs `tools describe --repos` through that schema, so a drifted
-sibling emitter fails *here* (the cross-repo drift guard). One schema, both repos
-checked. (When the sibling isn't installed, `--repos` simply folds in nothing.)
+*sibling emitter* fails *here* (the cross-repo drift guard). One schema, every
+emitter checked. (When the sibling isn't installed, `--repos` folds in nothing.)
 
 `tools generate` is another render-many consumer: it derives zsh completions
 and the README CLI reference/inventory from the local aggregate. CI validates
