@@ -26,13 +26,13 @@ describe_spec() {
     desc_example "encrypt -- -starts-with-dash.md"
 }
 
+desc_help_intercept "$@"
+
 FORCE=0
 COPY=0
 EXTRA_KEYS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --describe) describe_emit "$@"; exit 0 ;;
-        -h|--help)  usage; exit 0 ;;
         -c|--copy)  COPY=1; shift ;;
         -f|--force) FORCE=1; shift ;;
         -k|--key)

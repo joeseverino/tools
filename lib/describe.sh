@@ -791,9 +791,11 @@ describe_emit() {
     describe_render_json $pretty
 }
 
-# desc_help_intercept "$@" — the whole help + machine surface of a subcommand
-# tool, derived from the one describe_spec, in ONE place. Call it first in the
-# dispatch, then write only the command→action mapping:
+# desc_help_intercept "$@" — THE one dispatch line every tool puts first, for
+# BOTH leaf and subcommand tools. It renders the whole help + machine surface
+# from the single describe_spec and exits for a help/contract request; what it
+# does past the shared top is DERIVED from the spec's shape, never restated by
+# the tool. Subcommand tool — call it, then write only the command→action map:
 #
 #     desc_help_intercept "$@"
 #     case "${1:-}" in
@@ -801,25 +803,44 @@ describe_emit() {
 #         ...
 #     esac
 #
-# It renders and exits 0 when the args are a help/describe request — so no tool
-# hand-routes help, and a help flag can never fall through to run an action:
-#   (no args | -h | --help | help)  -> usage              (main screen)
-#   --describe [--pretty]           -> describe_emit       (JSON contract)
-#   <cmd> (-h | --help)             -> usage_command <cmd> (focused screen)
-# Otherwise it runs the blast-radius gate for the resolved command and returns,
-# letting the caller dispatch the real command.
+# Leaf tool (declares no desc_cmd) — call it, then parse the tool's own
+# options/positionals; it never hand-routes -h/--help/--describe again.
+#
+# It renders and exits 0 on a help/describe request, so a help flag can never
+# fall through to run an action:
+#   -h | --help            -> usage              main screen    (every tool)
+#   --describe [--pretty]   -> describe_emit      JSON contract  (every tool)
+#   (no args | help)        -> usage              main screen    (subcommand tools)
+#   <cmd> (-h | --help)     -> usage_command <cmd> focused screen (subcommand tools)
+# then it runs the blast-radius gate for the resolved scope — the named command,
+# or the tool itself for a leaf — and returns, letting the caller dispatch.
+#
+# Leaf vs subcommand is read from the spec itself (does it declare any desc_cmd?),
+# so adding or removing a subcommand re-routes dispatch with no second edit. A
+# leaf's bare / `help` invocation is the tool's own to define (`backup` runs,
+# `encrypt` errors with its usage), so the intercept deliberately does NOT claim
+# those for a leaf — only the unambiguous -h/--help/--describe meta-flags.
 desc_help_intercept() {
+    # Meta-flags are universal — unambiguous for every tool, leaf or subcommand.
     case "${1:-}" in
-        ''|-h|--help|help) usage; exit 0 ;;
-        --describe)        describe_emit "$@"; exit 0 ;;
+        -h|--help)  usage; exit 0 ;;
+        --describe) describe_emit "$@"; exit 0 ;;
     esac
-    case "${2:-}" in
-        -h|--help)         usage_command "$1"; exit 0 ;;
-    esac
-    desc_guard_effect "${1:-}"
+    # Past here behavior is spec-shape-specific. With no describe_spec
+    # (lib/drift.sh's hermetic harness overrides usage and declares none) there
+    # is nothing to inspect, route, or gate — hand back to the caller.
+    declare -F describe_spec >/dev/null || return 0
+    describe_reset; describe_spec
+    if (( ${#_D_CMDS[@]} == 0 )); then
+        desc_guard_effect ""        # leaf: gate the tool-level effect, then hand back
+        return 0
+    fi
+    case "${1:-}" in ''|help) usage; exit 0 ;; esac
+    case "${2:-}" in -h|--help) usage_command "$1"; exit 0 ;; esac
+    desc_guard_effect "$1"
 }
 
-# desc_guard_effect <command> — the runtime renderer of the effect contract: the
+# desc_guard_effect <scope> — the runtime renderer of the effect contract: the
 # warning, derived from the same `desc_effect` line that feeds -h / the README /
 # the agent JSON, never hand-wired per command. A `deploy` (the top of the
 # read→deploy ladder — it ships to prod) requires an explicit confirmation, so a
@@ -829,8 +850,7 @@ desc_help_intercept() {
 # this for free — it runs from the one intercept they already call, so a new
 # deploy command is gated the moment it declares its effect, with zero wiring.
 desc_guard_effect() {
-    local cmd="$1"
-    [[ -n "$cmd" ]] || return 0
+    local cmd="$1"   # a command name for a subcommand tool, or "" = the leaf tool itself
     # No spec means no declared effect (defaults to read) — nothing to gate. Also
     # keeps lib/drift.sh's hermetic test harness, which overrides usage() and
     # never declares describe_spec, working unchanged.
