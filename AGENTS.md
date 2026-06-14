@@ -38,9 +38,11 @@ emitter is `severino-vault-mcp`'s `cli_introspect.describe_parser`.)
   execute). The `case` after it is pure command→action wiring — the only thing
   not derivable from the spec (`cmd_*` vs `run_npm` vs aliases); `describe.bats`
   guards that every declared command has a dispatch arm so the two sets can't
-  drift. New tools get this form from `tools new`. (Lone exception: the zsh
-  `dns-test` self-describes via `getopts` + a `--describe`/`--help` preflight,
-  since `getopts` can't see long options.)
+  drift. New tools get this form from `tools new`. The lone zsh tool,
+  `dns-test`, uses this same one dispatch line (`lib/describe.sh` is bash+zsh
+  safe); it keeps `getopts` only for its own short options, and a `getopts -h`
+  arm for an `-h` that isn't the leading token, since `getopts` can't see the
+  long meta-flags.
 - **Everything per-command is spec-derived — zero hand-written sub-help, zero
   help heredocs in the toolchain.** After a `desc_cmd`, declare its flags
   (`desc_opt`/`desc_pos`), prose (`desc_para`), and examples (`desc_example`);
