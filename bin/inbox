@@ -24,11 +24,11 @@ describe_spec() {
     desc_example "inbox -e \"draft: post-mortem template\"" -- "seed + open editor"
 }
 
+desc_help_intercept "$@"
+
 EDIT=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --describe) describe_emit "$@"; exit 0 ;;
-        -h|--help) usage; exit 0 ;;
         -e|--edit) EDIT=1; shift ;;
         --)        shift; break ;;
         -*)        die_unknown option "$1" ;;

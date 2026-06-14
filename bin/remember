@@ -33,6 +33,8 @@ describe_spec() {
 
 # ---- arg parsing ------------------------------------------------------------
 
+desc_help_intercept "$@"
+
 MODE="write"
 TARGET_DIR=""
 DESCRIPTION=""
@@ -45,8 +47,6 @@ POSITIONAL=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --describe)         describe_emit "$@"; exit 0 ;;
-        -h|--help)          usage; exit 0 ;;
         --list)             MODE="list"; shift ;;
         --forget)           MODE="forget"; FORGET_SLUG="${2:?--forget needs a slug}"; shift 2 ;;
         -d|--description)   DESCRIPTION="${2:?--description needs a value}"; shift 2 ;;

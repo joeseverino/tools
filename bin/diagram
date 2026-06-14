@@ -17,6 +17,7 @@ describe_spec() {
 }
 
 desc_help_intercept "$@"
+[[ $# -ge 1 ]] || { usage; exit 0; }   # bare invocation: show the main screen
 
 sources=()
 for target in "$@"; do
