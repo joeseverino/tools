@@ -172,12 +172,14 @@ desc_delegate() {
 # desc_effect <class> [+network] [+interactive] — declare a command's (or, before
 # the first desc_cmd, the leaf tool's) blast radius and reach. <class> escalates:
 #   read | local_write | vault_write | remote_write | deploy
-# Optional tags: +network (touches a remote / API / SSH) and +interactive (needs
-# a TTY). Scoped like desc_opt/desc_para. It is the structured signal an agent
-# risk-gates on before running a command — the one fact it can't read off the
-# flags — and rides into the JSON as effect / network / interactive. Undeclared
-# defaults to read (no mutation, no network); declare it on anything that mutates,
-# reaches off-box, or blocks on a TTY.
+# Optional tags: +network (the requested operation reaches a remote / API / SSH)
+# and +interactive (needs a TTY). Dependency installation or a package-manager
+# cache miss does not make an otherwise local operation networked. Scoped like
+# desc_opt/desc_para. It is the structured signal an agent risk-gates on before
+# running a command — the one fact it can't read off the flags — and rides into
+# the JSON as effect / network / interactive. Undeclared defaults to read (no
+# mutation, no remote operation); declare it on anything that mutates, reaches
+# off-box as part of its requested operation, or blocks on a TTY.
 desc_effect() {
     local class="$1"; shift
     local network=0 interactive=0
