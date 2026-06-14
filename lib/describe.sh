@@ -829,7 +829,10 @@ desc_help_intercept() {
     # Past here behavior is spec-shape-specific. With no describe_spec
     # (lib/drift.sh's hermetic harness overrides usage and declares none) there
     # is nothing to inspect, route, or gate — hand back to the caller.
-    declare -F describe_spec >/dev/null || return 0
+    # `declare -f` (not -F) is the function-existence test that works in BOTH
+    # shells: under zsh `declare -F` means *float* — it always succeeds and
+    # declares a float param of that name, so the early return never fires.
+    declare -f describe_spec >/dev/null || return 0
     describe_reset; describe_spec
     if (( ${#_D_CMDS[@]} == 0 )); then
         desc_guard_effect ""        # leaf: gate the tool-level effect, then hand back
@@ -853,8 +856,9 @@ desc_guard_effect() {
     local cmd="$1"   # a command name for a subcommand tool, or "" = the leaf tool itself
     # No spec means no declared effect (defaults to read) — nothing to gate. Also
     # keeps lib/drift.sh's hermetic test harness, which overrides usage() and
-    # never declares describe_spec, working unchanged.
-    declare -F describe_spec >/dev/null || return 0
+    # never declares describe_spec, working unchanged. `-f` not `-F`: zsh's `-F`
+    # is float, not function-exists (see desc_help_intercept).
+    declare -f describe_spec >/dev/null || return 0
     describe_reset
     describe_spec
     local eff; eff="$(_describe_effect_for "$cmd")"; eff="${eff%%"$_DSEP"*}"

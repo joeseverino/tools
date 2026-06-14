@@ -241,6 +241,42 @@ print("\n".join(sorted(toks)))
     fi
 }
 
+@test "desc_help_intercept routes help byte-identically under bash and zsh" {
+    # The one dispatch line, not just describe_emit, must be bash+zsh safe — it
+    # is what the lone zsh tool (dns-test) now calls. Exercise the leaf shape
+    # (no desc_cmd → -h renders usage, then the no-arg path hits the effect
+    # gate and hands back) under both shells and assert byte-parity.
+    spec='
+        source "$TOOLS_HOME/lib/common.sh"; source "$TOOLS_HOME/lib/describe.sh"
+        describe_spec(){ desc_tool t d; desc_inventory G 1; desc_effect read +network
+                         desc_synopsis "t [-d X]"; desc_opt -d X -- h; }
+        desc_help_intercept -h'
+    bash_out=$(bash -c "$spec")
+    if command -v zsh >/dev/null 2>&1; then
+        zsh_out=$(zsh -c "$spec")
+        [ "$bash_out" = "$zsh_out" ]
+    else
+        skip "zsh not installed"
+    fi
+}
+
+@test "desc_help_intercept's no-spec early return holds under zsh (declare -f, not -F)" {
+    # Regression: zsh's `declare -F` means *float* — it always succeeds and
+    # declares a float param, so the buggy guard never returned early and then
+    # ran an undefined describe_spec. With no describe_spec defined, the leaf
+    # no-arg path (gate + hand back) and any routed arg must return 0, emit
+    # nothing, and leave no `describe_spec` parameter behind.
+    command -v zsh >/dev/null 2>&1 || skip "zsh not installed"
+    run zsh -c '
+        source "$TOOLS_HOME/lib/common.sh"; source "$TOOLS_HOME/lib/describe.sh"
+        usage(){ :; }                      # hermetic: no spec, like lib/drift.sh
+        desc_help_intercept somecmd; rc=$?
+        [[ -z "${describe_spec+x}" ]] || { echo "leaked float param"; exit 3; }
+        exit $rc'
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
 @test "a real tool self-describes (encrypt)" {
     setup_crypt
     run "$TOOLS_HOME/bin/encrypt" --describe
