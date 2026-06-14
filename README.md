@@ -591,6 +591,8 @@ Each path may be an .mmd file or a directory. Directories render their top-level
 
 Rendering uses Mermaid CLI 11.15.0 with Joe Severino brand tokens, PNG output, 1100px width, 3x scale, and a white background. Set DIAGRAM_BRAND_KIT to override the kit directory.
 
+Author flow diagrams with flowchart TB. Contract diagrams may use HTML labels for dense multiline nodes; site diagrams stay on SVG labels when their nodes are single-line.
+
 Usage: `diagram <path>...`
 
 | Argument | Description |
