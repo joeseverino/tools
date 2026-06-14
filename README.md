@@ -570,7 +570,9 @@ remember --forget use-rg-and-fd
 
 Render a Markdown file (with Mermaid) to PDF via local Chromium, offline.
 
-Produces a branded document using the Joe Severino kit. The kit resolves from DOCTOPDF_BRAND_KIT, then BRAND_HOME, then CODE_HOME/Assets/severino-brand.
+Produces a branded document using the Joe Severino kit and embedded Inter variable font. The kit resolves from DOCTOPDF_BRAND_KIT, then BRAND_HOME, then CODE_HOME/Assets/severino-brand.
+
+Markdown image references are consumed unchanged. Rare inline Mermaid fences are rendered through the diagram tool, so both commands share one Mermaid implementation and brand configuration.
 
 Usage: `doc-to-pdf <input.md> [output.pdf]`
 
@@ -587,7 +589,7 @@ Render Mermaid .mmd sources to neighboring PNG files.
 
 Each path may be an .mmd file or a directory. Directories render their top-level .mmd files.
 
-Rendering uses Mermaid CLI 11.15.0 with Joe Severino brand tokens, PNG output, 1100px width, 2x scale, and a white background. Set DIAGRAM_BRAND_KIT to override the kit directory.
+Rendering uses Mermaid CLI 11.15.0 with Joe Severino brand tokens, PNG output, 1100px width, 3x scale, and a white background. Set DIAGRAM_BRAND_KIT to override the kit directory.
 
 Usage: `diagram <path>...`
 

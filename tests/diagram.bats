@@ -15,6 +15,8 @@ setup() {
     cat > "$DIAGRAM_BRAND_KIT/web/tokens.css" <<'EOF'
 :root {
   --brand-accent: #123456;
+  --brand-deep: #0a1a2b;
+  --brand-on-accent: #ffffff;
   --brand-ink: #111111;
   --brand-paper: #ffffff;
 }
@@ -45,7 +47,7 @@ STUB
     [ -f "$BATS_TEST_TMPDIR/diagrams/one.png" ]
     [ -f "$BATS_TEST_TMPDIR/diagrams/two.png" ]
     [ "$(wc -l < "$NPX_LOG" | tr -d ' ')" -eq 2 ]
-    grep -q -- '-y -p @mermaid-js/mermaid-cli@11.15.0 mmdc -i one.mmd -o one.png -c .* -w 1100 -s 2 -b white' "$NPX_LOG"
+    grep -q -- '-y -p @mermaid-js/mermaid-cli@11.15.0 mmdc -i one.mmd -o one.png -c .* -w 1100 -s 3 -b white' "$NPX_LOG"
     grep -q '"primaryBorderColor": "#123456"' "$CONFIG_LOG"
     grep -q '"theme": "base"' "$CONFIG_LOG"
     grep -q 'data:font/woff2;base64' "$CONFIG_LOG"
