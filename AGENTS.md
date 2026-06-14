@@ -85,10 +85,11 @@ emitter is `severino-vault-mcp`'s `cli_introspect.describe_parser`.)
   / `+interactive` tags. The ladder's definitions and the
   network-vs-dependency-install rule live in
   [cordon](https://github.com/joeseverino/cordon#the-effect-ladder) — don't
-  restate them here. Declare it in one line — `desc_effect deploy +network` after
-  a `desc_cmd`, or after `desc_tool` for a leaf — scoped like `desc_opt`.
-  **Default is `read`**; declare it on anything that mutates, reaches off-box, or
-  needs a TTY. It renders a terse `Effect:` line in the focused `-h`, a colored
+  restate them here. Declare it explicitly in one line, including reads —
+  `desc_effect deploy +network` after a `desc_cmd`, or after `desc_tool` for a
+  leaf — scoped like `desc_opt`. Missing or duplicate declarations fail closed
+  before rendering or gating, so an omitted classification can never become an
+  inferred read. It renders a terse `Effect:` line in the focused `-h`, a colored
   chip in `--tui`, and rides into the JSON. The drift guards declare theirs
   **once** in `drift_describe_commands` (show/diff read+network, pull
   vault_write+network), so all four inherit. This is what lets an agent risk-gate

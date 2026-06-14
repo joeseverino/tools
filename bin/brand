@@ -12,6 +12,7 @@ describe_spec() {
     desc_tool "brand" "Render Joe's brand kits via the branding-engine."
     desc_inventory "Integrations" 150
     desc_synopsis "brand <command>"
+    desc_effect read
     desc_para "Kits land in \$BRAND_HOME/kits. The engine lives in \$ENGINE_HOME and comes in as a dependency of the brand repo; see its README for all flags."
     desc_cmd build  -- "Rebuild every kit from brand/ + the social cards"
     desc_effect local_write
@@ -25,6 +26,7 @@ describe_spec() {
     desc_opt --only LIST       -- "Comma-separated subset (e.g. mark,wordmark)"
     desc_opt --out DIR         -- "Output directory override"
     desc_cmd status -- "Show engine + brand locations and git state"
+    desc_effect read
     desc_env CODE_HOME   -- "Defaults to ~/Documents/Code"
     desc_env BRAND_HOME  -- "Defaults to \$CODE_HOME/Assets/severino-brand"
     desc_env ENGINE_HOME -- "Defaults to \$CODE_HOME/Projects/branding-engine"
