@@ -47,6 +47,10 @@ EOF
     grep -q 'source document.md' "$html"
     grep -q 'counter(page).*counter(pages)' "$html"
     grep -q '<title>source document</title>' "$html"
+    grep -q "theme: 'base'" "$html"
+    grep -q "primaryBorderColor: accent" "$html"
+    grep -q "curve: 'basis'" "$html"
+    grep -Fq 'value.match(/^rgb\(\s*' "$html"
     rm -f "$html"
 }
 
