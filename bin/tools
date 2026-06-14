@@ -32,17 +32,20 @@ describe_spec() {
     desc_tool "tools" "Umbrella command for the personal CLI toolchain."
     desc_inventory "Core" 10
     desc_synopsis "tools <command> [options]"
+    desc_effect read
 
     desc_cmd status   -- "One-screen health check across vault, inbox, backup, keys"
     desc_effect read +network
     desc_opt --json   -- "Machine-readable output (one JSON object)"
 
     desc_cmd doctor   -- "Verify environment, deps, and installed symlinks"
+    desc_effect read +network
     desc_opt --all    -- "Cross-system rollup: also run hq doctor, hq schema --check, and site doctor (exit 1 if any gate fails)"
     desc_opt --live   -- "Implies --all; additionally run the drift guards (cf-dns / adguard / ts-acl) — live API reads that need network + the age key"
     desc_opt --json   -- "Machine-readable output (one object, \"checks\" array)"
 
     desc_cmd check    -- "Run the full CI suite locally: lint, tests, bench"
+    desc_effect local_write
     desc_opt --no-bench -- "Skip the bench scripts (the slowest step)"
 
     desc_cmd new      -- "Scaffold a new tool in bin/ with the house conventions"
@@ -63,6 +66,7 @@ describe_spec() {
     desc_pos action +optional "{enable,disable,status,run-now}" -- "Agent action — enable (install+load), disable (unload+remove), status (loaded? + log tail), run-now (one immediate vault sync)"
 
     desc_cmd describe -- "Emit the command surface of every tool as one JSON document (the emit-once contract)"
+    desc_effect read
     desc_pos tool +optional -- "Describe just one tool (delegates to <tool> --describe)"
     desc_pos command +optional -- "With a tool, project its contract to one command — the token-minimal AI path (tools describe hq restart)"
     desc_opt --pretty -- "Indent the JSON for reading (default: compact, diff-stable)"
@@ -581,13 +585,14 @@ describe_spec() {
     desc_tool "__NAME__" "One-line description of __NAME__."
     desc_inventory "Other" __ORDER__
     desc_synopsis "__NAME__ [options] <args>"
-    # Declare blast radius if this tool does anything but read (default is read):
+    # Declare blast radius explicitly; never infer a missing classification:
+    desc_effect read
     #   desc_effect local_write             # writes local files
     #   desc_effect vault_write             # mutates the Obsidian vault
     #   desc_effect remote_write +network   # mutates a remote system over the network
     #   desc_effect deploy +network         # ships / restarts a service
     # +interactive marks a command that blocks on a TTY. On a subcommand tool,
-    # put desc_effect right after each desc_cmd; here (leaf tool) it is the tool's.
+    # put desc_effect right after every desc_cmd; here it classifies the leaf tool.
     # desc_opt -x --example METAVAR -- "what the flag does"
     # desc_pos arg -- "what the positional is"
     # desc_para "One logical paragraph as a single unwrapped string; renderers
@@ -648,6 +653,7 @@ describe_spec() {
     desc_tool "__NAME__" "Fetch live state from an API and diff it against the vault mirror."
     desc_inventory "Drift guards" __ORDER__
     desc_synopsis "__NAME__ <command>"
+    # Tool and command effects are declared once by the shared surface.
     drift_describe_commands
     desc_env __PREFIX___CREDS         -- "age-encrypted env holding the API credential"
     desc_env __PREFIX___VAULT_DOC     -- "vault doc holding the mirror"

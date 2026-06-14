@@ -46,9 +46,9 @@
 # usage, and external flag-ownership from the JSON alone (without re-reading the
 # handler). v3 adds the EFFECT triple — effect (one of read | local_write |
 # vault_write | remote_write | deploy, escalating blast radius) plus the boolean
-# tags network / interactive — declared by desc_effect. It is the structured
-# signal an agent risk-gates on before running a command (read vs deploy), the
-# one fact it can't derive from flags. effect is always emitted (default read);
+# tags network / interactive — explicitly declared by desc_effect. It is the
+# structured signal an agent risk-gates on before running a command (read vs
+# deploy), the one fact it can't derive from flags. effect is always emitted;
 # network / interactive only when true. desc_env stays human-help only. desc_para
 # / desc_example / desc_effect are scoped to the current command, like desc_opt.
 # v4 adds required group / order inventory metadata and explicit metavar /
@@ -177,20 +177,56 @@ desc_delegate() {
 # cache miss does not make an otherwise local operation networked. Scoped like
 # desc_opt/desc_para. It is the structured signal an agent risk-gates on before
 # running a command — the one fact it can't read off the flags — and rides into
-# the JSON as effect / network / interactive. Undeclared defaults to read (no
-# mutation, no remote operation); declare it on anything that mutates, reaches
-# off-box as part of its requested operation, or blocks on a TTY.
+# the JSON as effect / network / interactive. Every tool and command must
+# declare it explicitly, including read: a missing safety classification is a
+# contract error, never an inferred read.
 desc_effect() {
     local class="$1"; shift
     local network=0 interactive=0
+    case "$class" in
+        read|local_write|vault_write|remote_write|deploy) ;;
+        *) die "contract" "invalid effect '$class' in ${_D_NAME:-describe_spec}" 2 ;;
+    esac
     while [[ $# -gt 0 && "$1" != "--" ]]; do
         case "$1" in
             +network)     network=1 ;;
             +interactive) interactive=1 ;;
+            *) die "contract" "invalid effect tag '$1' in ${_D_NAME:-describe_spec}" 2 ;;
         esac
         shift
     done
     _D_EFFECT+=("${_D_CUR_CMD}${_DSEP}${class}${_DSEP}${network}${_DSEP}${interactive}")
+}
+
+# Every executable scope must make its safety classification explicit. This
+# validates the authoring DSL before any renderer or runtime gate consumes it,
+# so forgetting desc_effect cannot silently manufacture a read or bypass a
+# deploy confirmation.
+_describe_validate_effects() {
+    local want rec scope name count
+    local scopes=("")
+    if (( ${#_D_CMDS[@]} )); then
+        for rec in "${_D_CMDS[@]}"; do
+            name="${rec%%"$_DSEP"*}"
+            scopes+=("$name")
+        done
+    fi
+    for want in "${scopes[@]}"; do
+        count=0
+        if (( ${#_D_EFFECT[@]} )); then
+            for rec in "${_D_EFFECT[@]}"; do
+                scope="${rec%%"$_DSEP"*}"
+                [[ "$scope" == "$want" ]] && count=$((count + 1))
+            done
+        fi
+        if (( count == 0 )); then
+            name="${_D_NAME}${want:+ $want}"
+            die "contract" "'$name' must declare desc_effect explicitly" 2
+        elif (( count > 1 )); then
+            name="${_D_NAME}${want:+ $want}"
+            die "contract" "'$name' declares desc_effect more than once" 2
+        fi
+    done
 }
 
 # desc_env <VAR> -- <help...> — human help only.
@@ -409,6 +445,7 @@ describe_render_usage_for() {
 usage_command() {
     describe_reset
     describe_spec
+    _describe_validate_effects
     describe_render_usage_for "$1"
 }
 
@@ -480,8 +517,8 @@ _describe_delegate_for() {
     done
 }
 
-# _describe_effect_for <scope> — print "effect<sep>network<sep>interactive" for a
-# scope, defaulting to read / 0 / 0 when none was declared. Consumed by both the
+# _describe_effect_for <scope> — print "effect<sep>network<sep>interactive" for
+# an explicitly declared scope. Consumed by both the
 # usage line and the JSON, so the two can't drift.
 _describe_effect_for() {
     local want="$1" rec scope effect network interactive
@@ -494,7 +531,7 @@ _describe_effect_for() {
             fi
         done
     fi
-    printf 'read%s0%s0' "$_DSEP" "$_DSEP"
+    return 1
 }
 
 # _describe_render_effect_line <scope> — print "Effect: <class> · network · …",
@@ -592,6 +629,7 @@ _describe_render_opt_section() {
 usage() {
     describe_reset
     describe_spec
+    _describe_validate_effects
     describe_render_usage
 }
 
@@ -788,6 +826,7 @@ describe_emit() {
     done
     describe_reset
     describe_spec
+    _describe_validate_effects
     describe_render_json $pretty
 }
 
@@ -831,6 +870,7 @@ desc_help_intercept() {
     # is nothing to inspect, route, or gate — hand back to the caller.
     declare -F describe_spec >/dev/null || return 0
     describe_reset; describe_spec
+    _describe_validate_effects
     if (( ${#_D_CMDS[@]} == 0 )); then
         desc_guard_effect ""        # leaf: gate the tool-level effect, then hand back
         return 0
@@ -851,13 +891,16 @@ desc_help_intercept() {
 # deploy command is gated the moment it declares its effect, with zero wiring.
 desc_guard_effect() {
     local cmd="$1"   # a command name for a subcommand tool, or "" = the leaf tool itself
-    # No spec means no declared effect (defaults to read) — nothing to gate. Also
-    # keeps lib/drift.sh's hermetic test harness, which overrides usage() and
-    # never declares describe_spec, working unchanged.
+    # No spec means no executable declared surface to gate. This keeps
+    # lib/drift.sh's hermetic test harness, which overrides usage() and never
+    # declares describe_spec, working unchanged.
     declare -F describe_spec >/dev/null || return 0
     describe_reset
     describe_spec
-    local eff; eff="$(_describe_effect_for "$cmd")"; eff="${eff%%"$_DSEP"*}"
+    _describe_validate_effects
+    local eff
+    eff="$(_describe_effect_for "$cmd")" || return 0
+    eff="${eff%%"$_DSEP"*}"
     [[ "$eff" == deploy ]] || return 0
     [[ -n "${TOOLS_ASSUME_YES:-}" ]] && return 0
     if [[ ! -t 0 || ! -t 1 ]]; then

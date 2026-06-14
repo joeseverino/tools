@@ -22,6 +22,7 @@ render() {
             desc_tool "demo" "A demo tool."
             desc_inventory "Test" 10
             desc_synopsis "demo [options] <file>..."
+            desc_effect read
             desc_para "First paragraph."
             desc_example "demo a.txt" -- "the common case"
             desc_opt -c --copy             -- "Keep the original"
@@ -54,13 +55,13 @@ assert o["schema_version"] == 4
 assert o["name"] == "demo"
 assert o["description"] == "A demo tool."
 assert o["group"] == "Test" and o["order"] == 10
-assert o["effect"] == "read"   # tool-level default for a command tool
+assert o["effect"] == "read"
 for k in ("global_options","positionals","commands"):
     assert isinstance(o[k], list), k
 '
 }
 
-@test "effect triple: default read, declared class + network/interactive tags" {
+@test "effect triple: explicit class + network/interactive tags" {
     run render json
     [ "$status" -eq 0 ]
     echo "$output" | python3 -c '
@@ -72,6 +73,38 @@ assert run["network"] is True
 # interactive was not declared, so the lean tag is omitted entirely
 assert "interactive" not in run
 '
+}
+
+@test "missing effect declarations fail closed before rendering" {
+    run bash -c '
+        source "$TOOLS_HOME/lib/common.sh"
+        source "$TOOLS_HOME/lib/describe.sh"
+        describe_spec() {
+            desc_tool demo "A demo tool."
+            desc_inventory Test 10
+            desc_effect read
+            desc_cmd mutate -- "Mutate something"
+        }
+        describe_emit
+    '
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"'demo mutate' must declare desc_effect explicitly"* ]]
+}
+
+@test "duplicate effect declarations fail closed before rendering" {
+    run bash -c '
+        source "$TOOLS_HOME/lib/common.sh"
+        source "$TOOLS_HOME/lib/describe.sh"
+        describe_spec() {
+            desc_tool demo "A demo tool."
+            desc_inventory Test 10
+            desc_effect read
+            desc_effect local_write
+        }
+        describe_emit
+    '
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"'demo' declares desc_effect more than once"* ]]
 }
 
 @test "effect line shows in focused help only when non-trivial" {
@@ -230,7 +263,7 @@ print("\n".join(sorted(toks)))
 @test "engine is byte-identical under bash and zsh" {
     spec='
         source "$TOOLS_HOME/lib/common.sh"; source "$TOOLS_HOME/lib/describe.sh"
-        describe_spec(){ desc_tool t d; desc_opt -d X -- h; desc_cmd c -- s; desc_opt --foo "{a,b}" -- hh; }
+        describe_spec(){ desc_tool t d; desc_effect read; desc_opt -d X -- h; desc_cmd c -- s; desc_effect read; desc_opt --foo "{a,b}" -- hh; }
         describe_emit'
     bash_out=$(bash -c "$spec")
     if command -v zsh >/dev/null 2>&1; then
