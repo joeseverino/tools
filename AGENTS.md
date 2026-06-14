@@ -80,7 +80,9 @@ Every tool emits its command surface as one structured JSON document — the
   `drift_describe_commands` (show/diff read+network, pull vault_write+network),
   so all four inherit. This is what lets an agent risk-gate `hq restart`
   (`deploy`) vs `vault status` (`read`) before running either.
-- **Contract** (`schema_version 4`, a superset of the MCP's): `{ ok,
+- **Contract** (Cordon `schema_version 4` — the same schema `severino-vault-mcp`
+  emits; that emitter just omits the optional prose fields `paras`/`examples`/
+  `delegates`): `{ ok,
   schema_version, name, description, group, order, effect, network?, interactive?,
   global_options:[<opt>], positionals:[<arg>], paras:[<prose>],
   examples:[{command,comment}], commands:[{name, summary, args:[<opt>|<arg>],
