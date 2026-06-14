@@ -27,7 +27,7 @@ renders every view — the human `-h` screens, the `--describe` JSON contract, t
 hand-writes help; no prose is parsed, so the human help and the machine JSON
 cannot drift.
 
-![emit-once, render-many](diagrams/emit-once.png)
+![the describe pipeline](diagrams/describe-pipeline.png)
 
 This is the spine of the repo. A new tool becomes self-helping and
 self-describing the moment it defines `describe_spec` and puts
