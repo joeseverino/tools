@@ -51,6 +51,7 @@ EOF
     grep -q "primaryBorderColor: accent" "$html"
     grep -q "curve: 'basis'" "$html"
     grep -Fq 'value.match(/^rgb\(\s*' "$html"
+    grep -q 'white-space: pre-wrap' "$html"
     rm -f "$html"
 }
 
