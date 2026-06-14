@@ -192,6 +192,11 @@ type; both stay in sync because there is only one implementation.
   `.example` are templates; their gitignored copies are user-specific.
 - `schemas/` — machine-enforced cross-tool contracts. Keep executable schemas
   here rather than under `docs/`; prose explaining them stays in `docs/`.
+  `cordon-v4.json` is vendored **verbatim** from the canonical cordon repo (the
+  single source of the command-surface contract) — edit it there, then re-vendor.
+  `tools check` / `tools doctor` diff this copy against the canonical source
+  (`cordon_schema_status`, resolved via `$CORDON_HOME` or the sibling checkout),
+  so the copy can't silently drift; absent cordon, the check warns, not fails.
 - `tests/` — bats suite. Hermetic: throwaway keys, tmpdirs, no Keychain.
 - `bench/` — every measured claim in the README has a script here that
   asserts it; they run in CI.
