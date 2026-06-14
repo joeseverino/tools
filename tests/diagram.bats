@@ -9,7 +9,9 @@ setup() {
     export NPX_LOG="$BATS_TEST_TMPDIR/npx.log"
     export CONFIG_LOG="$BATS_TEST_TMPDIR/config.json"
     export DIAGRAM_BRAND_KIT="$BATS_TEST_TMPDIR/kit"
+    export DIAGRAM_FONT="$BATS_TEST_TMPDIR/inter.woff2"
     export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
+    printf 'fake font\n' > "$DIAGRAM_FONT"
     cat > "$DIAGRAM_BRAND_KIT/web/tokens.css" <<'EOF'
 :root {
   --brand-accent: #123456;
@@ -46,6 +48,9 @@ STUB
     grep -q -- '-y -p @mermaid-js/mermaid-cli@11.15.0 mmdc -i one.mmd -o one.png -c .* -w 1100 -s 2 -b white' "$NPX_LOG"
     grep -q '"primaryBorderColor": "#123456"' "$CONFIG_LOG"
     grep -q '"theme": "base"' "$CONFIG_LOG"
+    grep -q 'data:font/woff2;base64' "$CONFIG_LOG"
+    grep -q '\\\"Inter\\\", sans-serif' "$CONFIG_LOG"
+    grep -q 'edgeLabel p.*background: #ffffff' "$CONFIG_LOG"
 }
 
 @test "file input writes the neighboring png" {
