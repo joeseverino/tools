@@ -54,6 +54,7 @@ EOF
     grep -q 'source document.md' "$html"
     grep -q 'counter(page).*counter(pages)' "$html"
     grep -q '<title>source document</title>' "$html"
+    grep -q '<span class="document-provenance">source document.md</span>' "$html"
     grep -q 'font-family: "Inter"' "$html"
     grep -q 'data:font/woff2;base64' "$html"
     grep -q 'white-space: pre-wrap' "$html"
@@ -65,6 +66,42 @@ EOF
     grep -q 'background: var(--brand-paper)' "$html"
     grep -q 'hljs-attr' "$html"
     grep -q 'hljs-comment' "$html"
+    rm -f "$html"
+}
+
+@test "doc-to-pdf links GitHub provenance beneath the title" {
+    local kit="$BATS_TEST_TMPDIR/kit"
+    local repo="$BATS_TEST_TMPDIR/repo"
+    local input="$repo/docs/README.md"
+    local pdf="$BATS_TEST_TMPDIR/repository.pdf"
+    local chrome="$BATS_TEST_TMPDIR/chrome"
+    local font="$BATS_TEST_TMPDIR/inter.woff2"
+    mkdir -p "$kit/web" "$kit/mark" "$kit/wordmark" "$repo/docs"
+    printf ':root { --brand-accent: #123456; --brand-ink: #111; --brand-paper: #fff; }\n' > "$kit/web/tokens.css"
+    printf '<svg xmlns="http://www.w3.org/2000/svg"/>\n' > "$kit/mark/mark.svg"
+    printf '<svg xmlns="http://www.w3.org/2000/svg"/>\n' > "$kit/wordmark/wordmark-caps.svg"
+    printf '# Repository document\n' > "$input"
+    printf 'fake font\n' > "$font"
+    git -C "$repo" init -q -b main
+    git -C "$repo" remote add origin git@github.com:joeseverino/cordon.git
+    git -C "$repo" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+    cat > "$chrome" <<'EOF'
+#!/usr/bin/env bash
+for arg in "$@"; do
+    case "$arg" in
+        --print-to-pdf=*) printf 'fake pdf\n' > "${arg#--print-to-pdf=}" ;;
+    esac
+done
+EOF
+    chmod +x "$chrome"
+
+    run env CHROME_PATH="$chrome" DOCTOPDF_BRAND_KIT="$kit" DOCTOPDF_FONT="$font" DOCTOPDF_KEEP_HTML=1 \
+        "$TOOLS_HOME/bin/doc-to-pdf" "$input" "$pdf"
+    [ "$status" -eq 0 ]
+
+    local html
+    html="$(printf '%s\n' "$output" | sed -n 's/^doc-to-pdf: kept HTML at //p' | head -1)"
+    grep -q '<span class="document-provenance"><a href="https://github.com/joeseverino/cordon/blob/main/docs/README.md">joeseverino/cordon/docs/README.md</a></span>' "$html"
     rm -f "$html"
 }
 
