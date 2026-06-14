@@ -124,7 +124,7 @@ print(json.dumps(out, indent=2) if os.environ["TOOLS_DESC_PRETTY"] == "1" else j
             "$DESCRIBE_SCHEMA_VERSION" "$(json_join "${objs[@]}")" "$siblings")
 
         if [[ -n "$cache_file" ]] && mkdir -p "$cache_dir" 2>/dev/null; then
-            printf '%s\n' "$body" > "$cache_file" 2>/dev/null || true
+            (printf '%s\n' "$body" > "$cache_file") 2>/dev/null || true
         fi
     fi
 
