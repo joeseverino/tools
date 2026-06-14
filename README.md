@@ -657,8 +657,10 @@ nothing). Either way the loop is `<tool> diff` → reconcile the prose →
 
 #### tools describe — the command-surface contract
 
-Every tool emits its command surface as one structured JSON document, and
-three consumers render from that single source: an AI session reads it,
+Every tool emits its command surface as one structured JSON document conforming
+to [**Cordon**](https://github.com/joeseverino/cordon), the language-agnostic
+command-surface contract — this toolchain is Cordon's reference Bash emitter.
+Three consumers render from that single source: an AI session reads it,
 the `--tui` explorer builds a picker from it, and CI guards diff it. This is
 **emit-once, render-many** — a tool declares its surface once in a
 `describe_spec()` (the `desc_*` DSL in `lib/describe.sh`), and *both*

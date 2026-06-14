@@ -268,6 +268,15 @@ cmd_doctor() {
         check "tools self-describe" 0 "no --describe contract: ${desc_missing% }" || fail=1
     fi
 
+    # The vendored Cordon schema (schemas/cordon-v4.json) is the one copy with no
+    # other drift guard — verify it still matches the canonical cordon source.
+    cordon_schema_status
+    case "$CORDON_STATUS" in
+        synced)  check "cordon schema" 1 "schemas/cordon-v4.json matches canonical" ;;
+        drifted) check "cordon schema" 0 "drifted from $CORDON_CANONICAL — re-vendor it" || fail=1 ;;
+        absent)  check_warn "cordon schema" "cordon repo not found (set CORDON_HOME) — can't verify vendored copy" ;;
+    esac
+
     # Symlinks in install dir (top-level tools + lib helpers)
     for name in "${TOOL_NAMES[@]}"; do
         local link="$INSTALL_DIR/$name"
@@ -451,6 +460,18 @@ cmd_check() {
     else
         check "describe schema" 0 "run npm ci (Ajv is required)" || fail=1
     fi
+
+    # Vendored schema vs canonical cordon. The validation above uses the local
+    # copy; this confirms the copy itself hasn't drifted from the source of
+    # truth. Absent cordon (CI for this repo alone) warns, not fails — the copy
+    # is still self-validated above.
+    cordon_schema_status
+    case "$CORDON_STATUS" in
+        synced)  check "cordon schema sync" 1 "schemas/cordon-v4.json matches canonical" ;;
+        drifted) printf '    re-vendor: cp %s schemas/cordon-v4.json\n' "$CORDON_CANONICAL"
+                 check "cordon schema sync" 0 "drifted from $CORDON_CANONICAL" || fail=1 ;;
+        absent)  check_warn "cordon schema sync" "cordon repo not found (set CORDON_HOME) — copy self-validated above" ;;
+    esac
 
     # Lint tracked shell sources only; local config/*.sh copies are
     # user-specific and would make the check non-reproducible.
