@@ -282,7 +282,30 @@ for c in o.get("commands",[]):
 @test "every real tool validates against the committed JSON Schema" {
     run bash -c '"$TOOLS_HOME/bin/tools" describe | node "$TOOLS_HOME/lib/tools/validate-describe.mjs"'
     [ "$status" -eq 0 ]
-    [[ "$output" == *"valid describe contracts: 18"* ]]
+    [[ "$output" == *"valid describe contracts: $(tool_count)"* ]]
+}
+
+@test "diagram is a local write without remote network reach" {
+    run "$TOOLS_HOME/bin/diagram" --describe
+    [ "$status" -eq 0 ]
+    echo "$output" | python3 -c '
+import json,sys
+o=json.load(sys.stdin)
+assert o["effect"] == "local_write"
+assert "network" not in o
+'
+}
+
+@test "tools new exposes the scaffold verification path" {
+    run "$TOOLS_HOME/bin/tools" --describe
+    [ "$status" -eq 0 ]
+    echo "$output" | python3 -c '
+import json,sys
+o=json.load(sys.stdin)
+new=next(c for c in o["commands"] if c["name"] == "new")
+flags={flag for arg in new["args"] for flag in arg.get("flags", [])}
+assert "--verify" in flags
+'
 }
 
 @test "prose is reflowable: validation rejects a paragraph that ends mid-sentence" {

@@ -67,13 +67,16 @@ Every tool emits its command surface as one structured JSON document — the
 - **Effect = the risk signal an agent can't read off the flags — `desc_effect`.**
   Every command (and every leaf tool) carries a *blast-radius* class:
   `read | local_write | vault_write | remote_write | deploy` (escalating), plus
-  the boolean tags `+network` (reaches off-box) and `+interactive` (blocks on a
-  TTY). One line — `desc_effect deploy +network` after a `desc_cmd`, or after
+  the boolean tags `+network` (the requested operation reaches off-box) and
+  `+interactive` (blocks on a TTY). Dependency installation and package-manager
+  cache misses do not count as the command's network effect. One line —
+  `desc_effect deploy +network` after a `desc_cmd`, or after
   `desc_tool` for a leaf — scoped like `desc_opt`. It renders a terse `Effect:`
   line in the focused `-h` (only when non-trivial), a colored chip in `--tui`,
   and rides into the JSON as `effect` / `network` / `interactive`. **Default is
-  `read`** (no mutation, no reach) — declare it on anything that mutates, hits
-  the network, or needs a TTY. The drift guards declare theirs **once** in
+  `read`** (no mutation, no reach) — declare it on anything that mutates,
+  reaches a remote as part of the requested operation, or needs a TTY. The
+  drift guards declare theirs **once** in
   `drift_describe_commands` (show/diff read+network, pull vault_write+network),
   so all four inherit. This is what lets an agent risk-gate `hq restart`
   (`deploy`) vs `vault status` (`read`) before running either.
@@ -246,8 +249,10 @@ it (installed fingerprint vs source).
 ## Conventions (enforced by review, checked by CI)
 
 - New bash tools: scaffold with `tools new <name>` — it emits the canonical
-  skeleton. Every tool sources `lib/init.sh`, uses `msg`/`die`/`header`/
-  `footer` for output, and exits 0 (success/skips), 1 (failure), 2 (usage).
+  skeleton. Add `--verify` to regenerate the derived README/completions and run
+  `tools check --no-bench` immediately after scaffolding. Every tool sources
+  `lib/init.sh`, uses `msg`/`die`/`header`/`footer` for output, and exits 0
+  (success/skips), 1 (failure), 2 (usage).
 - Every tool answers `-h`/`--help` and `--describe` (both from one
   `describe_spec` — see the Command-surface contract above; `tools doctor`
   gates it).
