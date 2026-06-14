@@ -26,9 +26,12 @@ describe_spec() {
     desc_env ADGUARD_IP -- "AdGuard LAN resolver IP (overridden by -a)"
 }
 
-# getopts doesn't see long options; intercept --describe / --help before the loop.
-[[ "${1:-}" == "--describe" ]] && { describe_emit "$@"; exit 0; }
-[[ "${1:-}" == "--help" ]] && { usage; exit 0; }
+# The one unified dispatch line — same as every bash tool. As a leaf (no
+# desc_cmd) it claims only -h/--help/--describe and hands back; lib/describe.sh
+# is bash+zsh safe, so this lone zsh tool routes help from the same engine. The
+# getopts -h arm below still handles -h that isn't the first token (getopts
+# can't see the long options, which is why they must lead).
+desc_help_intercept "$@"
 
 while getopts ":d:n:a:b:h" opt; do
     case $opt in
