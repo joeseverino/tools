@@ -19,7 +19,7 @@ so they can never drift (there is no prose to parse). See
 [`ARCHITECTURE.md`](ARCHITECTURE.md) for where this sits in the repo, and
 [`../AGENTS.md`](../AGENTS.md) for the editing rules.
 
-![emit-once, render-many](diagrams/emit-once.png)
+![the describe pipeline](diagrams/describe-pipeline.png)
 
 ## The DSL
 
