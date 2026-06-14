@@ -18,18 +18,29 @@ of it — the `desc_*` DSL and its renderers; the prose walkthrough is
 decision record: `read_doc('report-emit-once-render-many')`; the Python sibling
 emitter is `severino-vault-mcp`'s `cli_introspect.describe_parser`.)
 
-- **One source, one dispatch line.** A tool defines a single `describe_spec()`
-  (the `desc_*` DSL in `lib/describe.sh`) and calls **`desc_help_intercept "$@"`**
-  first in its dispatch. That one line renders the whole help + machine surface
-  from the spec: bare `-h`/`--help`/no-args → the git-style main screen
-  (`usage()`, a scannable command list + a `Run '<tool> <cmd> -h'` pointer);
-  `--describe` → the JSON; and **`<tool> <cmd> -h` → that command's focused
-  screen** (`usage_command`). No tool hand-routes help, and a help flag can never
-  fall through to run an action (`hq restart -h`, `adguard pull -h`, `site doctor
-  -h` all *render*, never execute). The `case` after it is pure command→action
-  wiring — the only thing not derivable from the spec (`cmd_*` vs `run_npm` vs
-  aliases); `describe.bats` guards that every declared command has a dispatch arm
-  so the two sets can't drift. New tools get the leaf-tool form from `tools new`.
+- **One source, one dispatch line — leaf and subcommand alike.** A tool defines
+  a single `describe_spec()` (the `desc_*` DSL in `lib/describe.sh`) and calls
+  **`desc_help_intercept "$@"`** first in its dispatch. That one line renders the
+  whole help + machine surface from the spec, and **derives the rest from the
+  spec's shape** (does it declare any `desc_cmd`?) so a tool never restates it:
+  `-h`/`--help` → the git-style main screen (`usage()`); `--describe` → the JSON
+  — both universal. For a **subcommand tool** it also serves bare/`help` → main
+  screen and **`<tool> <cmd> -h` → that command's focused screen**
+  (`usage_command`); for a **leaf tool** (no `desc_cmd`) it claims only the
+  unambiguous `-h`/`--help`/`--describe` meta-flags and hands back, because a
+  leaf's bare / `help` invocation is the tool's own to define (`backup` runs,
+  `encrypt` errors with its usage). So a leaf tool with its own options
+  (`encrypt`, `decrypt`, `inbox`, `remember`, `backup`, `open-age`) drops the
+  hand-rolled `--describe)` / `-h)` arms and uses the same one line; adding or
+  removing a `desc_cmd` re-routes dispatch with no second edit. No tool
+  hand-routes help, and a help flag can never fall through to run an action
+  (`hq restart -h`, `adguard pull -h`, `site doctor -h` all *render*, never
+  execute). The `case` after it is pure command→action wiring — the only thing
+  not derivable from the spec (`cmd_*` vs `run_npm` vs aliases); `describe.bats`
+  guards that every declared command has a dispatch arm so the two sets can't
+  drift. New tools get this form from `tools new`. (Lone exception: the zsh
+  `dns-test` self-describes via `getopts` + a `--describe`/`--help` preflight,
+  since `getopts` can't see long options.)
 - **Everything per-command is spec-derived — zero hand-written sub-help, zero
   help heredocs in the toolchain.** After a `desc_cmd`, declare its flags
   (`desc_opt`/`desc_pos`), prose (`desc_para`), and examples (`desc_example`);

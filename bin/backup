@@ -17,12 +17,12 @@ describe_spec() {
     desc_env BACKUPS_HOME -- "Read from ~/.zshrc; backup destination root"
 }
 
+desc_help_intercept "$@"
+
 DRY=0
 NO_COMMIT=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --describe)   describe_emit "$@"; exit 0 ;;
-        -h|--help)    usage; exit 0 ;;
         -n|--dry-run) DRY=1; shift ;;
         --no-commit)  NO_COMMIT=1; shift ;;
         --)           shift; break ;;
