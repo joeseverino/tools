@@ -104,10 +104,11 @@ desc_effect deploy +network          # after a desc_cmd …
 desc_effect local_write              # … or after desc_tool, for a leaf tool
 ```
 
-**Default is `read`** when undeclared; add `desc_effect` to anything that
-mutates, reaches off-box (`+network`), or blocks on a TTY (`+interactive`).
-It renders five ways from the one line: a terse `Effect:` line in the focused
-`-h` (only when non-trivial), `effect` / `network?` / `interactive?` in the JSON
+Every tool and command declares `desc_effect` explicitly, including `read`.
+Missing or duplicate declarations fail closed before help, JSON, or the runtime
+gate can render. It renders five ways from the one line: a terse `Effect:` line
+in the focused `-h` (only when non-trivial), `effect` / `network?` /
+`interactive?` in the JSON
 (`effect` always emitted; the boolean tags only when true, to stay lean), a
 color-coded chip in `--tui`, the field in the scoped lookup below, and — the
 load-bearing one — the **runtime gate**.
@@ -121,8 +122,7 @@ its effect, with zero per-tool wiring. At a TTY it prompts `[y/N]`;
 non-interactive it **fails closed** unless `TOOLS_ASSUME_YES=1` is set (the
 bypass CI and intentional automation use), so a stray `hq ship` / `site publish`
 can't fire by accident, by hand or by an agent. A tool with no `describe_spec`
-declares no effect (defaults to `read`) and is never gated. Covered by
-`site-mcp.bats`.
+has no executable declared surface to gate. Covered by `site-mcp.bats`.
 
 **Declared once where it's shared:** the drift guards declare their effects a
 single time in `drift_describe_commands` (show/diff `read +network`, pull

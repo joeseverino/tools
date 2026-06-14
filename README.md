@@ -60,7 +60,7 @@ tools/
     brand       # Render Joe's brand kits via the branding-engine.
     # Authoring
     remember    # Write a Claude memory file + MEMORY.md index entry in one shot.
-    doc-to-pdf  # Render a Markdown file (with Mermaid) to PDF via the system Chrome, offline.
+    doc-to-pdf  # Render a Markdown file (with Mermaid) to PDF via local Chromium, offline.
     diagram     # Render Mermaid .mmd sources to neighboring PNG files.
   .github/               # CI workflows and repository automation
   archive/               # retired scripts kept for reference
@@ -171,8 +171,8 @@ Umbrella command for the personal CLI toolchain.
 | Invocation | Arguments / options | Effect | Summary |
 |---|---|---|---|
 | `tools status` | `--json` | `read + network` | One-screen health check across vault, inbox, backup, keys |
-| `tools doctor` | `--all`<br>`--live`<br>`--json` | `read` | Verify environment, deps, and installed symlinks |
-| `tools check` | `--no-bench` | `read` | Run the full CI suite locally: lint, tests, bench |
+| `tools doctor` | `--all`<br>`--live`<br>`--json` | `read + network` | Verify environment, deps, and installed symlinks |
+| `tools check` | `--no-bench` | `local_write` | Run the full CI suite locally: lint, tests, bench |
 | `tools new <name>` | `<name>`<br>`--drift`<br>`--verify` | `local_write` | Scaffold a new tool in bin/ with the house conventions |
 | `tools install` | — | `local_write` | Create symlinks in $INSTALL_DIR for every tool |
 | `tools key [cache|forget|status|test]` | `[cache\|forget\|status\|test]` | `local_write + interactive` | Cache / forget / test the age key passphrase in Keychain |
@@ -440,7 +440,7 @@ Public jseverino.com Astro site workflow.
 |---|---|---|---|
 | `site status` | — | `read` | Show repo location, git state, and build-output state |
 | `site sync` | — | `local_write` | Sync public pages/writeups from the vault into the site repo |
-| `site check` | — | `read` | Run Astro diagnostics |
+| `site check` | — | `local_write` | Run Astro diagnostics |
 | `site contrast` | — | `read` | Compute WCAG ratios for every text/background pair in base.css |
 | `site parity` | — | `read` | Assert vault Frontmatter Schema, Zod, and MCP agree on writeup fields |
 | `site build` | — | `local_write` | Run the full Astro build |
@@ -459,12 +459,12 @@ Public jseverino.com Astro site workflow.
 | `site verify <slug>` | `<slug>` | `read + network` | Post-publish live check: page status, OG image, tag pages, and home placement |
 | `site diagnose` | Delegated: the site repo's `npm run diagnose` — run it with --help for flags (--fast, --json) | `read` | The collect-all gate: run every audit and report all failures in one pass |
 | `site release <version>` | `<version>`<br>`--ship` | `deploy + network` | Bump package.json, run publish:check, commit + signed tag, push, create the GitHub release |
-| `site test` | `--visual`<br>`--ui`<br>`--update` | `read` | Run the Playwright end-to-end suite |
+| `site test` | `--visual`<br>`--ui`<br>`--update` | `local_write` | Run the Playwright end-to-end suite |
 | `site doctor` | — | `read + network` | Pre-flight health check: CLI/npm drift, vault-mcp install, security, contrast, parity, type check, audit. No build |
 | `site reinstall-mcp` | — | `local_write` | Reinstall the severino-vault-mcp package from source |
 | `site new-writeup <slug>` | `<slug>` | `vault_write` | Scaffold a new vault writeup folder from the template (starts published: false) |
 | `site seo <page>` | `<page>`<br>`-r, --result` | `read` | Preview the Google-style search result snippet for a built page |
-| `site dev` | `--drafts` | `read` | Start the local Astro dev server |
+| `site dev` | `--drafts` | `local_write + interactive` | Start the local Astro dev server |
 | `site open` | — | `read` | Open the local dev URL in the browser |
 | `site compare [path]` | `[path]`<br>`--dev <URL>`<br>`--live <URL>`<br>`--mobile`<br>`--desktop`<br>`--compact`<br>`--expanded`<br>`--link-scroll`<br>`--no-link-scroll`<br>`--scroll-mode <exact\|ratio>`<br>`--mirror-links`<br>`--no-mirror-links`<br>`--split <PERCENT>`<br>`--swap`<br>`--solo`<br>`--split-view`<br>`--overlay`<br>`--overlay-diff`<br>`--focus <dev\|live>`<br>`--notes`<br>`--note <TEXT>`<br>`--notes-out <FILE>`<br>`--clear-notes`<br>`--brand <NAME>`<br>`--http`<br>`--no-open` | `read + interactive` | Open a resizable dev-vs-live browser comparison |
 | `site og` | — | `local_write` | Regenerate the Open Graph social card (public/assets/og/) |
@@ -568,7 +568,11 @@ remember --forget use-rg-and-fd
 
 #### `doc-to-pdf`
 
-Render a Markdown file (with Mermaid) to PDF via the system Chrome, offline.
+Render a Markdown file (with Mermaid) to PDF via local Chromium, offline.
+
+Produces a branded document using the Joe Severino kit and embedded Inter variable font. The kit resolves from DOCTOPDF_BRAND_KIT, then BRAND_HOME, then CODE_HOME/Assets/severino-brand.
+
+Markdown image references are consumed unchanged. Rare inline Mermaid fences are rendered through the diagram tool, so both commands share one Mermaid implementation and brand configuration.
 
 Usage: `doc-to-pdf <input.md> [output.pdf]`
 
@@ -585,7 +589,7 @@ Render Mermaid .mmd sources to neighboring PNG files.
 
 Each path may be an .mmd file or a directory. Directories render their top-level .mmd files.
 
-Rendering uses Mermaid CLI 11.15.0 with the toolchain's established settings: PNG output, 1100px width, 2x scale, and a white background.
+Rendering uses Mermaid CLI 11.15.0 with Joe Severino brand tokens, PNG output, 1100px width, 3x scale, and a white background. Set DIAGRAM_BRAND_KIT to override the kit directory.
 
 Usage: `diagram <path>...`
 

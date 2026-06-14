@@ -15,6 +15,7 @@ describe_spec() {
     desc_tool "hq" "Sync vault frontmatter to Severino HQ, plus routine HQ deployment ops."
     desc_inventory "Integrations" 130
     desc_synopsis "hq <command> [args]"
+    desc_effect read
     desc_para "Severino HQ glue. Reads YAML frontmatter from the vault and upserts the HQ docs index. Also wraps the routine ssh + docker compose calls for managing the HQ deployment."
     # Tool-level examples: declared at global scope (before the first desc_cmd),
     # like global desc_opt/desc_pos — otherwise they'd attach to the last command.
@@ -23,6 +24,7 @@ describe_spec() {
     desc_example "hq doctor"                  -- "find docs missing frontmatter"
     desc_example "hq export 2026"             -- "download year-summary-2026.md"
     desc_cmd manifest  -- "Print the manifest JSON (frontmatter from every doc) to stdout — for inspection or piping elsewhere"
+    desc_effect read
 
     desc_cmd sync      -- "Pipe the manifest into HQ's import_docs_manifest; upserts by doc_id, safe to re-run"
     desc_effect remote_write +network
@@ -30,6 +32,7 @@ describe_spec() {
     desc_opt --no-update -- "Only create new records; never update existing ones"
 
     desc_cmd doctor    -- "Report vault docs missing or with invalid frontmatter, and whether HQ's last-synced manifest is stale"
+    desc_effect read
 
     desc_cmd schema    -- "Regenerate HQ's docs_index/schema.json from the installed MCP (the canonical frontmatter contract)"
     desc_effect local_write
@@ -62,6 +65,7 @@ describe_spec() {
     desc_effect deploy +network
 
     desc_cmd open      -- "Open \$HQ_URL in the browser"
+    desc_effect read
 
     desc_cmd shell     -- "ssh -t into the HQ Django shell (poke the ORM)"
     desc_effect remote_write +network +interactive

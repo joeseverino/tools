@@ -211,6 +211,7 @@ drift_describe_commands() {
     # Effects are declared once here and inherited by every guard (adguard,
     # cf-dns, ts-acl, nginx) — the zero-duplication payoff: show/diff read the
     # live API (network), pull rewrites the vault mirror block (vault_write).
+    desc_effect read
     desc_cmd show -- "Fetch and print the live state (normalized, sorted JSON)"
     desc_effect read +network
     desc_cmd diff -- "Diff live vs the vault mirror; exit 1 on drift"
