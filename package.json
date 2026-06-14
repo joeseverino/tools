@@ -5,8 +5,8 @@
   "type": "module",
   "description": "Shared Node dependencies for the Severino toolchain's node-based commands (doc-to-pdf, etc.). Tool implementations live under lib/<tool>/ and resolve these via Node's upward node_modules lookup.",
   "dependencies": {
-    "ajv": "8.17.1",
-    "markdown-it": "14.2.0",
-    "mermaid": "11.15.0"
+    "ajv": "8.20.0",
+    "highlight.js": "11.11.1",
+    "markdown-it": "14.2.0"
   }
 }
