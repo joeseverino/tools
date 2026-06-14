@@ -29,3 +29,19 @@ flowchart TB
 
     enum["describe.bats<br/>guards every effect against the enum"]
     enum -.->|"keeps the hand-declared data honest"| j
+
+    %% semantic heat ramp: cool (safe) → hot (irreversible). The one place hue = meaning.
+    classDef e_read fill:#DCFCE7,stroke:#16A34A,color:#0b0620;
+    classDef e_lw   fill:#ECFCCB,stroke:#65A30D,color:#0b0620;
+    classDef e_vw   fill:#FEF3C7,stroke:#D97706,color:#0b0620;
+    classDef e_rw   fill:#FFEDD5,stroke:#EA580C,color:#0b0620;
+    classDef e_dep  fill:#FEE2E2,stroke:#DC2626,color:#0b0620;
+    class r e_read;
+    class lw e_lw;
+    class vw e_vw;
+    class rw e_rw;
+    class dep e_dep;
+
+    %% the decision pivot — styled by .anchor in the shared theme
+    classDef anchor stroke-width:2px;
+    class gate anchor;
