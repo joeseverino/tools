@@ -54,7 +54,7 @@ EOF
     grep -q 'source document.md' "$html"
     grep -q 'counter(page).*counter(pages)' "$html"
     grep -q '<title>source document</title>' "$html"
-    grep -q '<p class="document-provenance">source document.md</p>' "$html"
+    grep -q '<span class="document-provenance">source document.md</span>' "$html"
     grep -q 'font-family: "Inter"' "$html"
     grep -q 'data:font/woff2;base64' "$html"
     grep -q 'white-space: pre-wrap' "$html"
@@ -101,7 +101,7 @@ EOF
 
     local html
     html="$(printf '%s\n' "$output" | sed -n 's/^doc-to-pdf: kept HTML at //p' | head -1)"
-    grep -q '<p class="document-provenance"><a href="https://github.com/joeseverino/cordon/blob/main/docs/README.md">joeseverino/cordon/docs/README.md</a></p>' "$html"
+    grep -q '<span class="document-provenance"><a href="https://github.com/joeseverino/cordon/blob/main/docs/README.md">joeseverino/cordon/docs/README.md</a></span>' "$html"
     rm -f "$html"
 }
 
