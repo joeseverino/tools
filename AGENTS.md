@@ -157,8 +157,13 @@ type; both stay in sync because there is only one implementation.
 
 ## Repo conventions
 
-- **Solo-authored. Work on `main`.** No `Co-Authored-By` / "Claude" trailers in
-  commits, no AI attribution in messages. Commit/push only when asked.
+- **Solo-authored, but never commit to `main` — branch → PR.** Branch from a
+  freshly fetched `origin/main` (`git fetch origin && git checkout -b <name>
+  origin/main`), never from a stale local tree (multiple sessions touch these
+  repos, so local `main` lags). Push, open a PR, and hand back only on green CI
+  with no unresolved review comments; Joe approves or comments, then it merges.
+  No `Co-Authored-By` / "Claude" trailers in commits, no AI attribution in
+  messages. Commit/push/PR only when asked.
 - After meaningful vault-affecting work, the operator runs `hq sync`. This is
   checked, not remembered: `hq sync` records the shipped manifest hash at
   `${XDG_STATE_HOME:-~/.local/state}/severino-tools/hq-sync.json`, and
