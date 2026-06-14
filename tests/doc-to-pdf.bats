@@ -81,6 +81,7 @@ EOF
 :root {
   --brand-accent: #123456;
   --brand-deep: #102030;
+  --brand-on-accent: #ffffff;
   --brand-ink: #111111;
   --brand-paper: #ffffff;
 }
