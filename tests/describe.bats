@@ -22,6 +22,7 @@ render() {
             desc_tool "demo" "A demo tool."
             desc_inventory "Test" 10
             desc_synopsis "demo [options] <file>..."
+            desc_effect read
             desc_para "First paragraph."
             desc_example "demo a.txt" -- "the common case"
             desc_opt -c --copy             -- "Keep the original"
@@ -54,13 +55,13 @@ assert o["schema_version"] == 4
 assert o["name"] == "demo"
 assert o["description"] == "A demo tool."
 assert o["group"] == "Test" and o["order"] == 10
-assert o["effect"] == "read"   # tool-level default for a command tool
+assert o["effect"] == "read"
 for k in ("global_options","positionals","commands"):
     assert isinstance(o[k], list), k
 '
 }
 
-@test "effect triple: default read, declared class + network/interactive tags" {
+@test "effect triple: explicit class + network/interactive tags" {
     run render json
     [ "$status" -eq 0 ]
     echo "$output" | python3 -c '
@@ -72,6 +73,38 @@ assert run["network"] is True
 # interactive was not declared, so the lean tag is omitted entirely
 assert "interactive" not in run
 '
+}
+
+@test "missing effect declarations fail closed before rendering" {
+    run bash -c '
+        source "$TOOLS_HOME/lib/common.sh"
+        source "$TOOLS_HOME/lib/describe.sh"
+        describe_spec() {
+            desc_tool demo "A demo tool."
+            desc_inventory Test 10
+            desc_effect read
+            desc_cmd mutate -- "Mutate something"
+        }
+        describe_emit
+    '
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"'demo mutate' must declare desc_effect explicitly"* ]]
+}
+
+@test "duplicate effect declarations fail closed before rendering" {
+    run bash -c '
+        source "$TOOLS_HOME/lib/common.sh"
+        source "$TOOLS_HOME/lib/describe.sh"
+        describe_spec() {
+            desc_tool demo "A demo tool."
+            desc_inventory Test 10
+            desc_effect read
+            desc_effect local_write
+        }
+        describe_emit
+    '
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"'demo' declares desc_effect more than once"* ]]
 }
 
 @test "effect line shows in focused help only when non-trivial" {
@@ -230,7 +263,7 @@ print("\n".join(sorted(toks)))
 @test "engine is byte-identical under bash and zsh" {
     spec='
         source "$TOOLS_HOME/lib/common.sh"; source "$TOOLS_HOME/lib/describe.sh"
-        describe_spec(){ desc_tool t d; desc_opt -d X -- h; desc_cmd c -- s; desc_opt --foo "{a,b}" -- hh; }
+        describe_spec(){ desc_tool t d; desc_effect read; desc_opt -d X -- h; desc_cmd c -- s; desc_effect read; desc_opt --foo "{a,b}" -- hh; }
         describe_emit'
     bash_out=$(bash -c "$spec")
     if command -v zsh >/dev/null 2>&1; then
@@ -239,6 +272,42 @@ print("\n".join(sorted(toks)))
     else
         skip "zsh not installed"
     fi
+}
+
+@test "desc_help_intercept routes help byte-identically under bash and zsh" {
+    # The one dispatch line, not just describe_emit, must be bash+zsh safe — it
+    # is what the lone zsh tool (dns-test) now calls. Exercise the leaf shape
+    # (no desc_cmd → -h renders usage, then the no-arg path hits the effect
+    # gate and hands back) under both shells and assert byte-parity.
+    spec='
+        source "$TOOLS_HOME/lib/common.sh"; source "$TOOLS_HOME/lib/describe.sh"
+        describe_spec(){ desc_tool t d; desc_inventory G 1; desc_effect read +network
+                         desc_synopsis "t [-d X]"; desc_opt -d X -- h; }
+        desc_help_intercept -h'
+    bash_out=$(bash -c "$spec")
+    if command -v zsh >/dev/null 2>&1; then
+        zsh_out=$(zsh -c "$spec")
+        [ "$bash_out" = "$zsh_out" ]
+    else
+        skip "zsh not installed"
+    fi
+}
+
+@test "desc_help_intercept's no-spec early return holds under zsh (declare -f, not -F)" {
+    # Regression: zsh's `declare -F` means *float* — it always succeeds and
+    # declares a float param, so the buggy guard never returned early and then
+    # ran an undefined describe_spec. With no describe_spec defined, the leaf
+    # no-arg path (gate + hand back) and any routed arg must return 0, emit
+    # nothing, and leave no `describe_spec` parameter behind.
+    command -v zsh >/dev/null 2>&1 || skip "zsh not installed"
+    run zsh -c '
+        source "$TOOLS_HOME/lib/common.sh"; source "$TOOLS_HOME/lib/describe.sh"
+        usage(){ :; }                      # hermetic: no spec, like lib/drift.sh
+        desc_help_intercept somecmd; rc=$?
+        [[ -z "${describe_spec+x}" ]] || { echo "leaked float param"; exit 3; }
+        exit $rc'
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
 }
 
 @test "a real tool self-describes (encrypt)" {

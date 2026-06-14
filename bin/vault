@@ -8,11 +8,13 @@ describe_spec() {
     desc_tool "vault" "Operations on the vault git repo."
     desc_inventory "Vault" 60
     desc_synopsis "vault <command>"
+    desc_effect read
     desc_cmd sync   -- "Pull and push the vault repo"
     desc_effect remote_write +network
     desc_cmd status -- "Working tree, inbox count, remote sync state, and whether doc metadata changed since the last hq sync"
     desc_effect read +network
     desc_cmd inbox  -- "List notes currently in the inbox"
+    desc_effect read
     desc_env NOTES_HOME -- "Read from ~/.zshrc; resolves VAULT"
     desc_env VAULT      -- "Per-invocation override for the vault path"
     desc_env INBOX_DIR  -- "Per-invocation override for the inbox folder"

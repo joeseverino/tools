@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://jseverino.com/schemas/cordon-v4.json",
-  "$comment": "Canonical source: the cordon repo at schema/cordon-v4.json. Published copies (jseverino.com, consumer repos) are derived from this file — edit here.",
+  "$comment": "Canonical home: https://jseverino.com/schemas/cordon-v4.json (the value of $id above) — the live, immutable URL this schema_version pins. The copy in the cordon repo at schema/cordon-v4.json is the byte-identical development mirror; reference it for validation, since the live URL is bot-gated from CI. Schemas are frozen per version: revise by publishing a new cordon-vN.json, never by editing a published version in place.",
   "title": "Cordon command-surface contract (schema_version 4)",
   "type": "object",
   "additionalProperties": false,

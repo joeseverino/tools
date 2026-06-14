@@ -38,9 +38,11 @@ emitter is `severino-vault-mcp`'s `cli_introspect.describe_parser`.)
   execute). The `case` after it is pure command→action wiring — the only thing
   not derivable from the spec (`cmd_*` vs `run_npm` vs aliases); `describe.bats`
   guards that every declared command has a dispatch arm so the two sets can't
-  drift. New tools get this form from `tools new`. (Lone exception: the zsh
-  `dns-test` self-describes via `getopts` + a `--describe`/`--help` preflight,
-  since `getopts` can't see long options.)
+  drift. New tools get this form from `tools new`. The lone zsh tool,
+  `dns-test`, uses this same one dispatch line (`lib/describe.sh` is bash+zsh
+  safe); it keeps `getopts` only for its own short options, and a `getopts -h`
+  arm for an `-h` that isn't the leading token, since `getopts` can't see the
+  long meta-flags.
 - **Everything per-command is spec-derived — zero hand-written sub-help, zero
   help heredocs in the toolchain.** After a `desc_cmd`, declare its flags
   (`desc_opt`/`desc_pos`), prose (`desc_para`), and examples (`desc_example`);
@@ -85,10 +87,11 @@ emitter is `severino-vault-mcp`'s `cli_introspect.describe_parser`.)
   / `+interactive` tags. The ladder's definitions and the
   network-vs-dependency-install rule live in
   [cordon](https://github.com/joeseverino/cordon#the-effect-ladder) — don't
-  restate them here. Declare it in one line — `desc_effect deploy +network` after
-  a `desc_cmd`, or after `desc_tool` for a leaf — scoped like `desc_opt`.
-  **Default is `read`**; declare it on anything that mutates, reaches off-box, or
-  needs a TTY. It renders a terse `Effect:` line in the focused `-h`, a colored
+  restate them here. Declare it explicitly in one line, including reads —
+  `desc_effect deploy +network` after a `desc_cmd`, or after `desc_tool` for a
+  leaf — scoped like `desc_opt`. Missing or duplicate declarations fail closed
+  before rendering or gating, so an omitted classification can never become an
+  inferred read. It renders a terse `Effect:` line in the focused `-h`, a colored
   chip in `--tui`, and rides into the JSON. The drift guards declare theirs
   **once** in `drift_describe_commands` (show/diff read+network, pull
   vault_write+network), so all four inherit. This is what lets an agent risk-gate

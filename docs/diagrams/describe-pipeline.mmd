@@ -39,3 +39,7 @@ flowchart TB
     fed <-.->|"sibling emitter · reads effect to gate"| mcp
     fed -.->|"effect per command"| ai
     mcp -.->|"describe_commands"| ai
+
+    %% the one engine every declaration flows through — styled by .anchor in the shared theme
+    classDef anchor stroke-width:2px;
+    class run anchor;

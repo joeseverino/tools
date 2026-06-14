@@ -22,6 +22,7 @@ describe_spec() {
     desc_tool "site" "Public jseverino.com Astro site workflow."
     desc_inventory "Integrations" 140
     desc_synopsis "site <command>"
+    desc_effect read
     # One spec, every view. Each command's flags/args (desc_opt/desc_pos) AND its
     # prose/examples (desc_para/desc_example) live here, so the main -h, the
     # focused `site <cmd> -h`, the --describe JSON, and --tui all render from it —
@@ -29,11 +30,15 @@ describe_spec() {
     # draft-alt, diagnose) carry only a summary: their flags are owned by the site
     # repo's package.json scripts (run those with --help for the live list).
     desc_cmd status         -- "Show repo location, git state, and build-output state"
+    desc_effect read
     desc_cmd sync           -- "Sync public pages/writeups from the vault into the site repo"
     desc_effect local_write
     desc_cmd check          -- "Run Astro diagnostics"
+    desc_effect local_write
     desc_cmd contrast       -- "Compute WCAG ratios for every text/background pair in base.css"
+    desc_effect read
     desc_cmd parity         -- "Assert vault Frontmatter Schema, Zod, and MCP agree on writeup fields"
+    desc_effect read
     desc_cmd build          -- "Run the full Astro build"
     desc_effect local_write
     desc_cmd publish        -- "Ship every change: gate published writeups, hq sync, build + audits, auto-commit, push, then verify each affected writeup live"
@@ -43,6 +48,7 @@ describe_spec() {
     desc_cmd sign-security  -- "Clear-sign public/.well-known/security.txt with the security@ key"
     desc_effect local_write +interactive
     desc_cmd check-security -- "Verify signature, required fields, Expires, and WKD file"
+    desc_effect read
     desc_cmd scaffold-primer -- "Scaffold a new 04 Reference/ primer with slim frontmatter"
     desc_effect vault_write
     desc_delegate "the site repo's \`npm run scaffold:primer\` — run it with --help for flags"
@@ -60,9 +66,11 @@ describe_spec() {
     desc_pos slug           -- "Writeup slug to highlight in the publish run"
     desc_para "The same gate as \`site publish\` validates every published writeup once before any sync, build, commit, or push. Requires the severino-vault-mcp console script on PATH."
     desc_cmd validate       -- "Run the writeup publish gate standalone — report only, no build/commit"
+    desc_effect read
     desc_pos slug           -- "Writeup slug to gate-check"
     desc_opt --draft        -- "Tolerate the published / published_at blockers so a draft can be gate-checked mid-authoring"
     desc_cmd tech           -- "List technology slugs from the vault catalog, filtered when a query is given"
+    desc_effect read
     desc_pos query +optional -- "Filter by slug, label, or group (case-insensitive)"
     desc_para "Catalog source: 06 Pages/_technology-groups.md. Featured slugs surface in the home-page cloud."
     desc_cmd featured       -- "Show the home-page featured order, or move one writeup and renumber automatically"
@@ -80,12 +88,14 @@ describe_spec() {
     desc_pos slug           -- "Writeup slug to verify on the live site"
     desc_para "Checks the live site: /portfolio/<slug>/ is 200, the og:image resolves, every tag page lists it, and the home page shows it when featured. Run ~30s after publishing (Cloudflare rebuild)."
     desc_cmd diagnose       -- "The collect-all gate: run every audit and report all failures in one pass"
+    desc_effect read
     desc_delegate "the site repo's \`npm run diagnose\` — run it with --help for flags (--fast, --json)"
     desc_cmd release        -- "Bump package.json, run publish:check, commit + signed tag, push, create the GitHub release"
     desc_effect deploy +network
     desc_pos version        -- "Target version, e.g. 1.4.0"
     desc_opt --ship         -- "Execute the release (dry-run prints the plan and stops without it)"
     desc_cmd test           -- "Run the Playwright end-to-end suite"
+    desc_effect local_write
     desc_opt --visual       -- "Run only the visual-regression specs"
     desc_opt --ui           -- "Open Playwright's interactive UI mode"
     desc_opt --update       -- "Update the visual baselines"
@@ -98,14 +108,17 @@ describe_spec() {
     desc_pos slug           -- "Lowercase-kebab-case slug; becomes the /portfolio/<slug>/ URL path"
     desc_para "Creates 05 Writeups/<slug>/index.md (published: false) and an images/ folder; stays out of the build until you set published: true."
     desc_cmd seo            -- "Preview the Google-style search result snippet for a built page"
+    desc_effect read
     desc_pos page           -- "Full URL, domain, absolute path, page slug, or writeup slug"
     desc_opt -r --result    -- "Show only the Google-style result preview"
     desc_para "Reads dist.nosync — run \`site build\` first if the page is missing."
     desc_example "site seo portfolio"
     desc_example "site seo --result architecting-a-custom-detection-engine"
     desc_cmd dev            -- "Start the local Astro dev server"
+    desc_effect local_write +interactive
     desc_opt --drafts       -- "Sync and render published: false content for local preview (never in a build)"
     desc_cmd open           -- "Open the local dev URL in the browser"
+    desc_effect read
     desc_cmd compare        -- "Open a resizable dev-vs-live browser comparison"
     desc_effect read +interactive
     desc_pos path +optional -- "Route to compare (default: /)"
