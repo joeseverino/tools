@@ -1,6 +1,28 @@
 # shellcheck shell=bash
 # Cross-repo command-surface aggregation for `tools describe`.
 
+# cordon_schema_status — verify the vendored command-surface schema against its
+# canonical source. schemas/cordon-v4.json is copied verbatim from the cordon
+# repo (the single source of the contract); this is the one copy with no other
+# drift guard, so resolve the canonical schema (CORDON_HOME, else the sibling
+# checkout) and diff it. Sets two globals (not echoed — command substitution
+# would drop a plain assignment):
+#   CORDON_STATUS     synced | drifted | absent
+#   CORDON_CANONICAL  the canonical path it compared against
+# Re-vendor on drift: cp "$CORDON_CANONICAL" schemas/cordon-v4.json
+# shellcheck disable=SC2034  # both globals are read by callers in bin/tools
+cordon_schema_status() {
+    local vendored="$TOOLS_HOME/schemas/cordon-v4.json"
+    CORDON_CANONICAL="${CORDON_HOME:-$TOOLS_HOME/../cordon}/schema/cordon-v4.json"
+    if [[ ! -f "$CORDON_CANONICAL" ]]; then
+        CORDON_STATUS="absent"
+    elif cmp -s "$vendored" "$CORDON_CANONICAL"; then
+        CORDON_STATUS="synced"
+    else
+        CORDON_STATUS="drifted"
+    fi
+}
+
 cmd_describe() {
     local pretty=0 repos=0 tui=0 only="" only_cmd=""
     while [[ $# -gt 0 ]]; do
