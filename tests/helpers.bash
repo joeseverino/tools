@@ -52,3 +52,11 @@ encrypt_bin() { "$TOOLS_HOME/bin/encrypt" "$@"; }
 decrypt_bin() { "$TOOLS_HOME/bin/decrypt" "$@"; }
 remember_bin() { "$TOOLS_HOME/bin/remember" "$@"; }
 diagram_bin() { "$TOOLS_HOME/bin/diagram" "$@"; }
+
+tool_count() {
+    local count=0 file
+    for file in "$TOOLS_HOME"/bin/*; do
+        [[ -f "$file" && -x "$file" ]] && count=$((count + 1))
+    done
+    printf '%s' "$count"
+}

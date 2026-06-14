@@ -49,6 +49,7 @@ describe_spec() {
     desc_effect local_write
     desc_pos name     -- "Name of the new tool (creates bin/<name>)"
     desc_opt --drift  -- "Scaffold a drift-guard tool instead (show/diff/pull, with get_token/fetch_live/normalize + a config template)"
+    desc_opt --verify -- "Generate derived surfaces and run the full non-benchmark check after scaffolding"
 
     desc_cmd install  -- "Create symlinks in \$INSTALL_DIR for every tool"
     desc_effect local_write
@@ -514,15 +515,16 @@ cmd_check() {
 # ---------- new (scaffold a tool with the house conventions) ----------
 
 cmd_new() {
-    local name="" drift=0
+    local name="" drift=0 verify=0
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --drift)    drift=1; shift ;;
+            --verify)   verify=1; shift ;;
             -*)         die_unknown option "$1" new ;;
             *)          name="$1"; shift ;;
         esac
     done
-    [[ -n "$name" ]] || die "usage" "tools new <name> [--drift] (try -h)" 2
+    [[ -n "$name" ]] || die "usage" "tools new <name> [--drift] [--verify] (try -h)" 2
     [[ "$name" =~ ^[a-z][a-z0-9-]*$ ]] || die "usage" "name must be lowercase letters, digits, dashes" 2
     local target="$TOOLS_HOME/bin/$name"
     [[ -e "$target" ]] && die "error" "bin/$name already exists"
@@ -541,7 +543,7 @@ process.stdin.on("end", () => {
 ')
 
     if (( drift )); then
-        new_drift "$name" "$prefix" "$target" "$order"
+        new_drift "$name" "$prefix" "$target" "$order" "$verify"
         return 0
     fi
 
@@ -584,15 +586,22 @@ EOF
     echo
     msg "$GREEN" "created" "bin/$name"
     msg "$DIM"   "next"    "1. implement it (tool-specific files go in lib/$name/)"
-    msg "$DIM"   "next"    "2. tools generate && tools install"
-    msg "$DIM"   "next"    "3. tools check"
+    if (( verify )); then
+        msg "$DIM" "verify" "generating surfaces and running tools check --no-bench"
+        cmd_generate all
+        cmd_check --no-bench
+        msg "$DIM" "next" "tools install"
+    else
+        msg "$DIM" "next" "2. tools generate && tools install"
+        msg "$DIM" "next" "3. tools check"
+    fi
     echo
 }
 
 # Scaffold a drift-guard tool + its config. __NAME__ / __PREFIX__ are filled in
 # after the heredocs are written (the heredocs are quoted, so nothing expands).
 new_drift() {
-    local name="$1" prefix="$2" target="$3" order="$4"
+    local name="$1" prefix="$2" target="$3" order="$4" verify="${5:-0}"
 
     cat > "$target" <<'EOF'
 #!/usr/bin/env bash
@@ -692,8 +701,16 @@ EOF
     msg "$GREEN" "created" "bin/$name (drift guard) + config/$name.sh"
     msg "$DIM"   "next"    "1. fill the TODOs: API base, get_token keys, fetch_live endpoint, normalize jq"
     msg "$DIM"   "next"    "2. set CREDS / VAULT_DOC / VAULT_HEADING in config/$name.sh"
-    msg "$DIM"   "next"    "3. tools generate; seed the vault block via: $name pull"
-    msg "$DIM"   "next"    "4. tools install && tools check"
+    if (( verify )); then
+        msg "$DIM" "verify" "generating surfaces and running tools check --no-bench"
+        cmd_generate all
+        cmd_check --no-bench
+        msg "$DIM" "next" "3. seed the vault block via: $name pull"
+        msg "$DIM" "next" "4. tools install"
+    else
+        msg "$DIM" "next" "3. tools generate; seed the vault block via: $name pull"
+        msg "$DIM" "next" "4. tools install && tools check"
+    fi
     echo
 }
 
