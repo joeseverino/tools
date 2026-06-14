@@ -60,7 +60,7 @@ tools/
     brand       # Render Joe's brand kits via the branding-engine.
     # Authoring
     remember    # Write a Claude memory file + MEMORY.md index entry in one shot.
-    doc-to-pdf  # Render a Markdown file (with Mermaid) to PDF via the system Chrome, offline.
+    doc-to-pdf  # Render a Markdown file (with Mermaid) to PDF via local Chromium, offline.
     diagram     # Render Mermaid .mmd sources to neighboring PNG files.
   .github/               # CI workflows and repository automation
   archive/               # retired scripts kept for reference
@@ -568,7 +568,9 @@ remember --forget use-rg-and-fd
 
 #### `doc-to-pdf`
 
-Render a Markdown file (with Mermaid) to PDF via the system Chrome, offline.
+Render a Markdown file (with Mermaid) to PDF via local Chromium, offline.
+
+Produces a branded document using the Joe Severino kit. The kit resolves from DOCTOPDF_BRAND_KIT, then BRAND_HOME, then CODE_HOME/Assets/severino-brand.
 
 Usage: `doc-to-pdf <input.md> [output.pdf]`
 
