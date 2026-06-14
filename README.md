@@ -173,7 +173,7 @@ Umbrella command for the personal CLI toolchain.
 | `tools status` | `--json` | `read + network` | One-screen health check across vault, inbox, backup, keys |
 | `tools doctor` | `--all`<br>`--live`<br>`--json` | `read` | Verify environment, deps, and installed symlinks |
 | `tools check` | `--no-bench` | `read` | Run the full CI suite locally: lint, tests, bench |
-| `tools new <name>` | `<name>`<br>`--drift` | `local_write` | Scaffold a new tool in bin/ with the house conventions |
+| `tools new <name>` | `<name>`<br>`--drift`<br>`--verify` | `local_write` | Scaffold a new tool in bin/ with the house conventions |
 | `tools install` | — | `local_write` | Create symlinks in $INSTALL_DIR for every tool |
 | `tools key [cache|forget|status|test]` | `[cache\|forget\|status\|test]` | `local_write + interactive` | Cache / forget / test the age key passphrase in Keychain |
 | `tools watch [enable|disable|status|run-now]` | `[enable\|disable\|status\|run-now]` | `local_write` | Manage the optional launchd auto-sync agent (off by default) |
@@ -593,7 +593,7 @@ Usage: `diagram <path>...`
 |---|---|
 | `<path>...` | Mermaid source file or directory |
 
-Effect: `local_write + network`
+Effect: `local_write`
 
 **Examples**
 
@@ -635,6 +635,9 @@ instead (the `ts-acl` / `cf-dns` / `adguard` / `nginx` shape): `show` /
 `vault_block` already wired, plus a matching `config/<name>.sh` — fill in
 the TODOs (endpoint, creds key, jq projection) and seed the vault block
 with `<name> pull`.
+
+Add `--verify` to either scaffold command to regenerate derived surfaces
+and run `tools check --no-bench`.
 
 A successful `pull` writes the regenerated block through the
 [`severino-vault-mcp`](https://github.com/joeseverino/severino-vault-mcp)

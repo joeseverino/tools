@@ -104,9 +104,11 @@ desc_effect local_write              # … or after desc_tool, for a leaf tool
 - **class** — `read | local_write | vault_write | remote_write | deploy`
   (escalating). **Default is `read`**; declare it on anything that mutates,
   reaches off-box, or blocks on a TTY.
-- **`+network`** — touches a remote / API / SSH. Not derivable from the class
-  (a `read` `diff` over the network is real; a `vault_write` `pull` over the
-  network is too).
+- **`+network`** — the requested operation touches a remote / API / SSH. A
+  package-manager cache miss or dependency installation does not make an
+  otherwise local operation networked. Not derivable from the class (a `read`
+  `diff` over the network is real; a `vault_write` `pull` over the network is
+  too).
 - **`+interactive`** — blocks on a TTY (prompts, `ssh -t`, a full-screen UI).
 
 It renders five ways from the one line: a terse `Effect:` line in the focused

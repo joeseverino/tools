@@ -127,7 +127,7 @@ tui() { node "$TOOLS_HOME/lib/tools/describe-tui.mjs"; }
     export DESCRIBE_TUI_KEYS='slash,s,i,t,e,enter,esc'
     run tui
     [ "$status" -eq 0 ]
-    [[ "$output" == *"TOOLS (18)"* ]]
+    [[ "$output" == *"TOOLS ($(tool_count))"* ]]
 }
 
 @test "replay: short terminals keep the cursor and footer on screen" {
