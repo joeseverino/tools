@@ -1,3 +1,13 @@
+# The entire CI surface of this repo. All the plumbing — checkout, tool setup,
+# pinned action SHAs, running the gate, surfacing the report — lives once in
+# cordon's reusable gate, which runs cordon's checks engine over this repo. The
+# engine auto-detects the stack and runs the matching catalog checks (here:
+# shellcheck — shebang-aware, so it skips this repo's zsh tools — and the bats
+# suite) folded with cordon's invariants — so this repo needs no cordon.checks.json
+# at all. This repo runs on macOS (its suite uses the Keychain + a brew toolchain),
+# so it sets the gate's `runner` + `packages` — the only two lines that differ from
+# the cornerstone CI. Required status check: `cordon / gate`.
+# See https://github.com/joeseverino/cordon/blob/main/docs/REUSABLE-GATE.md
 name: ci
 
 on:
@@ -6,18 +16,8 @@ on:
   pull_request:
 
 jobs:
-  check:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install toolchain
-        run: brew install bash zsh shellcheck bats-core age jq
-
-      - name: Install pinned Node dependencies
-        run: npm ci
-
-      # The definition of "passing" lives in `tools check`, not here —
-      # run the same command locally before pushing.
-      - name: tools check
-        run: TOOLS_HOME="$PWD" ./bin/tools check
+  cordon:
+    uses: joeseverino/cordon/.github/workflows/cordon-gate.yml@main
+    with:
+      runner: macos-latest
+      packages: bash zsh bats-core age jq
