@@ -66,10 +66,16 @@ EOF
     grep -q 'background: var(--brand-paper)' "$html"
     grep -q 'hljs-attr' "$html"
     grep -q 'hljs-comment' "$html"
+    grep -q 'table-layout: fixed' "$html"
+    grep -q 'page-break-inside: auto; break-inside: auto' "$html"
+    grep -q 'thead { display: table-header-group; }' "$html"
+    grep -q 'overflow-wrap: anywhere' "$html"
+    ! grep -q 'body {[^}]*width: 100%' "$html"
+    grep -q 'main { padding-inline: 2mm; }' "$html"
     rm -f "$html"
 }
 
-@test "doc-to-pdf links GitHub provenance beneath the title" {
+@test "doc-to-pdf links GitHub provenance and repository-local links" {
     local kit="$BATS_TEST_TMPDIR/kit"
     local repo="$BATS_TEST_TMPDIR/repo"
     local input="$repo/docs/README.md"
@@ -80,7 +86,18 @@ EOF
     printf ':root { --brand-accent: #123456; --brand-ink: #111; --brand-paper: #fff; }\n' > "$kit/web/tokens.css"
     printf '<svg xmlns="http://www.w3.org/2000/svg"/>\n' > "$kit/mark/mark.svg"
     printf '<svg xmlns="http://www.w3.org/2000/svg"/>\n' > "$kit/wordmark/wordmark-caps.svg"
-    printf '# Repository document\n' > "$input"
+    mkdir -p "$repo/reference"
+    printf '# Other document\n' > "$repo/reference/other file.md"
+    cat > "$input" <<'EOF'
+# Repository document
+
+[Sibling document](../reference/other%20file.md#details)
+[Repository root](/README.md)
+[Directory](../reference/)
+[Section](#local-section)
+[External](https://example.com/example)
+EOF
+    printf '# Root document\n' > "$repo/README.md"
     printf 'fake font\n' > "$font"
     git -C "$repo" init -q -b main
     git -C "$repo" remote add origin git@github.com:joeseverino/cordon.git
@@ -102,6 +119,12 @@ EOF
     local html
     html="$(printf '%s\n' "$output" | sed -n 's/^doc-to-pdf: kept HTML at //p' | head -1)"
     grep -q '<span class="document-provenance"><a href="https://github.com/joeseverino/cordon/blob/main/docs/README.md">joeseverino/cordon/docs/README.md</a></span>' "$html"
+    grep -q 'href="https://github.com/joeseverino/cordon/blob/main/reference/other%20file.md#details"' "$html"
+    grep -q 'href="https://github.com/joeseverino/cordon/blob/main/README.md"' "$html"
+    grep -q 'href="https://github.com/joeseverino/cordon/tree/main/reference"' "$html"
+    grep -q 'href="#local-section"' "$html"
+    grep -q 'href="https://example.com/example"' "$html"
+    ! grep -q 'href="file://' "$html"
     rm -f "$html"
 }
 
