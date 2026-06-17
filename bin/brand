@@ -25,6 +25,13 @@ describe_spec() {
     desc_opt --font FONT       -- "Font family"
     desc_opt --only LIST       -- "Comma-separated subset (e.g. mark,wordmark)"
     desc_opt --out DIR         -- "Output directory override"
+    desc_cmd figure -- "Render a brand-themed graphic (cover, banner, diagram) from a JSON spec"
+    desc_effect local_write
+    desc_pos spec              -- "Path to a .figure.json spec (templates: title, flow, diamond, nodes)"
+    desc_opt --out PNG         -- "Output path (defaults to <spec>.png)"
+    desc_opt --tokens CSS      -- "Brand tokens.css (defaults to the primary kit's)"
+    desc_opt --scale N         -- "Render scale multiplier (default 2)"
+    desc_para "Spec format and template fields live in the engine README. Use this for designed graphics; use \`diagram\` for Mermaid flowcharts and sequence diagrams."
     desc_cmd status -- "Show engine + brand locations and git state"
     desc_effect read
     desc_env CODE_HOME   -- "Defaults to ~/Documents/Code"
@@ -55,6 +62,33 @@ cmd_kit() {
     (cd "$BRAND_HOME" && npm run -s kit -- "$@")
 }
 
+cmd_figure() {
+    if [[ "$#" -lt 1 ]]; then    # no spec → show the spec-derived help
+        usage_command figure
+        return 0
+    fi
+    local spec="$1"; shift
+    [[ -f "$spec" ]] || die "error" "spec not found: $spec"
+    local engine="$ENGINE_HOME/bin/cli.mjs"
+    [[ -f "$engine" ]] || die "error" "branding-engine not found at $engine (set \$ENGINE_HOME)"
+
+    # Default brand color to the primary kit's tokens unless the caller passes --tokens.
+    # Prefer the joe-severino kit; fall back to the first kit that ships tokens.css.
+    local has_tokens=0 a
+    for a in "$@"; do [[ "$a" == "--tokens" ]] && has_tokens=1; done
+    local default_tokens="$BRAND_HOME/kits/joe-severino/web/tokens.css"
+    if [[ ! -f "$default_tokens" ]]; then
+        default_tokens=$(find "$BRAND_HOME/kits" -mindepth 2 -maxdepth 3 -name tokens.css 2>/dev/null | sort | head -1)
+    fi
+
+    msg "$DIM" "engine" "$ENGINE_HOME"
+    if (( ! has_tokens )) && [[ -n "$default_tokens" && -f "$default_tokens" ]]; then
+        node "$engine" figure "$spec" --tokens "$default_tokens" "$@"
+    else
+        node "$engine" figure "$spec" "$@"
+    fi
+}
+
 cmd_status() {
     require_brand
     echo
@@ -80,6 +114,7 @@ desc_help_intercept "$@"
 case "${1:-}" in
     build)          shift; cmd_build "$@" ;;
     kit)            shift; cmd_kit "$@" ;;
+    figure)         shift; cmd_figure "$@" ;;
     status)         shift; cmd_status "$@" ;;
     *)              die_unknown command "$1" ;;
 esac
