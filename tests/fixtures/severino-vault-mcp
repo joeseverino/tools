@@ -23,9 +23,7 @@ JSON
         ;;
     apply-writeup-plan)
         if [[ -n "${FAKE_MCP_LOG:-}" ]]; then
-            printf '%s ' "$*" >> "$FAKE_MCP_LOG"
-            cat >> "$FAKE_MCP_LOG"
-            printf '\n' >> "$FAKE_MCP_LOG"
+            { printf '%s ' "$*"; cat; printf '\n'; } >> "$FAKE_MCP_LOG"
         fi
         echo '{"ok":true}'
         ;;
