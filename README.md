@@ -529,7 +529,12 @@ Kits land in $BRAND_HOME/kits. The engine lives in $ENGINE_HOME and comes in as 
 |---|---|---|---|
 | `brand build` | — | `local_write` | Rebuild every kit from brand/ + the social cards |
 | `brand kit <slug> <hex> <initials> [wordmark]` | `<slug>`<br>`<hex>`<br>`<initials>`<br>`[wordmark]`<br>`--font <FONT>`<br>`--only <LIST>`<br>`--out <DIR>` | `local_write` | Render a one-off kit into severino-brand/kits/<slug> |
+| `brand figure <spec>` | `<spec>`<br>`--out <PNG>`<br>`--tokens <CSS>`<br>`--scale <N>` | `local_write` | Render a brand-themed graphic (cover, banner, diagram) from a JSON spec |
 | `brand status` | — | `read` | Show engine + brand locations and git state |
+
+**`brand figure` details**
+
+Spec format and template fields live in the engine README. Use this for designed graphics; use `diagram` for Mermaid flowcharts and sequence diagrams.
 
 #### `remember`
 
