@@ -263,6 +263,7 @@ _tools_suite_contract() {
       commands=(
         'build:Rebuild every kit from brand/ + the social cards'
         'kit:Render a one-off kit into severino-brand/kits/<slug>'
+        'figure:Render a brand-themed graphic (cover, banner, diagram) from a JSON spec'
         'status:Show engine + brand locations and git state'
       )
       _arguments -C \
@@ -273,6 +274,7 @@ _tools_suite_contract() {
         args)
           case "${words[2]}" in
             kit) _arguments '1:Kit slug (output directory name):' '2:Primary brand color (hex, no leading #):' '3:Monogram initials:' '4:Wordmark text:' '--font[Font family]:font:' '--only[Comma-separated subset (e.g. mark,wordmark)]:list:' '--out[Output directory override]:dir:' ;;
+            figure) _arguments '1:Path to a .figure.json spec (templates: title, flow, diamond, nodes):' '--out[Output path (defaults to <spec>.png)]:png:' '--tokens[Brand tokens.css (defaults to the primary kit'\''s)]:css:' '--scale[Render scale multiplier (default 2)]:n:' ;;
           esac
           ;;
       esac
