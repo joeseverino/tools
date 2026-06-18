@@ -92,9 +92,8 @@ site_bin() {
 @test "publish-writeup runs the authoritative batch gate once" {
     export SITE_SKIP_MCP_DRIFT_CHECK=1
     export HQ_TEST_EXIT=1
-    # publish-writeup is a deploy; this test exercises the publish flow, so it
-    # takes the documented non-interactive bypass (the same one CI uses).
-    export TOOLS_ASSUME_YES=1
+    # publish-writeup only opens a PR (remote_write), so it runs the gate
+    # without the deploy bypass — landing the PR is the gated deploy.
     mkdir -p "$NOTES_HOME/05 Writeups/example"
 
     run site_bin publish-writeup example
@@ -106,13 +105,12 @@ site_bin() {
 }
 
 @test "deploy command is gated non-interactively without TOOLS_ASSUME_YES" {
-    # The blast-radius gate: a deploy (publish-writeup) must fail closed when run
+    # The blast-radius gate: a deploy (land) must fail closed when run
     # non-interactively without the explicit bypass — before any flow runs, so
     # the MCP batch gate is never even reached.
     export SITE_SKIP_MCP_DRIFT_CHECK=1
-    mkdir -p "$NOTES_HOME/05 Writeups/example"
 
-    run site_bin publish-writeup example
+    run site_bin land
 
     [ "$status" -eq 2 ]
     [[ "$output" == *"deploy"* ]]
