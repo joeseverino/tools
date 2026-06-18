@@ -41,10 +41,10 @@ describe_spec() {
     desc_effect read
     desc_cmd build          -- "Run the full Astro build"
     desc_effect local_write
-    desc_cmd publish        -- "Ship every change: gate published writeups, hq sync, build + audits, auto-commit, push, then verify each affected writeup live"
-    desc_effect deploy +network
-    desc_opt --no-push      -- "Stop after the local build — no commit, no push (inspect the diff first)"
-    desc_para "Runs the whole vault-to-live flow: gate every published writeup, hq sync, build + audits, auto-commit the synced snapshot, push (Cloudflare Pages rebuilds), then verify each affected writeup live. Only the generated snapshot is committed; drafts stay in the vault and are never pushed."
+    desc_cmd publish        -- "Open the PR: gate published writeups, hq sync, build + audits, commit the content snapshot, push the branch, open or update the PR to main"
+    desc_effect remote_write +network
+    desc_opt --no-push      -- "Stop after the local build — no commit, no push, no PR (inspect the diff first)"
+    desc_para "Gate every published writeup, hq sync, build + audits, commit the synced snapshot on the current branch (auto-branching off main when needed), push, then open or update the PR to main. Only the generated snapshot is committed; your code/config edits ride the same branch and PR once you commit them. Drafts stay in the vault and are never pushed. The PR carries CI and the Cloudflare preview; merge it with \`site land\` once both are green."
     desc_cmd sign-security  -- "Clear-sign public/.well-known/security.txt with the security@ key"
     desc_effect local_write +interactive
     desc_cmd check-security -- "Verify signature, required fields, Expires, and WKD file"
@@ -59,10 +59,10 @@ describe_spec() {
     desc_effect vault_write +network
     desc_delegate "the site repo's \`npm run draft:cover-alt\` — run it with --help for flags"
     desc_cmd publish-all    -- "Alias of publish"
-    desc_effect deploy +network
-    desc_opt --no-push      -- "Stop after the local build — no commit, no push (inspect the diff first)"
+    desc_effect remote_write +network
+    desc_opt --no-push      -- "Stop after the local build — no commit, no push, no PR (inspect the diff first)"
     desc_cmd publish-writeup -- "Full publish flow with the named writeup highlighted; the all-published gate runs once first"
-    desc_effect deploy +network
+    desc_effect remote_write +network
     desc_pos slug           -- "Writeup slug to highlight in the publish run"
     desc_para "The same gate as \`site publish\` validates every published writeup once before any sync, build, commit, or push. Requires the severino-vault-mcp console script on PATH."
     desc_cmd validate       -- "Run the writeup publish gate standalone — report only, no build/commit"
@@ -87,6 +87,10 @@ describe_spec() {
     desc_effect read +network
     desc_pos slug           -- "Writeup slug to verify on the live site"
     desc_para "Checks the live site: /portfolio/<slug>/ is 200, the og:image resolves, every tag page lists it, and the home page shows it when featured. Run ~30s after publishing (Cloudflare rebuild)."
+    desc_cmd land           -- "Land the current branch's PR: confirm CI is green, squash-merge (signature-safe), wait for the deploy, then verify live"
+    desc_effect deploy +network
+    desc_pos slug +optional -- "Writeup slug to verify after the deploy; omit to verify every writeup the PR changed"
+    desc_para "Run after eyeballing the Cloudflare preview on the PR. Refuses to merge unless \`gh pr checks\` is all green, squash-merges (rebase strips SSH signatures, squash does not), deletes the branch, waits ~30s for the Cloudflare Pages rebuild, then runs the live checks. Requires the gh CLI."
     desc_cmd diagnose       -- "The collect-all gate: run every audit and report all failures in one pass"
     desc_effect read
     desc_delegate "the site repo's \`npm run diagnose\` — run it with --help for flags (--fast, --json)"
@@ -667,6 +671,9 @@ cmd_publish_all() {
     require_site
     require_mcp
     command -v hq >/dev/null 2>&1 || die "error" "hq CLI not on PATH"
+    if [[ -z "$skip_push" ]]; then
+        command -v gh >/dev/null 2>&1 || die "error" "gh CLI not on PATH (needed to open the PR)"
+    fi
 
     msg "$DIM" "step 1/5" "writeup gate (every published writeup)"
     local gate
@@ -698,25 +705,29 @@ cmd_publish_all() {
     (cd "$SITE_HOME" && npm run -s publish:check)
 
     if [[ -n "$skip_push" ]]; then
-        msg "$YELLOW" "steps 4-5/5" "skipped (--no-push). Inspect with \`site status\` and push manually."
+        msg "$YELLOW" "steps 4-5/5" "skipped (--no-push). Inspect with \`site status\`, then re-run without --no-push to open the PR."
         return 0
     fi
 
-    msg "$DIM" "step 4/5" "commit + push if content changed (site repo)"
-    local head_before
-    head_before="$(git -C "$SITE_HOME" rev-parse HEAD)"
+    msg "$DIM" "step 4/5" "commit content snapshot (site repo)"
     (
         cd "$SITE_HOME"
+
+        # Content rides a PR now, never a direct push to main. Sitting on main
+        # (or a detached HEAD) means there is no branch to PR, so branch off
+        # automatically — publishing never needs a thought about git state.
+        branch="$(git symbolic-ref --short HEAD 2>/dev/null || true)"
+        if [[ -z "$branch" || "$branch" == "main" ]]; then
+            branch="content/$(date +%Y-%m-%d-%H%M)"
+            git switch -c "$branch"
+            msg "$GREEN" "branch" "off main → $branch"
+        fi
 
         # Stage only the generated snapshot — never sweep up code/config edits.
         git add src/content public/assets
 
         if git diff --cached --quiet; then
-            if ! git diff --quiet; then
-                msg "$YELLOW" "note" "site repo has uncommitted non-content changes (left for you)"
-            fi
-            msg "$DIM" "skip" "no content changes — no commit or push"
-            return 0
+            msg "$DIM" "skip" "no content changes — committing nothing new"
         else
             # Classify each staged content change by the git status of its
             # index file: Added → published (new), Modified → edited,
@@ -810,42 +821,91 @@ cmd_publish_all() {
             msg "$GREEN" "commit" "$commit_subject"
         fi
 
-        # Code or config edits stay yours to commit deliberately — they are
-        # not folded into the content commit and do not block this push.
+        # Code or config edits stay yours to commit deliberately — they now
+        # ride this same branch and PR, so commit them and push again.
         if ! git diff --quiet; then
-            msg "$YELLOW" "note" "site repo has uncommitted non-content changes (left for you)"
+            msg "$YELLOW" "note" "uncommitted code/config changes — commit them to include them in this PR"
         fi
 
-        git push
-        msg "$GREEN" "shipped" "Cloudflare Pages will rebuild from the new HEAD"
+        msg "$DIM" "step 5/5" "push + open/update the PR to main"
+
+        # Only open a PR when there is something ahead of main to review —
+        # an auto-branch off a clean main with no content diff has nothing.
+        git fetch -q origin main 2>/dev/null || true
+        ahead="$(git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)"
+        if [[ "${ahead:-0}" -eq 0 ]]; then
+            msg "$DIM" "skip" "nothing ahead of main — no PR to open"
+            return 0
+        fi
+
+        git push -u origin HEAD
+
+        if pr_url="$(gh pr view --json url -q .url 2>/dev/null)" && [[ -n "$pr_url" ]]; then
+            msg "$GREEN" "PR" "updated $pr_url"
+        else
+            gh pr create --base main --fill
+            pr_url="$(gh pr view --json url -q .url 2>/dev/null || true)"
+            msg "$GREEN" "PR" "opened ${pr_url:-(see above)}"
+        fi
+        msg "$DIM" "next" "check CI + the Cloudflare preview on the PR, then \`site land\`"
     )
+}
 
-    # Verify only what this publish actually shipped: writeup slugs whose
-    # synced content or assets are in the new commit. Pages and removals
-    # have no live writeup URL to assert.
-    local head_after
-    head_after="$(git -C "$SITE_HOME" rev-parse HEAD)"
-    [[ "$head_after" != "$head_before" ]] || return 0
+# Print writeup slugs touched across the given git diff range, one per line.
+changed_writeup_slugs() {
+    git -C "$SITE_HOME" diff --name-only "$1" \
+        -- src/content/writeups public/assets/writeups 2>/dev/null \
+        | awk '
+            /^src\/content\/writeups\/[^\/]+\// { s=$0; sub(/^src\/content\/writeups\//, "", s); sub(/\/.*/, "", s); print s }
+            /^public\/assets\/writeups\/[^\/]+\// { s=$0; sub(/^public\/assets\/writeups\//, "", s); sub(/\/.*/, "", s); print s }
+        ' | sort -u
+}
 
+cmd_land() {
+    local slug="${1:-}"
+    require_site
+    command -v gh >/dev/null 2>&1 || die "error" "gh CLI not on PATH"
+    if [[ -n "$slug" && ! "$slug" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+        die "error" "slug must be lowercase-kebab-case: '$slug'"
+    fi
+    cd "$SITE_HOME"
+
+    local branch
+    branch="$(git symbolic-ref --short HEAD 2>/dev/null || true)"
+    [[ -n "$branch" && "$branch" != "main" ]] \
+        || die "error" "not on a PR branch (currently: ${branch:-detached HEAD}); checkout the branch whose PR you want to land"
+
+    local pr_url
+    pr_url="$(gh pr view --json url -q .url 2>/dev/null || true)"
+    [[ -n "$pr_url" ]] || die "error" "no open PR for $branch — run \`site publish\` first"
+
+    # Capture the writeups this PR changes before the branch is deleted.
+    git fetch -q origin main 2>/dev/null || true
     local verify_slugs
-    verify_slugs="$(git -C "$SITE_HOME" show --name-status --no-renames --format= "$head_after" \
-        -- src/content/writeups public/assets/writeups \
-        | awk -F'\t' '
-            $1 == "D" { next }
-            $2 ~ /^src\/content\/writeups\/[^\/]+\// {
-                slug = $2
-                sub(/^src\/content\/writeups\//, "", slug); sub(/\/.*/, "", slug)
-                print slug
-            }
-            $2 ~ /^public\/assets\/writeups\/[^\/]+\// {
-                slug = $2
-                sub(/^public\/assets\/writeups\//, "", slug); sub(/\/.*/, "", slug)
-                print slug
-            }
-        ' | sort -u)"
-    [[ -n "$verify_slugs" ]] || return 0
+    if [[ -n "$slug" ]]; then
+        verify_slugs="$slug"
+    else
+        verify_slugs="$(changed_writeup_slugs "origin/main...HEAD")"
+    fi
 
-    msg "$DIM" "step 5/5" "verify live (waiting ~30s for the Cloudflare rebuild)"
+    msg "$DIM" "step 1/3" "confirm CI is green"
+    if ! gh pr checks >/dev/null 2>&1; then
+        gh pr checks || true
+        die "error" "PR checks are not all green — wait for CI or fix failures, then re-run \`site land\`" 1
+    fi
+    msg "$GREEN" "checks" "all green — $pr_url"
+
+    msg "$DIM" "step 2/3" "squash-merge + delete branch"
+    gh pr merge --squash --delete-branch \
+        || die "error" "merge failed — check $pr_url" 1
+    msg "$GREEN" "merged" "$branch → main (squash); Cloudflare Pages will rebuild"
+
+    if [[ -z "$verify_slugs" ]]; then
+        msg "$GREEN" "landed" "no writeup pages to verify (no writeup content changed)"
+        return 0
+    fi
+
+    msg "$DIM" "step 3/3" "verify live (waiting ~30s for the Cloudflare rebuild)"
     sleep 30
     local verify_slug all_ok=1
     for verify_slug in $verify_slugs; do
@@ -856,11 +916,11 @@ cmd_publish_all() {
         fi
     done
     if (( ! all_ok )); then
-        die "error" "verify failed after publish — check the Cloudflare Pages build for jseverino.com" 1
+        die "error" "verify failed after merge — check the Cloudflare Pages build for jseverino.com" 1
     fi
     # Intentional splitting: one argument per slug.
     # shellcheck disable=SC2086
-    msg "$GREEN" "published" "live and verified:$(printf ' %s' $verify_slugs)"
+    msg "$GREEN" "landed" "live and verified:$(printf ' %s' $verify_slugs)"
 }
 
 cmd_release() {
@@ -1052,6 +1112,7 @@ case "${1:-}" in
     featured)           shift; cmd_featured "$@" ;;
     manage)             shift; cmd_manage "$@" ;;
     verify)             shift; cmd_verify "$@" ;;
+    land)               shift; cmd_land "$@" ;;
     diagnose)           shift; run_npm diagnose -- "$@" ;;
     release)            shift; cmd_release "$@" ;;
     test)               shift; cmd_test "$@" ;;

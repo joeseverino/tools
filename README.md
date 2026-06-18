@@ -444,19 +444,20 @@ Public jseverino.com Astro site workflow.
 | `site contrast` | — | `read` | Compute WCAG ratios for every text/background pair in base.css |
 | `site parity` | — | `read` | Assert vault Frontmatter Schema, Zod, and MCP agree on writeup fields |
 | `site build` | — | `local_write` | Run the full Astro build |
-| `site publish` | `--no-push` | `deploy + network` | Ship every change: gate published writeups, hq sync, build + audits, auto-commit, push, then verify each affected writeup live |
+| `site publish` | `--no-push` | `remote_write + network` | Open the PR: gate published writeups, hq sync, build + audits, commit the content snapshot, push the branch, open or update the PR to main |
 | `site sign-security` | — | `local_write + interactive` | Clear-sign public/.well-known/security.txt with the security@ key |
 | `site check-security` | — | `read` | Verify signature, required fields, Expires, and WKD file |
 | `site scaffold-primer` | Delegated: the site repo's `npm run scaffold:primer` — run it with --help for flags | `vault_write` | Scaffold a new 04 Reference/ primer with slim frontmatter |
 | `site scaffold-field` | Delegated: the site repo's `npm run scaffold:writeup-field` — run it with --help for flags | `local_write` | Patch every layer needed for a new writeup field (dry-run by default) |
 | `site draft-alt` | Delegated: the site repo's `npm run draft:cover-alt` — run it with --help for flags | `vault_write + network` | Use the Claude API to draft cover_alt from a writeup's cover image |
-| `site publish-all` | `--no-push` | `deploy + network` | Alias of publish |
-| `site publish-writeup <slug>` | `<slug>` | `deploy + network` | Full publish flow with the named writeup highlighted; the all-published gate runs once first |
+| `site publish-all` | `--no-push` | `remote_write + network` | Alias of publish |
+| `site publish-writeup <slug>` | `<slug>` | `remote_write + network` | Full publish flow with the named writeup highlighted; the all-published gate runs once first |
 | `site validate <slug>` | `<slug>`<br>`--draft` | `read` | Run the writeup publish gate standalone — report only, no build/commit |
 | `site tech [query]` | `[query]` | `read` | List technology slugs from the vault catalog, filtered when a query is given |
 | `site featured [slug] [target]` | `[slug]`<br>`[target]` | `vault_write` | Show the home-page featured order, or move one writeup and renumber automatically |
 | `site manage` | — | `vault_write + interactive` | Interactive manager: every writeup on one screen — reorder, feature, publish. Nothing written until you save |
 | `site verify <slug>` | `<slug>` | `read + network` | Post-publish live check: page status, OG image, tag pages, and home placement |
+| `site land [slug]` | `[slug]` | `deploy + network` | Land the current branch's PR: confirm CI is green, squash-merge (signature-safe), wait for the deploy, then verify live |
 | `site diagnose` | Delegated: the site repo's `npm run diagnose` — run it with --help for flags (--fast, --json) | `read` | The collect-all gate: run every audit and report all failures in one pass |
 | `site release <version>` | `<version>`<br>`--ship` | `deploy + network` | Bump package.json, run publish:check, commit + signed tag, push, create the GitHub release |
 | `site test` | `--visual`<br>`--ui`<br>`--update` | `local_write` | Run the Playwright end-to-end suite |
@@ -471,7 +472,7 @@ Public jseverino.com Astro site workflow.
 
 **`site publish` details**
 
-Runs the whole vault-to-live flow: gate every published writeup, hq sync, build + audits, auto-commit the synced snapshot, push (Cloudflare Pages rebuilds), then verify each affected writeup live. Only the generated snapshot is committed; drafts stay in the vault and are never pushed.
+Gate every published writeup, hq sync, build + audits, commit the synced snapshot on the current branch (auto-branching off main when needed), push, then open or update the PR to main. Only the generated snapshot is committed; your code/config edits ride the same branch and PR once you commit them. Drafts stay in the vault and are never pushed. The PR carries CI and the Cloudflare preview; merge it with `site land` once both are green.
 
 **`site publish-writeup` details**
 
@@ -499,6 +500,10 @@ Full-screen manager (keys shown in-app): reorder featured, feature/unfeature, pu
 **`site verify` details**
 
 Checks the live site: /portfolio/<slug>/ is 200, the og:image resolves, every tag page lists it, and the home page shows it when featured. Run ~30s after publishing (Cloudflare rebuild).
+
+**`site land` details**
+
+Run after eyeballing the Cloudflare preview on the PR. Refuses to merge unless `gh pr checks` is all green, squash-merges (rebase strips SSH signatures, squash does not), deletes the branch, waits ~30s for the Cloudflare Pages rebuild, then runs the live checks. Requires the gh CLI.
 
 **`site new-writeup` details**
 
@@ -1020,13 +1025,15 @@ just the launcher. It looks for the checkout at
 entry point.
 
 `site publish` is the everyday path: edit a writeup in Obsidian, run it, and
-the synced snapshot is auto-committed and pushed when content changed —
-Cloudflare rebuilds within ~30s and the command then verifies each affected
-writeup on the live site (page status, og:image, tag pages, home placement).
-If the sync produces no content diff, the command skips commit, push, and
-verify. The commit message is built from the diff: it names each slug as
-published (new), edited, or removed. `--no-push` stops after the local build
-when you want to review the diff first. `site <subcommand> --help` for flag
+the synced snapshot is committed on the current branch (auto-branching off
+main when needed), pushed, and a PR to main is opened or updated. The commit
+message is built from the diff: it names each slug as published (new), edited,
+or removed. Code and config edits ride the same branch and PR once committed.
+`--no-push` stops after the local build when you want to review the diff
+first. Then check CI and the Cloudflare preview on the PR and run `site land`:
+it confirms checks are green, squash-merges, waits ~30s for the Cloudflare
+rebuild, and verifies each affected writeup on the live site (page status,
+og:image, tag pages, home placement). `site <subcommand> --help` for flag
 details.
 
 Layout resolves from env vars, all with defaults:
