@@ -66,6 +66,7 @@ tools/
     repos       # Fleet inventory of every repo under ~/Documents/Code.
     brief       # One emit-once snapshot of repos, vault, and writeups.
     ship        # Commit, push, and PR pending work — one repo, or the whole fleet.
+    resync      # Reconcile local repos with the remote after merging PRs on GitHub.
   .github/               # CI workflows and repository automation
   archive/               # retired scripts kept for reference
   bench/                 # measured claims asserted in CI
@@ -665,6 +666,10 @@ Commit, push, and PR pending work — one repo, or the whole fleet.
 
 Preview with 'ship' or 'ship <name>'; execute with --go. A single repo needs no --all; a fleet ship requires --all so it can never happen by accident. Pass '-- path ...' to commit only those paths instead of everything. If you are on main (or a branch whose remote was merged and deleted) ship cuts a fresh 'ship/<timestamp>' branch off the default branch so main is never committed to and zombie branches are never pushed. The PR body defaults to a clean file summary; pass --body (or let an agent pass one) for a richer PR.
 
+--check runs the repo's local gate before pushing so a failure is caught here, not after a CI round-trip; a repo that fails its gate is left unpushed. --watch then follows the PR's checks to green or red instead of you polling by hand. Together they close the write half of the loop: gate locally, ship, watch CI, then 'resync' once it merges.
+
+ship is idempotent on an open PR, so iterating on one you review on GitHub is the same one command, not raw git. Re-run it after amending a commit and it re-pushes the branch with --force-with-lease and syncs the PR title to the (conventional) commit subject; the body is only rewritten when you pass --body, so a description you curated on GitHub is never clobbered.
+
 Usage: `ship <name>`
 
 | Argument | Description |
@@ -674,9 +679,26 @@ Usage: `ship <name>`
 | `-m, --message <MSG>` | PR title + commit message (default: derived from changed paths) |
 | `--body <BODY>` | PR body (default: a generated new/modified/removed file summary) |
 | `--no-pr` | Commit and push only; do not open a PR |
+| `--check` | Run the repo's own local gate (tools check / scripts/check.sh / npm test) before pushing; skip the repo if it fails |
+| `--watch` | After opening/updating the PR, poll 'gh pr checks' until CI is green or red |
 | `<name>` | Only repos whose name contains NAME |
 
 Effect: `remote_write + network`
+
+#### `resync`
+
+Reconcile local repos with the remote after merging PRs on GitHub.
+
+The closing beat of the workspace loop (resync → work → ship → merge → resync). For each clean repo with a remote: fetch + prune, fast-forward the default branch, and delete local branches whose upstream was merged and auto-deleted on GitHub. If you are stranded on such a branch (you merged the PR on GitHub and came back to the terminal still on it) resync steps you back onto the default branch first, then prunes it. It never deletes a branch that still has unique local commits — those are reported as 'kept (diverged)' so you can decide — and it never touches a repo with uncommitted changes. Defaults to the whole fleet; pass NAME to scope to one repo. --dry-run fetches (harmless) and reports the plan without changing any local branch or working tree.
+
+Usage: `resync <name>`
+
+| Argument | Description |
+|---|---|
+| `-n, --dry-run` | Show what would be reconciled; change nothing local |
+| `<name>` | Only repos whose name contains NAME |
+
+Effect: `local_write + network`
 <!-- END GENERATED CLI REFERENCE -->
 
 ### tools
