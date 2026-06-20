@@ -629,20 +629,26 @@ Fleet inventory of every repo under ~/Documents/Code.
 
 Default roots are $CODE_HOME/Assets and $CODE_HOME/Projects. A directory is listed if it is a git work tree or carries a project manifest (package.json, pyproject.toml, go.mod, Cargo.toml). Use 'repos --pm npm' to see what is left to migrate, 'repos --unpushed' before stepping away, and 'repos --json' to consume the whole fleet in one parse.
 
-Usage: `repos <name>`
+| Invocation | Arguments / options | Effect | Summary |
+|---|---|---|---|
+| `repos tui [name]` | `[name]`<br>`--dirty`<br>`--unpushed`<br>`--pm <PM>`<br>`--sizes`<br>`--icloud`<br>`--root <DIR>` | `remote_write + network + interactive` | Open the interactive repo dashboard and run ship/resync/shell actions |
 
-| Argument | Description |
-|---|---|
-| `--json` | Machine-readable output (one JSON object, "repos" array) |
-| `--dirty` | Only repos with uncommitted changes |
-| `--unpushed` | Only repos with no remote, no upstream, or unpushed commits |
-| `--pm <PM>` | Only repos whose package manager is PM (pnpm\|npm\|yarn\|bun\|none) |
-| `--sizes` | Include node_modules size (slower; runs du) |
-| `--icloud` | Count iCloud conflict duplicates ('name 2.ext') per repo |
-| `--root <DIR>` | Scan DIR instead of the defaults (repeatable) |
-| `<name>` | Only repos whose name contains NAME |
+**`repos tui` details**
 
-Effect: `read`
+The TUI renders the same repos --json fleet snapshot, then launches the existing workflow owners instead of reimplementing them: ship handles commit/push/PR, resync handles merged-branch cleanup, and shell actions drop into the selected repo.
+
+**Examples**
+
+```sh
+repos tui  # start from the workspace dashboard
+```
+
+**Examples**
+
+```sh
+repos tui  # open the fleet explorer
+repos --unpushed --json  # machine-read repos needing push, upstream setup, or stale-branch cleanup
+```
 
 #### `brief`
 

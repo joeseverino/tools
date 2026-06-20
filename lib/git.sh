@@ -45,7 +45,14 @@ git_target_branch() {
 git_commit_message() {
     local dirs
     dirs="$(git diff --cached --name-only 2>/dev/null | awk -F/ '{print $1}' | sort -u | head -4 | paste -sd, - || true)"
-    printf 'Update %s' "${dirs:-working tree}"
+    printf 'chore: update %s' "${dirs:-working tree}"
+}
+
+# True when a commit/PR title follows the Conventional Commits shape that
+# release-please expects to parse cleanly.
+git_conventional_subject() {
+    local re='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]+\))?!?:[[:space:]].+'
+    [[ "$1" =~ $re ]]
 }
 
 # Stage and commit. With trailing paths, stages only those; else everything.

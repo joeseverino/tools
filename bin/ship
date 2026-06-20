@@ -69,7 +69,13 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-plan="$(repos --json ${NAME:+"$NAME"} 2>/dev/null | node "$TOOLS_HOME/lib/ship/plan.mjs")"
+if (( GO )) && (( ! NOPR )) && [[ -n "$MSG" ]] && ! git_conventional_subject "$MSG"; then
+    die "message" "PR title must be Conventional Commits / release-please friendly (example: feat: add repo dashboard)" 2
+fi
+
+include_clean_branch=0
+[[ -n "$NAME" && "$NOPR" == "0" ]] && include_clean_branch=1
+plan="$(repos --json ${NAME:+"$NAME"} 2>/dev/null | SHIP_INCLUDE_CLEAN_BRANCH="$include_clean_branch" node "$TOOLS_HOME/lib/ship/plan.mjs")"
 
 if [[ -z "$plan" ]]; then
     header "ship" 0
@@ -150,6 +156,11 @@ while IFS=$'\t' read -r name path branch uncommitted ahead has_remote; do
 
         if (( ! NOPR )); then
             title="${MSG:-$(git log -1 --format='%s' 2>/dev/null || true)}"
+            if ! git_conventional_subject "$title"; then
+                printf '  %s%-10s%s %s\n' "$RED$BOLD" "skip" "$RESET" "$name: PR title is not release-please friendly: $title"
+                printf '  %s%-10s%s %s\n' "$DIM" "hint" "$RESET" "rerun with -m 'feat: describe the change'"
+                exit 2
+            fi
             body="${BODY:-$(git_pr_body_summary "$base")}"
             # Existing PR: title is synced to the commit subject; body is only
             # rewritten when --body was passed (BODY_SET), so re-shipping never
