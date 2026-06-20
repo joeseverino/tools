@@ -53,7 +53,14 @@ setup_fleet() {
     )
 
     mkdir -p "$CODE_HOME/Projects/local-tool"
-    printf '{"name":"local-tool"}\n' > "$CODE_HOME/Projects/local-tool/package.json"
+    (
+        cd "$CODE_HOME/Projects/local-tool"
+        git init -q
+        git config user.name joeseverino
+        git config user.email github@jseverino.com
+        printf '{"name":"local-tool"}\n' > package.json
+        make_commit_ref "$PWD" main init
+    )
 }
 
 @test "repos json exposes gone upstream state for merged branches" {
@@ -101,6 +108,27 @@ assert tui["interactive"] is True
 import json,sys
 names={r["name"] for r in json.load(sys.stdin)["repos"]}
 assert "merged-branch" in names
+'
+}
+
+@test "repos json marks configured local-only repos as ok" {
+    setup_fleet
+    printf 'REPOS_LOCAL_OK=(local-tool)\n' > "$BATS_TEST_TMPDIR/repos.sh"
+    export REPOS_CONFIG="$BATS_TEST_TMPDIR/repos.sh"
+    run repos_bin --json local-tool
+    [ "$status" -eq 0 ]
+    echo "$output" | python3 -c '
+import json,sys
+repo=json.load(sys.stdin)["repos"][0]
+assert repo["has_remote"] is False
+assert repo["local_ok"] is True
+assert repo["needs_attention"] is False
+'
+    run repos_bin --unpushed --json local-tool
+    [ "$status" -eq 0 ]
+    echo "$output" | python3 -c '
+import json,sys
+assert json.load(sys.stdin)["repos"] == []
 '
 }
 
