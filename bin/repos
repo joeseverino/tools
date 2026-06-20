@@ -14,8 +14,10 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 describe_spec() {
     desc_tool "repos" "Fleet inventory of every repo under ~/Documents/Code."
     desc_inventory "Workspace" 190
-    desc_synopsis "repos [options] [name]"
+    desc_leaf_commands
+    desc_synopsis "repos [options] [name] | repos tui [options] [name]"
     desc_effect read
+    desc_opt --tui        -- "Open the interactive repo fleet explorer (can execute ship/resync actions)"
     desc_opt --json       -- "Machine-readable output (one JSON object, \"repos\" array)"
     desc_opt --dirty      -- "Only repos with uncommitted changes"
     desc_opt --unpushed   -- "Only repos with no remote, no upstream, or unpushed commits"
@@ -25,16 +27,30 @@ describe_spec() {
     desc_opt --root DIR   -- "Scan DIR instead of the defaults (repeatable)"
     desc_pos name         -- "Only repos whose name contains NAME"
     desc_para "Default roots are \$CODE_HOME/Assets and \$CODE_HOME/Projects. A directory is listed if it is a git work tree or carries a project manifest (package.json, pyproject.toml, go.mod, Cargo.toml). Use 'repos --pm npm' to see what is left to migrate, 'repos --unpushed' before stepping away, and 'repos --json' to consume the whole fleet in one parse."
+    desc_example "repos tui" -- "open the fleet explorer"
+    desc_example "repos --unpushed --json" -- "machine-read repos needing push, upstream setup, or stale-branch cleanup"
+    desc_cmd tui -- "Open the interactive repo dashboard and run ship/resync/shell actions"
+    desc_effect remote_write +network +interactive
+    desc_opt --dirty      -- "Start on repos with uncommitted changes"
+    desc_opt --unpushed   -- "Start on repos with no remote, no upstream, unpushed commits, or gone upstream"
+    desc_opt --pm PM      -- "Only repos whose package manager is PM (pnpm|npm|yarn|bun|none)"
+    desc_opt --sizes      -- "Include node_modules size (slower; runs du)"
+    desc_opt --icloud     -- "Count iCloud conflict duplicates ('name 2.ext') per repo"
+    desc_opt --root DIR   -- "Scan DIR instead of the defaults (repeatable)"
+    desc_pos name +optional -- "Only repos whose name contains NAME"
+    desc_para "The TUI renders the same repos --json fleet snapshot, then launches the existing workflow owners instead of reimplementing them: ship handles commit/push/PR, resync handles merged-branch cleanup, and shell actions drop into the selected repo."
+    desc_example "repos tui" -- "start from the workspace dashboard"
 }
 
 desc_help_intercept "$@"
 
 # ---------- args ----------
-JSON=0 DIRTY=0 UNPUSHED=0 SIZES=0 ICLOUD=0
+JSON=0 TUI=0 DIRTY=0 UNPUSHED=0 SIZES=0 ICLOUD=0
 PM_FILTER="" NAME_FILTER=""
 ROOTS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        tui|--tui)  TUI=1; shift ;;
         --json)     JSON=1; shift ;;
         --dirty)    DIRTY=1; shift ;;
         --unpushed) UNPUSHED=1; shift ;;
@@ -48,9 +64,22 @@ while [[ $# -gt 0 ]]; do
 done
 (( ${#ROOTS[@]} )) || ROOTS=("$CODE_HOME/Assets" "$CODE_HOME/Projects")
 
+if (( TUI )); then
+    args=()
+    (( DIRTY )) && args+=(--dirty)
+    (( UNPUSHED )) && args+=(--unpushed)
+    (( SIZES )) && args+=(--sizes)
+    (( ICLOUD )) && args+=(--icloud)
+    [[ -n "$PM_FILTER" ]] && args+=(--pm "$PM_FILTER")
+    for root in "${ROOTS[@]}"; do args+=(--root "$root"); done
+    [[ -n "$NAME_FILTER" ]] && args+=("$NAME_FILTER")
+    exec node "$TOOLS_HOME/lib/repos/tui.mjs" "${args[@]}"
+fi
+
 # ---------- per-repo collection (parallel arrays, one entry per included repo) ----------
 R_NAME=() R_ROOT=() R_PATH=() R_GIT=() R_BRANCH=() R_REMOTE=() R_HASREMOTE=()
-R_DIRTY=() R_UNTRACKED=() R_AHEAD=() R_BEHIND=() R_UPSTREAM=()
+R_DIRTY=() R_UNTRACKED=() R_AHEAD=() R_BEHIND=() R_UPSTREAM=() R_UPSTREAM_NAME=()
+R_UPSTREAM_TRACK=() R_UPSTREAM_GONE=()
 R_SHA=() R_DATE=() R_SUBJ=() R_LANG=() R_PM=() R_PMFIELD=() R_NVMRC=()
 R_NM=() R_NMSIZE=() R_CI=() R_IDUPS=()
 
@@ -64,7 +93,7 @@ collect() {
     [[ -f "$d/package.json" || -f "$d/pyproject.toml" || -f "$d/go.mod" || -f "$d/Cargo.toml" ]] && has_manifest=1
     (( is_git || has_manifest )) || return 0
 
-    local branch='-' remote='' has_remote=0 dirty=0 untracked=0 ahead=0 behind=0 upstream=0
+    local branch='-' remote='' has_remote=0 dirty=0 untracked=0 ahead=0 behind=0 upstream=0 upstream_name='' upstream_track='' upstream_gone=0
     local sha='' cdate='' subj=''
     if (( is_git )); then
         branch="$(git -C "$d" symbolic-ref --quiet --short HEAD 2>/dev/null || git -C "$d" rev-parse --short HEAD 2>/dev/null || echo '-')"
@@ -75,8 +104,15 @@ collect() {
             untracked="$(printf '%s\n' "$porc" | grep -c '^??' || true)"
             dirty="$(printf '%s\n' "$porc" | grep -cv '^??' || true)"
         fi
+        local head_ref; head_ref="$(git -C "$d" symbolic-ref --quiet HEAD 2>/dev/null || true)"
+        if [[ -n "$head_ref" ]]; then
+            upstream_name="$(git -C "$d" for-each-ref --format='%(upstream:short)' "$head_ref" 2>/dev/null || true)"
+            upstream_track="$(git -C "$d" for-each-ref --format='%(upstream:track)' "$head_ref" 2>/dev/null || true)"
+            [[ "$upstream_track" == "[gone]" ]] && upstream_gone=1
+        fi
         local lr; lr="$(git -C "$d" rev-list --left-right --count '@{u}...HEAD' 2>/dev/null || true)"
         if [[ -n "$lr" ]]; then upstream=1; behind="${lr%%[[:space:]]*}"; ahead="${lr##*[[:space:]]}"; fi
+        [[ -n "$upstream_name" ]] && upstream=1
         local lc; lc="$(git -C "$d" log -1 --format='%h%x1f%cs%x1f%s' 2>/dev/null || true)"
         [[ -n "$lc" ]] && { IFS=$'\x1f' read -r sha cdate subj <<<"$lc" || true; }
     fi
@@ -118,12 +154,13 @@ collect() {
     [[ -n "$PM_FILTER" && "$pm" != "$PM_FILTER" ]] && return 0
     (( DIRTY )) && (( dirty + untracked == 0 )) && return 0
     if (( UNPUSHED )); then
-        (( has_remote == 0 || ahead > 0 || upstream == 0 )) || return 0
+        (( has_remote == 0 || ahead > 0 || upstream == 0 || upstream_gone == 1 )) || return 0
     fi
 
     R_NAME+=("$name"); R_ROOT+=("$root_label"); R_PATH+=("$d")
     R_GIT+=("$is_git"); R_BRANCH+=("$branch"); R_REMOTE+=("$remote"); R_HASREMOTE+=("$has_remote")
     R_DIRTY+=("$dirty"); R_UNTRACKED+=("$untracked"); R_AHEAD+=("$ahead"); R_BEHIND+=("$behind"); R_UPSTREAM+=("$upstream")
+    R_UPSTREAM_NAME+=("$upstream_name"); R_UPSTREAM_TRACK+=("$upstream_track"); R_UPSTREAM_GONE+=("$upstream_gone")
     R_SHA+=("$sha"); R_DATE+=("$cdate"); R_SUBJ+=("$subj"); R_LANG+=("$lang")
     R_PM+=("$pm"); R_PMFIELD+=("$pmfield"); R_NVMRC+=("$nvmrc")
     R_NM+=("$nm"); R_NMSIZE+=("$nmsize"); R_CI+=("$ci"); R_IDUPS+=("$idups")
@@ -152,10 +189,11 @@ if (( JSON )); then
     i=0
     while (( i < N )); do
         (( i )) && printf ','
-        printf '{"name":"%s","path":"%s","root":"%s","git":%s,"branch":"%s","remote":"%s","has_remote":%s,"dirty":%d,"untracked":%d,"ahead":%d,"behind":%d,"upstream":%s,"last_commit":{"sha":"%s","date":"%s","subject":"%s"},"lang":"%s","pm":"%s","package_manager":"%s","nvmrc":"%s","node_modules":%s,"node_modules_size":%s,"ci":%d' \
+        printf '{"name":"%s","path":"%s","root":"%s","git":%s,"branch":"%s","remote":"%s","has_remote":%s,"dirty":%d,"untracked":%d,"ahead":%d,"behind":%d,"upstream":%s,"upstream_name":"%s","upstream_track":"%s","upstream_gone":%s,"last_commit":{"sha":"%s","date":"%s","subject":"%s"},"lang":"%s","pm":"%s","package_manager":"%s","nvmrc":"%s","node_modules":%s,"node_modules_size":%s,"ci":%d' \
             "$(json_escape "${R_NAME[$i]}")" "$(json_escape "${R_PATH[$i]}")" "$(json_escape "${R_ROOT[$i]}")" \
             "$(json_bool "${R_GIT[$i]}")" "$(json_escape "${R_BRANCH[$i]}")" "$(json_escape "${R_REMOTE[$i]}")" "$(json_bool "${R_HASREMOTE[$i]}")" \
             "${R_DIRTY[$i]}" "${R_UNTRACKED[$i]}" "${R_AHEAD[$i]}" "${R_BEHIND[$i]}" "$(json_bool "${R_UPSTREAM[$i]}")" \
+            "$(json_escape "${R_UPSTREAM_NAME[$i]}")" "$(json_escape "${R_UPSTREAM_TRACK[$i]}")" "$(json_bool "${R_UPSTREAM_GONE[$i]}")" \
             "$(json_escape "${R_SHA[$i]}")" "$(json_escape "${R_DATE[$i]}")" "$(json_escape "${R_SUBJ[$i]}")" \
             "$(json_escape "${R_LANG[$i]}")" "$(json_escape "${R_PM[$i]}")" "$(json_escape "${R_PMFIELD[$i]}")" "$(json_escape "${R_NVMRC[$i]}")" \
             "$(json_bool "${R_NM[$i]}")" "${R_NMSIZE[$i]}" "${R_CI[$i]}"
@@ -189,9 +227,10 @@ while (( i < N )); do
     (( ${R_UNTRACKED[$i]} > 0 ))  && st+="?${R_UNTRACKED[$i]} "
     (( ${R_AHEAD[$i]} > 0 ))      && st+="↑${R_AHEAD[$i]} "
     (( ${R_BEHIND[$i]} > 0 ))     && st+="↓${R_BEHIND[$i]} "
+    (( ${R_UPSTREAM_GONE[$i]} > 0 )) && st+="gone "
     [[ -z "$st" ]] && st="clean"; st="${st% }"
     (( ${R_DIRTY[$i]} + ${R_UNTRACKED[$i]} > 0 )) && n_dirty=$(( n_dirty + 1 ))
-    (( ${R_HASREMOTE[$i]} == 0 || ${R_AHEAD[$i]} > 0 || ${R_UPSTREAM[$i]} == 0 )) && n_unpushed=$(( n_unpushed + 1 ))
+    (( ${R_HASREMOTE[$i]} == 0 || ${R_AHEAD[$i]} > 0 || ${R_UPSTREAM[$i]} == 0 || ${R_UPSTREAM_GONE[$i]} > 0 )) && n_unpushed=$(( n_unpushed + 1 ))
 
     nm="${R_NAME[$i]}"; (( ${#nm} > 22 )) && nm="${nm:0:21}…"
     subj="${R_SUBJ[$i]}"; (( ${#subj} > 42 )) && subj="${subj:0:41}…"
