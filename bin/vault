@@ -3,6 +3,8 @@
 set -euo pipefail
 
 source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" vault "$@"
+# shellcheck source=lib/git.sh
+source "$TOOLS_HOME/lib/git.sh"
 
 describe_spec() {
     desc_tool "vault" "Operations on the vault git repo."
@@ -30,17 +32,12 @@ vault_sync() {
     cd "$VAULT"
     echo
 
-    if out=$(git pull --rebase 2>&1); then
-        msg "$GREEN" "pulled" "$(echo "$out" | tail -1)"
+    # Rides lib/git.sh: pull --rebase then push are owned by the engine
+    # (git_pull_push). Git's own errors still surface on stderr on failure.
+    if git_pull_push; then
+        msg "$GREEN" "synced" "pull --rebase + push"
     else
-        msg "$RED" "failed" "pull: $(echo "$out" | tail -1)"
-        echo; exit 1
-    fi
-
-    if out=$(git push 2>&1); then
-        msg "$GREEN" "pushed" "$(echo "$out" | tail -1)"
-    else
-        msg "$RED" "failed" "push: $(echo "$out" | tail -1)"
+        msg "$RED" "failed" "sync — see git output above"
         echo; exit 1
     fi
 

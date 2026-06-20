@@ -3,6 +3,8 @@
 set -euo pipefail
 
 source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
+# shellcheck source=lib/git.sh
+source "$TOOLS_HOME/lib/git.sh"
 
 CODE_HOME="${CODE_HOME:-$HOME/Documents/Code}"
 SITE_HOME="${SITE_HOME:-$CODE_HOME/Projects/jseverino.com}"
@@ -838,13 +840,16 @@ cmd_publish_all() {
             return 0
         fi
 
-        git push -u origin HEAD
-
-        if pr_url="$(gh pr view --json url -q .url 2>/dev/null)" && [[ -n "$pr_url" ]]; then
-            msg "$GREEN" "PR" "updated $pr_url"
+        # Rides lib/git.sh for push + PR mechanics. Note whether a PR already
+        # exists first, so the message can still say opened vs updated;
+        # git_open_or_update_pr returns the URL either way (--fill on create).
+        local had_pr=""
+        had_pr="$(gh pr view --json url -q .url 2>/dev/null || true)"
+        git_push_current
+        pr_url="$(git_open_or_update_pr main || true)"
+        if [[ -n "$had_pr" ]]; then
+            msg "$GREEN" "PR" "updated ${pr_url:-$had_pr}"
         else
-            gh pr create --base main --fill
-            pr_url="$(gh pr view --json url -q .url 2>/dev/null || true)"
             msg "$GREEN" "PR" "opened ${pr_url:-(see above)}"
         fi
         msg "$DIM" "next" "check CI + the Cloudflare preview on the PR, then \`site land\`"
@@ -888,16 +893,19 @@ cmd_land() {
         verify_slugs="$(changed_writeup_slugs "origin/main...HEAD")"
     fi
 
-    msg "$DIM" "step 1/3" "confirm CI is green"
-    if ! gh pr checks >/dev/null 2>&1; then
-        gh pr checks || true
-        die "error" "PR checks are not all green — wait for CI or fix failures, then re-run \`site land\`" 1
+    # Rides lib/git.sh: git_land confirms green checks then squash-merges +
+    # deletes the branch (squash keeps SSH signatures; rebase would strip them).
+    # It returns 2 when checks are not green, non-zero on merge failure.
+    msg "$DIM" "step 1/2" "confirm CI is green, then squash-merge + delete branch"
+    local rc=0
+    git_land || rc=$?
+    if (( rc )); then
+        if (( rc == 2 )); then
+            gh pr checks || true
+            die "error" "PR checks are not all green — wait for CI or fix failures, then re-run \`site land\`" 1
+        fi
+        die "error" "merge failed — check $pr_url" 1
     fi
-    msg "$GREEN" "checks" "all green — $pr_url"
-
-    msg "$DIM" "step 2/3" "squash-merge + delete branch"
-    gh pr merge --squash --delete-branch \
-        || die "error" "merge failed — check $pr_url" 1
     msg "$GREEN" "merged" "$branch → main (squash); Cloudflare Pages will rebuild"
 
     if [[ -z "$verify_slugs" ]]; then
@@ -905,7 +913,7 @@ cmd_land() {
         return 0
     fi
 
-    msg "$DIM" "step 3/3" "verify live (waiting ~30s for the Cloudflare rebuild)"
+    msg "$DIM" "step 2/2" "verify live (waiting ~30s for the Cloudflare rebuild)"
     sleep 30
     local verify_slug all_ok=1
     for verify_slug in $verify_slugs; do

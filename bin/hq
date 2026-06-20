@@ -10,6 +10,8 @@
 set -euo pipefail
 
 source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" hq "$@"
+# shellcheck source=lib/git.sh
+source "$TOOLS_HOME/lib/git.sh"
 
 describe_spec() {
     desc_tool "hq" "Sync vault frontmatter to Severino HQ, plus routine HQ deployment ops."
@@ -401,24 +403,37 @@ cmd_ship() {
     fi
 
     msg "$DIM" "staging" "tracked changes + known HQ app files"
+
+    # Rides lib/git.sh for the commit/push mechanics; the staging policy stays
+    # HQ's own: `git add -u` captures tracked edits repo-wide, then git_commit
+    # additively stages new files only under the known app dirs (its `git add --
+    # <paths>` is additive, so the index is the union of both). git_commit
+    # returns 1 when nothing is committable, mapped to exit 7 below. The push IS
+    # the deploy — it triggers the gated pipeline.
+    local rc=0
     (
         cd "$HQ_LOCAL_PATH"
         git add -u
-        git add \
-            assets content core docs docs_index expenses projects receipts reports \
-            static templates \
-            2>/dev/null || true
-    )
+        local d app_dirs=(assets content core docs docs_index expenses projects
+            receipts reports static templates) existing=()
+        for d in "${app_dirs[@]}"; do [[ -e "$d" ]] && existing+=("$d"); done
+        git_commit "$message" "${existing[@]}" || exit 7
+        git_push_current
+    ) || rc=$?
 
-    if git -C "$HQ_LOCAL_PATH" diff --cached --quiet; then
-        msg "$YELLOW" "skipped" "no committable HQ changes staged"
-        return 0
-    fi
-
-    git -C "$HQ_LOCAL_PATH" commit -m "$message"
-    git -C "$HQ_LOCAL_PATH" push
-    msg "$GREEN" "pushed" "the pipeline will build -> scan -> deploy on green"
-    msg "$DIM"   "watch"  "gh run watch   (or the Actions tab)"
+    case "$rc" in
+        0)
+            msg "$GREEN" "pushed" "the pipeline will build -> scan -> deploy on green"
+            msg "$DIM"   "watch"  "gh run watch   (or the Actions tab)"
+            ;;
+        7)
+            msg "$YELLOW" "skipped" "no committable HQ changes staged"
+            return 0
+            ;;
+        *)
+            die "error" "hq ship failed during commit/push (rc=$rc)" 1
+            ;;
+    esac
 
     if [[ -n "$(git -C "$VAULT" status --porcelain 2>/dev/null || true)" ]]; then
         msg "$YELLOW" "vault" "has uncommitted changes; run vault status/sync when ready"
