@@ -69,7 +69,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-plan="$(repos --json ${NAME:+"$NAME"} 2>/dev/null | node "$TOOLS_HOME/lib/ship/plan.mjs")"
+include_clean_branch=0
+[[ -n "$NAME" && "$NOPR" == "0" ]] && include_clean_branch=1
+plan="$(repos --json ${NAME:+"$NAME"} 2>/dev/null | SHIP_INCLUDE_CLEAN_BRANCH="$include_clean_branch" node "$TOOLS_HOME/lib/ship/plan.mjs")"
 
 if [[ -z "$plan" ]]; then
     header "ship" 0
