@@ -1,0 +1,209 @@
+#!/usr/bin/env bash
+# repos [options] [name] — fleet inventory of every repo under ~/Documents/Code.
+# One call returns git state, package manager, CI, and last commit for every
+# repo, so an agent (or human) gets the whole picture without running a dozen
+# git/ls/du commands per repo. `--json` is the machine surface.
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
+
+: "${CODE_HOME:=$HOME/Documents/Code}"
+
+# The single source of truth for repos's surface: lib/describe.sh renders
+# both this tool's -h text and its --describe JSON from this one declaration.
+describe_spec() {
+    desc_tool "repos" "Fleet inventory of every repo under ~/Documents/Code."
+    desc_inventory "Workspace" 190
+    desc_synopsis "repos [options] [name]"
+    desc_effect read
+    desc_opt --json       -- "Machine-readable output (one JSON object, \"repos\" array)"
+    desc_opt --dirty      -- "Only repos with uncommitted changes"
+    desc_opt --unpushed   -- "Only repos with no remote, no upstream, or unpushed commits"
+    desc_opt --pm PM      -- "Only repos whose package manager is PM (pnpm|npm|yarn|bun|none)"
+    desc_opt --sizes      -- "Include node_modules size (slower; runs du)"
+    desc_opt --icloud     -- "Count iCloud conflict duplicates ('name 2.ext') per repo"
+    desc_opt --root DIR   -- "Scan DIR instead of the defaults (repeatable)"
+    desc_pos name         -- "Only repos whose name contains NAME"
+    desc_para "Default roots are \$CODE_HOME/Assets and \$CODE_HOME/Projects. A directory is listed if it is a git work tree or carries a project manifest (package.json, pyproject.toml, go.mod, Cargo.toml). Use 'repos --pm npm' to see what is left to migrate, 'repos --unpushed' before stepping away, and 'repos --json' to consume the whole fleet in one parse."
+}
+
+desc_help_intercept "$@"
+
+# ---------- args ----------
+JSON=0 DIRTY=0 UNPUSHED=0 SIZES=0 ICLOUD=0
+PM_FILTER="" NAME_FILTER=""
+ROOTS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --json)     JSON=1; shift ;;
+        --dirty)    DIRTY=1; shift ;;
+        --unpushed) UNPUSHED=1; shift ;;
+        --sizes)    SIZES=1; shift ;;
+        --icloud)   ICLOUD=1; shift ;;
+        --pm)       PM_FILTER="${2:-}"; shift 2 ;;
+        --root)     ROOTS+=("${2:-}"); shift 2 ;;
+        -*)         die_unknown option "$1" ;;
+        *)          NAME_FILTER="$1"; shift ;;
+    esac
+done
+(( ${#ROOTS[@]} )) || ROOTS=("$CODE_HOME/Assets" "$CODE_HOME/Projects")
+
+# ---------- per-repo collection (parallel arrays, one entry per included repo) ----------
+R_NAME=() R_ROOT=() R_PATH=() R_GIT=() R_BRANCH=() R_REMOTE=() R_HASREMOTE=()
+R_DIRTY=() R_UNTRACKED=() R_AHEAD=() R_BEHIND=() R_UPSTREAM=()
+R_SHA=() R_DATE=() R_SUBJ=() R_LANG=() R_PM=() R_PMFIELD=() R_NVMRC=()
+R_NM=() R_NMSIZE=() R_CI=() R_IDUPS=()
+
+collect() {
+    local d="$1" root_label="$2"
+    local name; name="$(basename "$d")"
+
+    local is_git=0
+    git -C "$d" rev-parse --is-inside-work-tree >/dev/null 2>&1 && is_git=1
+    local has_manifest=0
+    [[ -f "$d/package.json" || -f "$d/pyproject.toml" || -f "$d/go.mod" || -f "$d/Cargo.toml" ]] && has_manifest=1
+    (( is_git || has_manifest )) || return 0
+
+    local branch='-' remote='' has_remote=0 dirty=0 untracked=0 ahead=0 behind=0 upstream=0
+    local sha='' cdate='' subj=''
+    if (( is_git )); then
+        branch="$(git -C "$d" symbolic-ref --quiet --short HEAD 2>/dev/null || git -C "$d" rev-parse --short HEAD 2>/dev/null || echo '-')"
+        remote="$(git -C "$d" remote get-url origin 2>/dev/null || true)"
+        [[ -n "$remote" ]] && has_remote=1
+        local porc; porc="$(git -C "$d" status --porcelain 2>/dev/null || true)"
+        if [[ -n "$porc" ]]; then
+            untracked="$(printf '%s\n' "$porc" | grep -c '^??' || true)"
+            dirty="$(printf '%s\n' "$porc" | grep -cv '^??' || true)"
+        fi
+        local lr; lr="$(git -C "$d" rev-list --left-right --count '@{u}...HEAD' 2>/dev/null || true)"
+        if [[ -n "$lr" ]]; then upstream=1; behind="${lr%%[[:space:]]*}"; ahead="${lr##*[[:space:]]}"; fi
+        local lc; lc="$(git -C "$d" log -1 --format='%h%x1f%cs%x1f%s' 2>/dev/null || true)"
+        [[ -n "$lc" ]] && { IFS=$'\x1f' read -r sha cdate subj <<<"$lc" || true; }
+    fi
+
+    local pm='-'
+    if   [[ -f "$d/pnpm-lock.yaml" ]];                then pm=pnpm
+    elif [[ -f "$d/package-lock.json" ]];             then pm=npm
+    elif [[ -f "$d/yarn.lock" ]];                     then pm=yarn
+    elif [[ -f "$d/bun.lockb" || -f "$d/bun.lock" ]]; then pm=bun
+    elif [[ -f "$d/package.json" ]];                  then pm=none
+    fi
+    local lang=other
+    if   [[ -f "$d/package.json" ]];                                then lang=node
+    elif [[ -f "$d/pyproject.toml" || -f "$d/requirements.txt" ]];  then lang=python
+    elif [[ -f "$d/go.mod" ]];                                      then lang=go
+    elif [[ -f "$d/Cargo.toml" ]];                                  then lang=rust
+    elif compgen -G "$d/bin/*" >/dev/null 2>&1 || compgen -G "$d/*.sh" >/dev/null 2>&1; then lang=bash
+    fi
+    local pmfield='-'
+    if [[ -f "$d/package.json" ]]; then
+        pmfield="$(grep -oE '"packageManager"[[:space:]]*:[[:space:]]*"[^"]+"' "$d/package.json" 2>/dev/null | grep -oE '"[^"]+"$' | tr -d '"' || true)"
+        [[ -n "$pmfield" ]] || pmfield='-'
+    fi
+    local nvmrc='-'; [[ -f "$d/.nvmrc" ]] && nvmrc="$(head -1 "$d/.nvmrc" 2>/dev/null | tr -d '[:space:]' || true)"
+    [[ -n "$nvmrc" ]] || nvmrc='-'
+
+    local nm=0; [[ -d "$d/node_modules" ]] && nm=1
+    local nmsize='null'
+    if (( SIZES )) && (( nm )); then nmsize="\"$(du -sh "$d/node_modules" 2>/dev/null | cut -f1 || true)\""; fi
+    local ci=0
+    [[ -d "$d/.github/workflows" ]] && ci="$(find "$d/.github/workflows" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null | wc -l | tr -d ' ' || true)"
+    local idups=0
+    if (( ICLOUD )); then
+        idups="$(find "$d" -path '*/node_modules' -prune -o -path '*/.git' -prune -o -type f -name '* [0-9].*' -print 2>/dev/null | wc -l | tr -d ' ' || true)"
+    fi
+
+    # filters
+    [[ -n "$NAME_FILTER" && "$name" != *"$NAME_FILTER"* ]] && return 0
+    [[ -n "$PM_FILTER" && "$pm" != "$PM_FILTER" ]] && return 0
+    (( DIRTY )) && (( dirty + untracked == 0 )) && return 0
+    if (( UNPUSHED )); then
+        (( has_remote == 0 || ahead > 0 || upstream == 0 )) || return 0
+    fi
+
+    R_NAME+=("$name"); R_ROOT+=("$root_label"); R_PATH+=("$d")
+    R_GIT+=("$is_git"); R_BRANCH+=("$branch"); R_REMOTE+=("$remote"); R_HASREMOTE+=("$has_remote")
+    R_DIRTY+=("$dirty"); R_UNTRACKED+=("$untracked"); R_AHEAD+=("$ahead"); R_BEHIND+=("$behind"); R_UPSTREAM+=("$upstream")
+    R_SHA+=("$sha"); R_DATE+=("$cdate"); R_SUBJ+=("$subj"); R_LANG+=("$lang")
+    R_PM+=("$pm"); R_PMFIELD+=("$pmfield"); R_NVMRC+=("$nvmrc")
+    R_NM+=("$nm"); R_NMSIZE+=("$nmsize"); R_CI+=("$ci"); R_IDUPS+=("$idups")
+}
+
+for root in "${ROOTS[@]}"; do
+    [[ -d "$root" ]] || continue
+    label="$(basename "$root")"
+    for d in "$root"/*/; do
+        d="${d%/}"
+        [[ -d "$d" ]] || continue
+        collect "$d" "$label"
+    done
+done
+
+N=${#R_NAME[@]}
+
+# ---------- JSON surface ----------
+if (( JSON )); then
+    printf '{"ok":true,"roots":['
+    for i in "${!ROOTS[@]}"; do
+        (( i )) && printf ','
+        printf '"%s"' "$(json_escape "${ROOTS[$i]}")"
+    done
+    printf '],"count":%d,"repos":[' "$N"
+    i=0
+    while (( i < N )); do
+        (( i )) && printf ','
+        printf '{"name":"%s","path":"%s","root":"%s","git":%s,"branch":"%s","remote":"%s","has_remote":%s,"dirty":%d,"untracked":%d,"ahead":%d,"behind":%d,"upstream":%s,"last_commit":{"sha":"%s","date":"%s","subject":"%s"},"lang":"%s","pm":"%s","package_manager":"%s","nvmrc":"%s","node_modules":%s,"node_modules_size":%s,"ci":%d' \
+            "$(json_escape "${R_NAME[$i]}")" "$(json_escape "${R_PATH[$i]}")" "$(json_escape "${R_ROOT[$i]}")" \
+            "$(json_bool "${R_GIT[$i]}")" "$(json_escape "${R_BRANCH[$i]}")" "$(json_escape "${R_REMOTE[$i]}")" "$(json_bool "${R_HASREMOTE[$i]}")" \
+            "${R_DIRTY[$i]}" "${R_UNTRACKED[$i]}" "${R_AHEAD[$i]}" "${R_BEHIND[$i]}" "$(json_bool "${R_UPSTREAM[$i]}")" \
+            "$(json_escape "${R_SHA[$i]}")" "$(json_escape "${R_DATE[$i]}")" "$(json_escape "${R_SUBJ[$i]}")" \
+            "$(json_escape "${R_LANG[$i]}")" "$(json_escape "${R_PM[$i]}")" "$(json_escape "${R_PMFIELD[$i]}")" "$(json_escape "${R_NVMRC[$i]}")" \
+            "$(json_bool "${R_NM[$i]}")" "${R_NMSIZE[$i]}" "${R_CI[$i]}"
+        (( ICLOUD )) && printf ',"icloud_dups":%d' "${R_IDUPS[$i]}"
+        printf '}'
+        i=$(( i + 1 ))
+    done
+    printf ']}\n'
+    exit 0
+fi
+
+# ---------- human surface ----------
+# Pad a string to WIDTH display columns. ${#s} counts characters (UTF-8 locale),
+# so this aligns columns that hold multibyte glyphs (± ↑ ↓ …) where printf's
+# byte-based %-Ns would not.
+pad() { local s="$1" w="$2"; printf '%s' "$s"; (( ${#s} < w )) && printf '%*s' $(( w - ${#s} )) ''; }
+
+header "repos" "$N"
+if (( N == 0 )); then
+    msg "$DIM" "none" "no repos matched"
+    echo; exit 0
+fi
+
+printf '  %s%-22s %-9s %-6s %-17s %-4s %s%s\n' "$BOLD" "REPO" "ROOT" "PM" "STATUS" "CI" "LAST COMMIT" "$RESET"
+n_dirty=0 n_unpushed=0
+i=0
+while (( i < N )); do
+    st=""
+    (( ${R_HASREMOTE[$i]} == 0 )) && st+="local "
+    (( ${R_DIRTY[$i]} > 0 ))      && st+="±${R_DIRTY[$i]} "
+    (( ${R_UNTRACKED[$i]} > 0 ))  && st+="?${R_UNTRACKED[$i]} "
+    (( ${R_AHEAD[$i]} > 0 ))      && st+="↑${R_AHEAD[$i]} "
+    (( ${R_BEHIND[$i]} > 0 ))     && st+="↓${R_BEHIND[$i]} "
+    [[ -z "$st" ]] && st="clean"; st="${st% }"
+    (( ${R_DIRTY[$i]} + ${R_UNTRACKED[$i]} > 0 )) && n_dirty=$(( n_dirty + 1 ))
+    (( ${R_HASREMOTE[$i]} == 0 || ${R_AHEAD[$i]} > 0 || ${R_UPSTREAM[$i]} == 0 )) && n_unpushed=$(( n_unpushed + 1 ))
+
+    nm="${R_NAME[$i]}"; (( ${#nm} > 22 )) && nm="${nm:0:21}…"
+    subj="${R_SUBJ[$i]}"; (( ${#subj} > 42 )) && subj="${subj:0:41}…"
+    ci="${R_CI[$i]}"; [[ "$ci" == "0" ]] && ci="-"
+    color="$RESET"; [[ "$st" != "clean" ]] && color="$YELLOW"
+    printf '  '; pad "$nm" 22
+    printf ' %-9s %-6s ' "${R_ROOT[$i]}" "${R_PM[$i]}"
+    printf '%s' "$color"; pad "$st" 17; printf '%s' "$RESET"
+    printf ' %-4s %s %s\n' "$ci" "${R_DATE[$i]:--}" "$subj"
+    i=$(( i + 1 ))
+done
+
+echo
+msg "$DIM" "summary" "$N repos · $n_dirty dirty · $n_unpushed unpushed"
+echo
