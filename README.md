@@ -65,6 +65,7 @@ tools/
     # Workspace
     repos       # Fleet inventory of every repo under ~/Documents/Code.
     brief       # One emit-once snapshot of repos, vault, and writeups.
+    ship        # Commit, push, and PR pending work — one repo, or the whole fleet.
   .github/               # CI workflows and repository automation
   archive/               # retired scripts kept for reference
   bench/                 # measured claims asserted in CI
@@ -657,6 +658,25 @@ Usage: `brief`
 | `--days <DAYS>` | Vault recent-changes window in days (default 7) |
 
 Effect: `read + network`
+
+#### `ship`
+
+Commit, push, and PR pending work — one repo, or the whole fleet.
+
+Preview with 'ship' or 'ship <name>'; execute with --go. A single repo needs no --all; a fleet ship requires --all so it can never happen by accident. Pass '-- path ...' to commit only those paths instead of everything. If you are on main (or a branch whose remote was merged and deleted) ship cuts a fresh 'ship/<timestamp>' branch off the default branch so main is never committed to and zombie branches are never pushed. The PR body defaults to a clean file summary; pass --body (or let an agent pass one) for a richer PR.
+
+Usage: `ship <name>`
+
+| Argument | Description |
+|---|---|
+| `--go` | Actually commit/push/PR (default is a dry-run preview) |
+| `--all` | Required to act on more than one repo (a guard against accidental fleet ships) |
+| `-m, --message <MSG>` | PR title + commit message (default: derived from changed paths) |
+| `--body <BODY>` | PR body (default: a generated new/modified/removed file summary) |
+| `--no-pr` | Commit and push only; do not open a PR |
+| `<name>` | Only repos whose name contains NAME |
+
+Effect: `remote_write + network`
 <!-- END GENERATED CLI REFERENCE -->
 
 ### tools
