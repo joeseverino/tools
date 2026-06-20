@@ -633,6 +633,7 @@ Usage: `repos <name>`
 
 | Argument | Description |
 |---|---|
+| `--tui` | Open the interactive repo fleet explorer (can execute ship/resync actions) |
 | `--json` | Machine-readable output (one JSON object, "repos" array) |
 | `--dirty` | Only repos with uncommitted changes |
 | `--unpushed` | Only repos with no remote, no upstream, or unpushed commits |
@@ -642,7 +643,14 @@ Usage: `repos <name>`
 | `--root <DIR>` | Scan DIR instead of the defaults (repeatable) |
 | `<name>` | Only repos whose name contains NAME |
 
-Effect: `read`
+Effect: `remote_write + network + interactive`
+
+**Examples**
+
+```sh
+repos tui  # open the fleet explorer
+repos --unpushed --json  # machine-read repos needing push, upstream setup, or stale-branch cleanup
+```
 
 #### `brief`
 
