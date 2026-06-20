@@ -85,13 +85,23 @@ git_pr_body_summary() {
     return 0
 }
 
-# Open a PR for the current branch against <base>, or echo the existing one.
-# Echoes the PR URL. Title/body optional (gh --fill used when both empty).
+# Open a PR for the current branch against <base>, or update + return the
+# existing one. Echoes the PR URL. On an existing PR it syncs the title to
+# <title> (so the PR title keeps tracking the conventional commit subject that
+# release-please reads) and rewrites the body only when <update_body> is 1 — a
+# curated description is never clobbered by a default auto-summary. On create,
+# title+body are used (gh --fill when both empty).
 git_open_or_update_pr() {
-    local base="$1" title="${2:-}" body="${3:-}" head url
+    local base="$1" title="${2:-}" body="${3:-}" update_body="${4:-0}" head url
     head="$(git symbolic-ref --short -q HEAD 2>/dev/null || true)"
     url="$(gh pr list --head "$head" --base "$base" --json url -q '.[0].url' 2>/dev/null || true)"
-    if [[ -n "$url" ]]; then printf '%s' "$url"; return 0; fi
+    if [[ -n "$url" ]]; then
+        local args=()
+        [[ -n "$title" ]] && args+=(--title "$title")
+        (( update_body )) && [[ -n "$body" ]] && args+=(--body "$body")
+        (( ${#args[@]} )) && { gh pr edit "$url" "${args[@]}" >/dev/null 2>&1 || true; }
+        printf '%s' "$url"; return 0
+    fi
     if [[ -n "$title" ]]; then
         gh pr create --base "$base" --title "$title" --body "$body" >/dev/null 2>&1 || return 1
     else
@@ -107,14 +117,32 @@ git_land() {
     gh pr merge --squash --delete-branch
 }
 
+# True when local branch <1>'s upstream is gone (its remote branch was deleted,
+# the signal a PR was merged + the branch auto-deleted on GitHub).
+git_branch_gone() {
+    [[ "$(git for-each-ref --format='%(upstream:track)' "refs/heads/$1" 2>/dev/null)" == *'[gone]'* ]]
+}
+
 # Bring the repo to a clean state: fetch --prune, fast-forward <base> when on it
 # and behind, and delete local branches whose upstream was merged and deleted
-# (never deletes a branch that still has unique commits — no lost work).
+# (never deletes a branch that still has unique commits — no lost work). If the
+# CURRENT branch is itself merged + gone with nothing unique on it, step back
+# onto <base> first so it can be pruned — the "merged the PR on GitHub with
+# auto-delete, came back to the terminal still on that branch" case. A dirty
+# working tree blocks the step-back/ff (git refuses), so the caller skips dirty
+# repos. Returns 1 only on fetch failure.
 git_sync_clean() {
     local base="${1:-}" cur b
     [[ -n "$base" ]] || base="$(git_default_branch)"
     git fetch -q origin --prune || return 1
     cur="$(git symbolic-ref --short -q HEAD 2>/dev/null || true)"
+
+    if [[ -n "$cur" && "$cur" != "$base" ]] \
+       && git_branch_gone "$cur" \
+       && [[ "$(git_unique_commits "$base")" == "0" ]]; then
+        git checkout -q "$base" 2>/dev/null && cur="$base"
+    fi
+
     if [[ "$cur" == "$base" ]]; then
         git merge -q --ff-only "origin/$base" 2>/dev/null || true
     fi
