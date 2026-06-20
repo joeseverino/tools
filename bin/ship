@@ -12,6 +12,26 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 # shellcheck source=lib/git.sh
 source "$TOOLS_HOME/lib/git.sh"
 
+# Echo the command that runs <repo path>'s own local gate, or nothing (return 1)
+# if the repo declares none. First match wins: the tools repo's own `tools
+# check`, then a scripts/check.sh, then a package.json check/test script run
+# through the repo's package manager. This is what --check runs before pushing.
+ship_gate_cmd() {
+    local p="$1"
+    [[ -x "$p/bin/tools" ]]      && { printf 'tools check --no-bench'; return 0; }
+    [[ -f "$p/scripts/check.sh" ]] && { printf 'bash scripts/check.sh'; return 0; }
+    if [[ -f "$p/package.json" ]]; then
+        local runner='npm run'
+        [[ -f "$p/pnpm-lock.yaml" ]]                  && runner='pnpm run'
+        [[ -f "$p/yarn.lock" ]]                       && runner='yarn'
+        [[ -f "$p/bun.lockb" || -f "$p/bun.lock" ]]   && runner='bun run'
+        local script
+        script="$(node -e 'try{const s=(require(process.argv[1]).scripts)||{};process.stdout.write(s.check?"check":(s.test?"test":""))}catch(e){}' "$p/package.json" 2>/dev/null || true)"
+        [[ -n "$script" ]] && { printf '%s %s' "$runner" "$script"; return 0; }
+    fi
+    return 1
+}
+
 describe_spec() {
     desc_tool "ship" "Commit, push, and PR pending work — one repo, or the whole fleet."
     desc_inventory "Workspace" 210
@@ -22,21 +42,27 @@ describe_spec() {
     desc_opt -m --message MSG -- "PR title + commit message (default: derived from changed paths)"
     desc_opt --body BODY  -- "PR body (default: a generated new/modified/removed file summary)"
     desc_opt --no-pr      -- "Commit and push only; do not open a PR"
+    desc_opt --check      -- "Run the repo's own local gate (tools check / scripts/check.sh / npm test) before pushing; skip the repo if it fails"
+    desc_opt --watch      -- "After opening/updating the PR, poll 'gh pr checks' until CI is green or red"
     desc_pos name         -- "Only repos whose name contains NAME"
     desc_para "Preview with 'ship' or 'ship <name>'; execute with --go. A single repo needs no --all; a fleet ship requires --all so it can never happen by accident. Pass '-- path ...' to commit only those paths instead of everything. If you are on main (or a branch whose remote was merged and deleted) ship cuts a fresh 'ship/<timestamp>' branch off the default branch so main is never committed to and zombie branches are never pushed. The PR body defaults to a clean file summary; pass --body (or let an agent pass one) for a richer PR."
+    desc_para "--check runs the repo's local gate before pushing so a failure is caught here, not after a CI round-trip; a repo that fails its gate is left unpushed. --watch then follows the PR's checks to green or red instead of you polling by hand. Together they close the write half of the loop: gate locally, ship, watch CI, then 'resync' once it merges."
+    desc_para "ship is idempotent on an open PR, so iterating on one you review on GitHub is the same one command, not raw git. Re-run it after amending a commit and it re-pushes the branch with --force-with-lease and syncs the PR title to the (conventional) commit subject; the body is only rewritten when you pass --body, so a description you curated on GitHub is never clobbered."
 }
 
 desc_help_intercept "$@"
 
-GO=0 ALL=0 NOPR=0 MSG="" BODY="" NAME=""
+GO=0 ALL=0 NOPR=0 CHECK=0 WATCH=0 BODY_SET=0 MSG="" BODY="" NAME=""
 PATHS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --go)         GO=1; shift ;;
         --all)        ALL=1; shift ;;
         --no-pr)      NOPR=1; shift ;;
+        --check)      CHECK=1; shift ;;
+        --watch)      WATCH=1; shift ;;
         -m|--message) MSG="${2:-}"; shift 2 ;;
-        --body)       BODY="${2:-}"; shift 2 ;;
+        --body)       BODY="${2:-}"; BODY_SET=1; shift 2 ;;
         --)           shift; PATHS=("$@"); break ;;
         -*)           die_unknown option "$1" ;;
         *)            NAME="$1"; shift ;;
@@ -100,14 +126,56 @@ while IFS=$'\t' read -r name path branch uncommitted ahead has_remote; do
             if (( ${#PATHS[@]} )); then git_commit "$MSG" "${PATHS[@]}" || true; else git_commit "$MSG" || true; fi
         fi
 
-        git_push_current \
+        # --check: run the repo's own gate before pushing, so a failure is
+        # caught locally instead of after a CI round-trip.
+        if (( CHECK )); then
+            if gate="$(ship_gate_cmd "$path")"; then
+                printf '  %s%-10s%s %s\n' "$DIM" "check" "$RESET" "$gate"
+                if ! eval "$gate"; then
+                    printf '  %s%-10s%s %s\n' "$RED$BOLD" "skip" "$RESET" "$name: local gate failed — not pushed"
+                    exit 0
+                fi
+            else
+                printf '  %s%-10s%s %s\n' "$DIM" "check" "$RESET" "$name: no local gate — pushing without one"
+            fi
+        fi
+
+        # Plain push; if the branch was amended/rebased (non-fast-forward, the
+        # "iterate on an open PR" case) re-push it safely with --force-with-lease,
+        # which refuses if the remote moved under us. ship only ever pushes its
+        # own feature branches, so forcing here is correct, not dangerous.
+        git_push_current 2>/dev/null \
+            || git push -q -u --force-with-lease origin HEAD 2>/dev/null \
             || { printf '  %s%-10s%s %s\n' "$RED$BOLD" "skip" "$RESET" "$name: push failed (check gh auth / remote)"; exit 0; }
 
         if (( ! NOPR )); then
             title="${MSG:-$(git log -1 --format='%s' 2>/dev/null || true)}"
             body="${BODY:-$(git_pr_body_summary "$base")}"
-            url="$(git_open_or_update_pr "$base" "$title" "$body" || true)"
+            # Existing PR: title is synced to the commit subject; body is only
+            # rewritten when --body was passed (BODY_SET), so re-shipping never
+            # clobbers a PR description you curated on GitHub.
+            url="$(git_open_or_update_pr "$base" "$title" "$body" "$BODY_SET" || true)"
             printf '  %s%-10s%s %s\n' "$GREEN$BOLD" "PR" "$RESET" "${url:-(create failed — check gh auth)}"
+
+            # --watch: follow CI to a terminal state instead of polling by hand.
+            # A brand-new PR races CI registration, so wait until at least one
+            # check exists before watching — otherwise `gh pr checks --watch`
+            # exits instantly on "no checks" and reports a false result. Then
+            # trust --watch's own exit code (it blocks until checks complete).
+            if (( WATCH )); then
+                printf '  %s%-10s%s %s\n' "$DIM" "watch" "$RESET" "polling gh pr checks…"
+                tries=0
+                until [[ -n "$(gh pr checks 2>/dev/null)" ]] || (( tries >= 12 )); do
+                    sleep 5; tries=$(( tries + 1 ))
+                done
+                if [[ -z "$(gh pr checks 2>/dev/null)" ]]; then
+                    printf '  %s%-10s%s %s\n' "$DIM" "watch" "$RESET" "$name: no checks registered — nothing to watch"
+                elif gh pr checks --watch --interval 15 >/dev/null 2>&1; then
+                    printf '  %s%-10s%s %s\n' "$GREEN$BOLD" "green" "$RESET" "$name: all checks passed"
+                else
+                    printf '  %s%-10s%s %s\n' "$RED$BOLD" "red" "$RESET" "$name: checks failed — see ${url:-the PR}"
+                fi
+            fi
         fi
     )
     shipped=$(( shipped + 1 ))
