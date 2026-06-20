@@ -9,6 +9,13 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 
 : "${CODE_HOME:=$HOME/Documents/Code}"
 
+REPOS_LOCAL_OK=()
+REPOS_CONFIG="${REPOS_CONFIG:-$TOOLS_HOME/config/repos.sh}"
+if [[ -f "$REPOS_CONFIG" ]]; then
+    # shellcheck source=config/repos.sh
+    source "$REPOS_CONFIG"
+fi
+
 # The single source of truth for repos's surface: lib/describe.sh renders
 # both this tool's -h text and its --describe JSON from this one declaration.
 describe_spec() {
@@ -82,6 +89,15 @@ R_DIRTY=() R_UNTRACKED=() R_AHEAD=() R_BEHIND=() R_UPSTREAM=() R_UPSTREAM_NAME=(
 R_UPSTREAM_TRACK=() R_UPSTREAM_GONE=()
 R_SHA=() R_DATE=() R_SUBJ=() R_LANG=() R_PM=() R_PMFIELD=() R_NVMRC=()
 R_NM=() R_NMSIZE=() R_CI=() R_IDUPS=()
+R_LOCAL_OK=() R_NEEDS_SHIP=() R_NEEDS_RESYNC=() R_NEEDS_ATTENTION=()
+
+repo_local_ok() {
+    local name="$1" path="$2" item
+    for item in "${REPOS_LOCAL_OK[@]:-}"; do
+        [[ "$item" == "$name" || "$item" == "$path" ]] && return 0
+    done
+    return 1
+}
 
 collect() {
     local d="$1" root_label="$2"
@@ -94,6 +110,7 @@ collect() {
     (( is_git || has_manifest )) || return 0
 
     local branch='-' remote='' has_remote=0 dirty=0 untracked=0 ahead=0 behind=0 upstream=0 upstream_name='' upstream_track='' upstream_gone=0
+    local local_ok=0 needs_ship=0 needs_resync=0 needs_attention=0
     local sha='' cdate='' subj=''
     if (( is_git )); then
         branch="$(git -C "$d" symbolic-ref --quiet --short HEAD 2>/dev/null || git -C "$d" rev-parse --short HEAD 2>/dev/null || echo '-')"
@@ -149,12 +166,17 @@ collect() {
         idups="$(find "$d" -path '*/node_modules' -prune -o -path '*/.git' -prune -o -type f -name '* [0-9].*' -print 2>/dev/null | wc -l | tr -d ' ' || true)"
     fi
 
+    repo_local_ok "$name" "$d" && local_ok=1
+    (( dirty + untracked > 0 || ahead > 0 || (has_remote == 1 && upstream == 0 && local_ok == 0) )) && needs_ship=1
+    (( upstream_gone > 0 || behind > 0 )) && needs_resync=1
+    (( needs_ship > 0 || needs_resync > 0 || (has_remote == 0 && local_ok == 0) )) && needs_attention=1
+
     # filters
     [[ -n "$NAME_FILTER" && "$name" != *"$NAME_FILTER"* ]] && return 0
     [[ -n "$PM_FILTER" && "$pm" != "$PM_FILTER" ]] && return 0
     (( DIRTY )) && (( dirty + untracked == 0 )) && return 0
     if (( UNPUSHED )); then
-        (( has_remote == 0 || ahead > 0 || upstream == 0 || upstream_gone == 1 )) || return 0
+        (( needs_ship == 1 || needs_resync == 1 || (has_remote == 0 && local_ok == 0) )) || return 0
     fi
 
     R_NAME+=("$name"); R_ROOT+=("$root_label"); R_PATH+=("$d")
@@ -164,6 +186,7 @@ collect() {
     R_SHA+=("$sha"); R_DATE+=("$cdate"); R_SUBJ+=("$subj"); R_LANG+=("$lang")
     R_PM+=("$pm"); R_PMFIELD+=("$pmfield"); R_NVMRC+=("$nvmrc")
     R_NM+=("$nm"); R_NMSIZE+=("$nmsize"); R_CI+=("$ci"); R_IDUPS+=("$idups")
+    R_LOCAL_OK+=("$local_ok"); R_NEEDS_SHIP+=("$needs_ship"); R_NEEDS_RESYNC+=("$needs_resync"); R_NEEDS_ATTENTION+=("$needs_attention")
 }
 
 for root in "${ROOTS[@]}"; do
@@ -189,11 +212,12 @@ if (( JSON )); then
     i=0
     while (( i < N )); do
         (( i )) && printf ','
-        printf '{"name":"%s","path":"%s","root":"%s","git":%s,"branch":"%s","remote":"%s","has_remote":%s,"dirty":%d,"untracked":%d,"ahead":%d,"behind":%d,"upstream":%s,"upstream_name":"%s","upstream_track":"%s","upstream_gone":%s,"last_commit":{"sha":"%s","date":"%s","subject":"%s"},"lang":"%s","pm":"%s","package_manager":"%s","nvmrc":"%s","node_modules":%s,"node_modules_size":%s,"ci":%d' \
+        printf '{"name":"%s","path":"%s","root":"%s","git":%s,"branch":"%s","remote":"%s","has_remote":%s,"dirty":%d,"untracked":%d,"ahead":%d,"behind":%d,"upstream":%s,"upstream_name":"%s","upstream_track":"%s","upstream_gone":%s,"local_ok":%s,"needs_ship":%s,"needs_resync":%s,"needs_attention":%s,"last_commit":{"sha":"%s","date":"%s","subject":"%s"},"lang":"%s","pm":"%s","package_manager":"%s","nvmrc":"%s","node_modules":%s,"node_modules_size":%s,"ci":%d' \
             "$(json_escape "${R_NAME[$i]}")" "$(json_escape "${R_PATH[$i]}")" "$(json_escape "${R_ROOT[$i]}")" \
             "$(json_bool "${R_GIT[$i]}")" "$(json_escape "${R_BRANCH[$i]}")" "$(json_escape "${R_REMOTE[$i]}")" "$(json_bool "${R_HASREMOTE[$i]}")" \
             "${R_DIRTY[$i]}" "${R_UNTRACKED[$i]}" "${R_AHEAD[$i]}" "${R_BEHIND[$i]}" "$(json_bool "${R_UPSTREAM[$i]}")" \
             "$(json_escape "${R_UPSTREAM_NAME[$i]}")" "$(json_escape "${R_UPSTREAM_TRACK[$i]}")" "$(json_bool "${R_UPSTREAM_GONE[$i]}")" \
+            "$(json_bool "${R_LOCAL_OK[$i]}")" "$(json_bool "${R_NEEDS_SHIP[$i]}")" "$(json_bool "${R_NEEDS_RESYNC[$i]}")" "$(json_bool "${R_NEEDS_ATTENTION[$i]}")" \
             "$(json_escape "${R_SHA[$i]}")" "$(json_escape "${R_DATE[$i]}")" "$(json_escape "${R_SUBJ[$i]}")" \
             "$(json_escape "${R_LANG[$i]}")" "$(json_escape "${R_PM[$i]}")" "$(json_escape "${R_PMFIELD[$i]}")" "$(json_escape "${R_NVMRC[$i]}")" \
             "$(json_bool "${R_NM[$i]}")" "${R_NMSIZE[$i]}" "${R_CI[$i]}"
@@ -222,7 +246,8 @@ n_dirty=0 n_unpushed=0
 i=0
 while (( i < N )); do
     st=""
-    (( ${R_HASREMOTE[$i]} == 0 )) && st+="local "
+    (( ${R_HASREMOTE[$i]} == 0 && ${R_LOCAL_OK[$i]} == 0 )) && st+="local "
+    (( ${R_HASREMOTE[$i]} == 0 && ${R_LOCAL_OK[$i]} == 1 )) && st+="local-ok "
     (( ${R_DIRTY[$i]} > 0 ))      && st+="±${R_DIRTY[$i]} "
     (( ${R_UNTRACKED[$i]} > 0 ))  && st+="?${R_UNTRACKED[$i]} "
     (( ${R_AHEAD[$i]} > 0 ))      && st+="↑${R_AHEAD[$i]} "
@@ -230,7 +255,7 @@ while (( i < N )); do
     (( ${R_UPSTREAM_GONE[$i]} > 0 )) && st+="gone "
     [[ -z "$st" ]] && st="clean"; st="${st% }"
     (( ${R_DIRTY[$i]} + ${R_UNTRACKED[$i]} > 0 )) && n_dirty=$(( n_dirty + 1 ))
-    (( ${R_HASREMOTE[$i]} == 0 || ${R_AHEAD[$i]} > 0 || ${R_UPSTREAM[$i]} == 0 || ${R_UPSTREAM_GONE[$i]} > 0 )) && n_unpushed=$(( n_unpushed + 1 ))
+    (( ${R_NEEDS_ATTENTION[$i]} > 0 )) && n_unpushed=$(( n_unpushed + 1 ))
 
     nm="${R_NAME[$i]}"; (( ${#nm} > 22 )) && nm="${nm:0:21}…"
     subj="${R_SUBJ[$i]}"; (( ${#subj} > 42 )) && subj="${subj:0:41}…"
