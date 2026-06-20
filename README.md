@@ -62,6 +62,9 @@ tools/
     remember    # Write a Claude memory file + MEMORY.md index entry in one shot.
     doc-to-pdf  # Render a Markdown file (with Mermaid) to PDF via local Chromium, offline.
     diagram     # Render Mermaid .mmd sources to neighboring PNG files.
+    # Workspace
+    repos       # Fleet inventory of every repo under ~/Documents/Code.
+    brief       # One emit-once snapshot of repos, vault, and writeups.
   .github/               # CI workflows and repository automation
   archive/               # retired scripts kept for reference
   bench/                 # measured claims asserted in CI
@@ -272,7 +275,7 @@ Effect: `local_write + interactive`
 
 Quick-capture a note into the vault inbox.
 
-Capture a quick note into your vault inbox folder. The filename is "YYYY-MM-DD HHMMSS <first words>.md" and the body is the captured text.
+Capture a quick note into your vault inbox folder. The filename is "YYYY-MM-DD HHMMSS <first words>.md" and the body is the captured text, prefixed with doc_id and created frontmatter.
 
 Usage: `inbox [text]...`
 
@@ -617,6 +620,43 @@ Effect: `local_write`
 diagram docs/diagrams/
 diagram docs/diagrams/architecture.mmd
 ```
+
+#### `repos`
+
+Fleet inventory of every repo under ~/Documents/Code.
+
+Default roots are $CODE_HOME/Assets and $CODE_HOME/Projects. A directory is listed if it is a git work tree or carries a project manifest (package.json, pyproject.toml, go.mod, Cargo.toml). Use 'repos --pm npm' to see what is left to migrate, 'repos --unpushed' before stepping away, and 'repos --json' to consume the whole fleet in one parse.
+
+Usage: `repos <name>`
+
+| Argument | Description |
+|---|---|
+| `--json` | Machine-readable output (one JSON object, "repos" array) |
+| `--dirty` | Only repos with uncommitted changes |
+| `--unpushed` | Only repos with no remote, no upstream, or unpushed commits |
+| `--pm <PM>` | Only repos whose package manager is PM (pnpm\|npm\|yarn\|bun\|none) |
+| `--sizes` | Include node_modules size (slower; runs du) |
+| `--icloud` | Count iCloud conflict duplicates ('name 2.ext') per repo |
+| `--root <DIR>` | Scan DIR instead of the defaults (repeatable) |
+| `<name>` | Only repos whose name contains NAME |
+
+Effect: `read`
+
+#### `brief`
+
+One emit-once snapshot of repos, vault, and writeups.
+
+Pure aggregator: it never re-implements a fact. Repo state comes from 'repos', and every vault fact (recent changes, docs to review, inbox) comes from 'severino-vault-mcp brief' and 'list-writeups' — the vault's one owner. Run 'brief' to orient at the start of a session, 'brief --json' to consume the whole workspace state in a single parse.
+
+Usage: `brief`
+
+| Argument | Description |
+|---|---|
+| `--json` | Machine-readable digest (one JSON object) |
+| `--prs` | Include open GitHub PRs per repo (slower; runs gh) |
+| `--days <DAYS>` | Vault recent-changes window in days (default 7) |
+
+Effect: `read + network`
 <!-- END GENERATED CLI REFERENCE -->
 
 ### tools
@@ -827,8 +867,10 @@ Quick-capture a note into the vault inbox folder.
 
 Filename is `YYYY-MM-DD HHMMSS <first words>.md` so notes sort
 chronologically and have a readable name. Body is the captured text,
-prefixed with a small `created:` frontmatter block. `--edit` opens the captured
-note and renames a blank capture from its first non-empty line on save.
+prefixed with a small `doc_id:` / `created:` frontmatter block. Inbox IDs use
+`inbox-YYYYMMDD-HHMMSS`, matching the timestamp in the filename. `--edit` opens
+the captured note and renames a blank capture from its first non-empty line on
+save.
 
 #### Examples
 
