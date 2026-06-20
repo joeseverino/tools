@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.2.0](https://github.com/joeseverino/tools/compare/v1.1.0...v1.2.0) (2026-06-20)
+
+
+### Features
+
+* add repos TUI workflow dashboard ([c5ba2bf](https://github.com/joeseverino/tools/commit/c5ba2bfeb48d6225b8b8c657106a2f619e4f559e))
+* add repos TUI workflow dashboard ([5e7bbb1](https://github.com/joeseverino/tools/commit/5e7bbb1293bf2a567aa99c640ecc0d042d4c5e12))
+* mark intentional local repos in fleet status ([1017102](https://github.com/joeseverino/tools/commit/1017102dfa0115aa93d225676679c167c5cb841e))
+* mark intentional local repos in fleet status ([29615d6](https://github.com/joeseverino/tools/commit/29615d6661d2a95d9962c2c0aa7fd0e572501d82))
+* one fleet classification consumed by repos tui and brief (emit-once) ([fb742ed](https://github.com/joeseverino/tools/commit/fb742ed47564305c96359245579a6e563e362dd9))
+
 ## [1.1.0](https://github.com/joeseverino/tools/compare/v1.0.0...v1.1.0) (2026-06-20)
 
 
