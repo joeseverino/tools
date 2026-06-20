@@ -18,3 +18,32 @@ load helpers
     [ "$status" -eq 0 ]
     [ "$output" = "" ]
 }
+
+@test "git_commit_message defaults to a release-please-friendly subject" {
+    repo="$BATS_TEST_TMPDIR/repo"
+    mkdir -p "$repo"
+    (
+        cd "$repo"
+        git init -q
+        printf 'x\n' > README.md
+        git add README.md
+        source "$TOOLS_HOME/lib/git.sh"
+        git_commit_message
+    ) >"$BATS_TEST_TMPDIR/message"
+
+    [ "$(cat "$BATS_TEST_TMPDIR/message")" = "chore: update README.md" ]
+}
+
+@test "git_conventional_subject accepts release-please-friendly subjects only" {
+    run bash -c 'source "$TOOLS_HOME/lib/git.sh"; git_conventional_subject "feat: add dashboard"'
+    [ "$status" -eq 0 ]
+
+    run bash -c 'source "$TOOLS_HOME/lib/git.sh"; git_conventional_subject "Add dashboard"'
+    [ "$status" -eq 1 ]
+}
+
+@test "ship --go rejects non-conventional PR titles before planning" {
+    run "$TOOLS_HOME/bin/ship" tools --go -m "Add dashboard"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"PR title must be Conventional Commits"* ]]
+}
