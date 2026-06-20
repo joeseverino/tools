@@ -84,6 +84,7 @@ describe_reset() {
     _D_EX=()               # scope <sep> command <sep> comment
     _D_DELEGATE=()         # scope <sep> owner (command's flags owned by another repo)
     _D_EFFECT=()           # scope <sep> effect <sep> network <sep> interactive
+    _D_LEAF_COMMANDS=0     # commands are discoverable aliases; bare invocation stays tool-owned
 }
 
 # desc_tool <name> <one-line description>
@@ -99,6 +100,12 @@ desc_inventory() {
     _D_GROUP="$1"
     _D_ORDER="$2"
 }
+
+# desc_leaf_commands — mark declared desc_cmd entries as discoverable leaf
+# aliases. Bare invocation still belongs to the tool (for tools like repos whose
+# default action is useful), while `<tool> <cmd> -h` and --describe expose the
+# command surface structurally.
+desc_leaf_commands() { _D_LEAF_COMMANDS=1; }
 
 # desc_synopsis <usage line, sans the leading "Usage: ">
 desc_synopsis() { _D_SYNOPSIS+=("$1"); }
@@ -878,9 +885,28 @@ desc_help_intercept() {
         desc_guard_effect ""        # leaf: gate the tool-level effect, then hand back
         return 0
     fi
+    if (( _D_LEAF_COMMANDS )); then
+        if [[ -n "${1:-}" ]] && _describe_has_command "$1"; then
+            case "${2:-}" in -h|--help) usage_command "$1"; exit 0 ;; esac
+            desc_guard_effect "$1"
+        else
+            desc_guard_effect ""
+        fi
+        return 0
+    fi
     case "${1:-}" in ''|help) usage; exit 0 ;; esac
     case "${2:-}" in -h|--help) usage_command "$1"; exit 0 ;; esac
     desc_guard_effect "$1"
+}
+
+_describe_has_command() {
+    local want="$1" rec name
+    (( ${#_D_CMDS[@]} )) || return 1
+    for rec in "${_D_CMDS[@]}"; do
+        name="${rec%%"$_DSEP"*}"
+        [[ "$name" == "$want" ]] && return 0
+    done
+    return 1
 }
 
 # desc_guard_effect <scope> — the runtime renderer of the effect contract: the

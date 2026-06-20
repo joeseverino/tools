@@ -14,8 +14,9 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 describe_spec() {
     desc_tool "repos" "Fleet inventory of every repo under ~/Documents/Code."
     desc_inventory "Workspace" 190
+    desc_leaf_commands
     desc_synopsis "repos [options] [name] | repos tui [options] [name]"
-    desc_effect remote_write +network +interactive
+    desc_effect read
     desc_opt --tui        -- "Open the interactive repo fleet explorer (can execute ship/resync actions)"
     desc_opt --json       -- "Machine-readable output (one JSON object, \"repos\" array)"
     desc_opt --dirty      -- "Only repos with uncommitted changes"
@@ -28,6 +29,17 @@ describe_spec() {
     desc_para "Default roots are \$CODE_HOME/Assets and \$CODE_HOME/Projects. A directory is listed if it is a git work tree or carries a project manifest (package.json, pyproject.toml, go.mod, Cargo.toml). Use 'repos --pm npm' to see what is left to migrate, 'repos --unpushed' before stepping away, and 'repos --json' to consume the whole fleet in one parse."
     desc_example "repos tui" -- "open the fleet explorer"
     desc_example "repos --unpushed --json" -- "machine-read repos needing push, upstream setup, or stale-branch cleanup"
+    desc_cmd tui -- "Open the interactive repo dashboard and run ship/resync/shell actions"
+    desc_effect remote_write +network +interactive
+    desc_opt --dirty      -- "Start on repos with uncommitted changes"
+    desc_opt --unpushed   -- "Start on repos with no remote, no upstream, unpushed commits, or gone upstream"
+    desc_opt --pm PM      -- "Only repos whose package manager is PM (pnpm|npm|yarn|bun|none)"
+    desc_opt --sizes      -- "Include node_modules size (slower; runs du)"
+    desc_opt --icloud     -- "Count iCloud conflict duplicates ('name 2.ext') per repo"
+    desc_opt --root DIR   -- "Scan DIR instead of the defaults (repeatable)"
+    desc_pos name +optional -- "Only repos whose name contains NAME"
+    desc_para "The TUI renders the same repos --json fleet snapshot, then launches the existing workflow owners instead of reimplementing them: ship handles commit/push/PR, resync handles merged-branch cleanup, and shell actions drop into the selected repo."
+    desc_example "repos tui" -- "start from the workspace dashboard"
 }
 
 desc_help_intercept "$@"
