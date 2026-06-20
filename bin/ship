@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+# ship [options] [name] [-- paths...] — flush pending work into one PR per repo.
+#
+# Reads what to ship from `repos --json` (the read-side owner), then for each
+# repo: commits, pushes a clean branch, and opens/updates one PR. Dry-run by
+# default; single-repo by default; fleet only with --all. Holds up after a
+# merge+branch-delete: it bases new work on a fresh branch off the default
+# branch instead of pushing a zombie.
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
+# shellcheck source=lib/git.sh
+source "$TOOLS_HOME/lib/git.sh"
+
+describe_spec() {
+    desc_tool "ship" "Commit, push, and PR pending work — one repo, or the whole fleet."
+    desc_inventory "Workspace" 210
+    desc_synopsis "ship [options] [name] [-- paths...]"
+    desc_effect remote_write +network
+    desc_opt --go         -- "Actually commit/push/PR (default is a dry-run preview)"
+    desc_opt --all        -- "Required to act on more than one repo (a guard against accidental fleet ships)"
+    desc_opt -m --message MSG -- "PR title + commit message (default: derived from changed paths)"
+    desc_opt --body BODY  -- "PR body (default: a generated new/modified/removed file summary)"
+    desc_opt --no-pr      -- "Commit and push only; do not open a PR"
+    desc_pos name         -- "Only repos whose name contains NAME"
+    desc_para "Preview with 'ship' or 'ship <name>'; execute with --go. A single repo needs no --all; a fleet ship requires --all so it can never happen by accident. Pass '-- path ...' to commit only those paths instead of everything. If you are on main (or a branch whose remote was merged and deleted) ship cuts a fresh 'ship/<timestamp>' branch off the default branch so main is never committed to and zombie branches are never pushed. The PR body defaults to a clean file summary; pass --body (or let an agent pass one) for a richer PR."
+}
+
+desc_help_intercept "$@"
+
+GO=0 ALL=0 NOPR=0 MSG="" BODY="" NAME=""
+PATHS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --go)         GO=1; shift ;;
+        --all)        ALL=1; shift ;;
+        --no-pr)      NOPR=1; shift ;;
+        -m|--message) MSG="${2:-}"; shift 2 ;;
+        --body)       BODY="${2:-}"; shift 2 ;;
+        --)           shift; PATHS=("$@"); break ;;
+        -*)           die_unknown option "$1" ;;
+        *)            NAME="$1"; shift ;;
+    esac
+done
+
+plan="$(repos --json ${NAME:+"$NAME"} 2>/dev/null | node "$TOOLS_HOME/lib/ship/plan.mjs")"
+
+if [[ -z "$plan" ]]; then
+    header "ship" 0
+    msg "$GREEN" "clean" "nothing to ship — every repo is committed and pushed"
+    echo; exit 0
+fi
+
+count="$(printf '%s\n' "$plan" | grep -c . || true)"
+
+# Safety: never act on more than one repo without --all.
+if (( GO )) && (( count > 1 )) && (( ! ALL )); then
+    header "ship" "$count"
+    printf '%s\n' "$plan" | while IFS=$'\t' read -r n _; do msg "$DIM" "pending" "$n"; done
+    echo
+    die "refuse" "$count repos pending — name one (\`ship <name> --go\`) or pass --all" 2
+fi
+
+header "ship" "$count"
+(( GO )) || msg "$YELLOW" "preview" "dry run — re-run with --go (single repo) or --all --go (fleet)"
+echo
+
+shipped=0
+while IFS=$'\t' read -r name path branch uncommitted ahead has_remote; do
+    [[ -n "$name" ]] || continue
+
+    on_main=0
+    [[ "$branch" == "main" || "$branch" == "master" || "$branch" == "-" ]] && on_main=1
+
+    # preview line
+    action=""
+    (( uncommitted > 0 )) && action+="commit $uncommitted · "
+    if (( on_main )); then action+="fresh branch · "; fi
+    if (( has_remote )); then
+        action+="push"; (( ahead > 0 )) && action+=" ↑$ahead"
+    else
+        action+="${RED}no remote — skip${RESET}"
+    fi
+    (( has_remote && ! NOPR )) && action+=" · PR"
+    msg "$DIM" "$name" "$action"
+
+    (( GO )) || continue
+    (( has_remote )) || continue
+
+    (
+        cd "$path"
+        git fetch -q origin --prune 2>/dev/null || true
+        base="$(git_default_branch)"
+
+        # lib/git.sh owns the mechanics (zombie-safe branch, commit, push, PR).
+        git_target_branch "$base" ship >/dev/null \
+            || { printf '  %s%-10s%s %s\n' "$RED$BOLD" "skip" "$RESET" "$name: could not branch off origin/$base"; exit 0; }
+
+        if (( uncommitted > 0 )); then
+            if (( ${#PATHS[@]} )); then git_commit "$MSG" "${PATHS[@]}" || true; else git_commit "$MSG" || true; fi
+        fi
+
+        git_push_current \
+            || { printf '  %s%-10s%s %s\n' "$RED$BOLD" "skip" "$RESET" "$name: push failed (check gh auth / remote)"; exit 0; }
+
+        if (( ! NOPR )); then
+            title="${MSG:-$(git log -1 --format='%s' 2>/dev/null || true)}"
+            body="${BODY:-$(git_pr_body_summary "$base")}"
+            url="$(git_open_or_update_pr "$base" "$title" "$body" || true)"
+            printf '  %s%-10s%s %s\n' "$GREEN$BOLD" "PR" "$RESET" "${url:-(create failed — check gh auth)}"
+        fi
+    )
+    shipped=$(( shipped + 1 ))
+done <<< "$plan"
+
+echo
+if (( GO )); then
+    msg "$GREEN" "shipped" "$shipped repo(s)"
+else
+    n_hint="ship <name> --go"; (( ALL )) && n_hint="ship --all --go"
+    msg "$DIM" "next" "$n_hint"
+fi
+echo
