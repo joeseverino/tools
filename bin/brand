@@ -16,15 +16,10 @@ describe_spec() {
     desc_para "Kits land in \$BRAND_HOME/kits. The engine lives in \$ENGINE_HOME and comes in as a dependency of the brand repo; see its README for all flags."
     desc_cmd build  -- "Rebuild every kit from brand/ + the social cards"
     desc_effect local_write
+    desc_delegate "severino-brand — surface owned by its cordon emitter (contract/brand.json); flags by branding-engine"
     desc_cmd kit    -- "Render a one-off kit into severino-brand/kits/<slug>"
     desc_effect local_write
-    desc_pos slug              -- "Kit slug (output directory name)"
-    desc_pos hex               -- "Primary brand color (hex, no leading #)"
-    desc_pos initials          -- "Monogram initials"
-    desc_pos wordmark +optional -- "Wordmark text"
-    desc_opt --font FONT       -- "Font family"
-    desc_opt --only LIST       -- "Comma-separated subset (e.g. mark,wordmark)"
-    desc_opt --out DIR         -- "Output directory override"
+    desc_delegate "severino-brand — positionals slug/hex/initials/wordmark and flags live in its cordon emitter (contract/brand.json) + branding-engine"
     desc_cmd figure -- "Render a brand-themed graphic (cover, banner, diagram) from a JSON spec"
     desc_effect local_write
     desc_pos spec              -- "Path to a .figure.json spec (templates: title, flow, diamond, nodes)"
