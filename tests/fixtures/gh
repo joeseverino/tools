@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Hermetic `gh` stub for repos --prs / land tests. No network, no auth.
+#
+# `gh pr view <branch> --json …` emits canned PR JSON keyed off the branch name
+# (so a fixture repo on `ship/green` looks like an open, green, approved PR);
+# unknown branches exit non-zero like a real branch with no PR. `gh pr merge …`
+# appends its argv to $GH_MERGE_LOG and succeeds, so a test can assert the merge
+# was issued without anything leaving the machine.
+set -euo pipefail
+
+if [[ "${1:-}" == "pr" && "${2:-}" == "view" ]]; then
+    branch="${3:-}"
+    case "$branch" in
+        ship/green|feat/green)
+            cat <<'JSON'
+{"number":12,"url":"https://github.com/demo/x/pull/12","state":"OPEN","isDraft":false,"reviewDecision":"APPROVED","statusCheckRollup":[{"status":"COMPLETED","conclusion":"SUCCESS"}]}
+JSON
+            ;;
+        ship/red|feat/red)
+            cat <<'JSON'
+{"number":13,"url":"https://github.com/demo/x/pull/13","state":"OPEN","isDraft":false,"reviewDecision":"REVIEW_REQUIRED","statusCheckRollup":[{"status":"COMPLETED","conclusion":"FAILURE"}]}
+JSON
+            ;;
+        ship/pending|feat/pending)
+            cat <<'JSON'
+{"number":14,"url":"https://github.com/demo/x/pull/14","state":"OPEN","isDraft":false,"reviewDecision":"","statusCheckRollup":[{"status":"IN_PROGRESS","conclusion":""}]}
+JSON
+            ;;
+        *)
+            exit 1
+            ;;
+    esac
+    exit 0
+fi
+
+if [[ "${1:-}" == "pr" && "${2:-}" == "merge" ]]; then
+    echo "merge $*" >> "${GH_MERGE_LOG:-/dev/null}"
+    exit 0
+fi
+
+exit 0

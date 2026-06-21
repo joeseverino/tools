@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# land [options] [name] — merge a green PR and clean up. The merge beat of the
+# workspace loop (resync → work → ship → land → resync).
+#
+# ship opens/updates the PR and (with --watch) follows CI to green; land is the
+# next beat — it merges that green PR and deletes its branch, the step you would
+# otherwise leave the terminal to click on GitHub. Reads PR/CI state from
+# `repos --json --prs` (the read owner) and merges through lib/git.sh; refuses a
+# PR that is not green unless --admin. Dry-run by default; single-repo by default;
+# fleet only with --all. Then `resync` reconciles the local tree.
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
+# shellcheck source=lib/git.sh
+source "$TOOLS_HOME/lib/git.sh"
+
+describe_spec() {
+    desc_tool "land" "Merge a green PR and delete its branch — the merge beat of the loop."
+    desc_inventory "Workspace" 215
+    desc_synopsis "land [options] [name]"
+    desc_effect remote_write +network
+    desc_opt --go         -- "Actually merge (default is a dry-run preview)"
+    desc_opt --all        -- "Required to land more than one repo (a guard against accidental fleet merges)"
+    desc_opt --admin      -- "Merge with gh pr merge --admin — bypass branch protection / required checks. For solo repos where you are the reviewer, or to land before CI is green."
+    desc_opt --merge      -- "Use a merge commit instead of the default squash"
+    desc_opt --rebase     -- "Rebase-merge instead of the default squash"
+    desc_pos name         -- "Only repos whose name contains NAME"
+    desc_para "Preview with 'land' or 'land <name>'; execute with --go. A single repo needs no --all; a fleet land requires --all so it can never happen by accident. land reads the open-PR and CI state from 'repos --json --prs', so what it previews is exactly what 'repos --prs' shows. It merges the PR for the repo's current branch (the branch ship pushed), squash by default, and deletes the remote branch."
+    desc_para "A PR whose checks are not green is skipped with a note, not merged — pass --admin to override (solo repos, or landing ahead of CI). After a merge the branch is gone on GitHub; run 'resync <name>' to fast-forward the default branch locally and prune the merged branch. The loop closes there."
+}
+
+desc_help_intercept "$@"
+
+GH_BIN="${GH_BIN:-gh}"
+GO=0 ALL=0 ADMIN=0 STRATEGY="--squash" NAME=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --go)     GO=1; shift ;;
+        --all)    ALL=1; shift ;;
+        --admin)  ADMIN=1; shift ;;
+        --merge)  STRATEGY="--merge"; shift ;;
+        --rebase) STRATEGY="--rebase"; shift ;;
+        -*)       die_unknown option "$1" ;;
+        *)        NAME="$1"; shift ;;
+    esac
+done
+
+# Fleet PR state from its one owner (repos --prs), projected to the fields land
+# acts on: only repos with an OPEN PR, as name<TAB>path<TAB>number<TAB>ci<TAB>url.
+plan="$(GH_BIN="$GH_BIN" repos --json --prs ${NAME:+"$NAME"} 2>/dev/null | node -e '
+    let raw = "";
+    process.stdin.on("data", (d) => (raw += d));
+    process.stdin.on("end", () => {
+        let j; try { j = JSON.parse(raw); } catch { process.exit(0); }
+        for (const r of j.repos || []) {
+            const pr = r.pr || {};
+            if (pr.state !== "open") continue;
+            process.stdout.write([r.name, r.path, pr.number, pr.ci, pr.url].join("\t") + "\n");
+        }
+    });
+')"
+
+if [[ -z "$plan" ]]; then
+    header "land" 0
+    msg "$GREEN" "clean" "nothing to land — no open PRs"
+    echo; exit 0
+fi
+
+count="$(printf '%s\n' "$plan" | grep -c . || true)"
+
+# Safety: never merge more than one repo without --all.
+if (( GO )) && (( count > 1 )) && (( ! ALL )); then
+    header "land" "$count"
+    printf '%s\n' "$plan" | while IFS=$'\t' read -r n _; do msg "$DIM" "open PR" "$n"; done
+    echo
+    die "refuse" "$count open PRs — name one (\`land <name> --go\`) or pass --all" 2
+fi
+
+header "land" "$count"
+(( GO )) || msg "$YELLOW" "preview" "dry run — re-run with --go (single repo) or --all --go (fleet)"
+(( ADMIN )) && msg "$YELLOW" "admin" "branch protection / required checks will be bypassed"
+echo
+
+landed=0
+while IFS=$'\t' read -r name path number ci url; do
+    [[ -n "$name" ]] || continue
+
+    green=0; [[ "$ci" == "passing" || "$ci" == "none" ]] && green=1
+
+    # preview line
+    if (( green || ADMIN )); then
+        msg "$DIM" "$name" "PR #$number ($ci) → merge ${STRATEGY#--} + delete branch"
+    else
+        msg "$YELLOW" "$name" "PR #$number ($ci) — not green; skipped (use --admin to override)"
+        (( GO )) && continue
+    fi
+
+    (( GO )) || continue
+    (( green || ADMIN )) || continue
+
+    (
+        cd "$path"
+        # git.sh owns the merge mechanic; land owns the policy (which repo, green
+        # gate, admin override) already decided above. git_merge_pr merges the
+        # current branch's PR — the same PR #$number repos --prs found for it.
+        if git_merge_pr "$STRATEGY" "$ADMIN" >/dev/null 2>&1; then
+            printf '  %s%-10s%s %s\n' "$GREEN$BOLD" "merged" "$RESET" "$name: PR #$number → ${url:-merged}"
+        else
+            printf '  %s%-10s%s %s\n' "$RED$BOLD" "skip" "$RESET" "$name: merge failed (check gh auth / protection — try --admin)"
+            exit 0
+        fi
+    )
+    landed=$(( landed + 1 ))
+done <<< "$plan"
+
+echo
+if (( GO )); then
+    msg "$GREEN" "landed" "$landed PR(s)"
+    (( landed > 0 )) && msg "$DIM" "next" "resync${NAME:+ $NAME} — reconcile the local tree"
+else
+    n_hint="land <name> --go"; (( ALL )) && n_hint="land --all --go"
+    msg "$DIM" "next" "$n_hint"
+fi
+echo
