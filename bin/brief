@@ -11,20 +11,29 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 describe_spec() {
     desc_tool "brief" "One emit-once snapshot of repos, vault, and writeups."
     desc_inventory "Workspace" 200
-    desc_synopsis "brief [options]"
+    desc_leaf_commands
+    desc_synopsis "brief [options] | brief tui [options]"
     # Reads only, but --prs reaches GitHub over the network.
     desc_effect read +network
     desc_opt --json     -- "Machine-readable digest (one JSON object)"
-    desc_opt --prs      -- "Include open GitHub PRs per repo (slower; runs gh)"
+    desc_opt --prs      -- "Include each repo's open PR (number, CI, review) and surface green PRs to land (network — folds in 'repos --prs', the one PR owner)"
     desc_opt --days DAYS -- "Vault recent-changes window in days (default 7)"
-    desc_para "Pure aggregator: it never re-implements a fact. Repo state comes from 'repos', and every vault fact (recent changes, docs to review, inbox) comes from 'severino-vault-mcp brief' and 'list-writeups' — the vault's one owner. Run 'brief' to orient at the start of a session, 'brief --json' to consume the whole workspace state in a single parse."
+    desc_para "Pure aggregator: it never re-implements a fact. Repo and PR state come from 'repos' (--prs folds in 'repos --prs', the one PR/CI owner — brief runs no gh of its own), and every vault fact (recent changes, docs to review, inbox) comes from 'severino-vault-mcp brief' and 'list-writeups' — the vault's one owner. Run 'brief' to orient at the start of a session, 'brief --json' to consume the whole workspace state in a single parse, or 'brief tui' for the interactive cockpit. The 'next' block names the loop verbs from that one classification: ship (dirty), land (green PR, with --prs), resync (merged)."
+    desc_example "brief --prs" -- "morning orient with open-PR/CI state and the land verbs"
+    desc_example "brief tui" -- "the interactive workspace cockpit"
+    desc_cmd tui -- "Open the workspace cockpit — a ranked queue of what needs you, run ship/land/resync"
+    desc_effect remote_write +network +interactive
+    desc_opt --days DAYS -- "Vault recent-changes window in days (default 7)"
+    desc_para "The cockpit renders 'brief --json --prs' as one severity-ranked action queue across every surface — green PRs to land, repos to ship, branches to resync, vault docs to review, writeup drafts — and runs the loop verbs (ship/land/resync/inbox) on the shared TUI runner. It reads the same digest as 'brief' and never scans on its own; vault/writeup rows are reminders that copy a useful string. Enter copies, x runs, o opens a PR on GitHub, r refreshes."
+    desc_example "brief tui" -- "open the workspace cockpit"
 }
 
 desc_help_intercept "$@"
 
-JSON=0 PRS=0 DAYS=7
+JSON=0 PRS=0 DAYS=7 TUI=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        tui|--tui) TUI=1; shift ;;
         --json) JSON=1; shift ;;
         --prs)  PRS=1; shift ;;
         --days) DAYS="${2:-7}"; shift 2 ;;
@@ -33,24 +42,25 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# The cockpit is a renderer over this same digest; it re-invokes `brief --json
+# --prs` for its data, so it owns no scanning. Pass the vault window through.
+if (( TUI )); then
+    exec node "$TOOLS_HOME/lib/brief/tui.mjs" --days "$DAYS"
+fi
+
 # Each fact from its one owner; a failed emitter degrades to null, never aborts.
-repos_json="$(repos --json 2>/dev/null || echo 'null')"
+# PR/CI state rides in repos --json --prs (the one PR owner) — brief no longer
+# runs gh itself. Two literal invocations (not an array spliced with "${a[@]}",
+# which is an unbound-variable error when empty under set -u in bash 3.2).
+if (( PRS )); then
+    repos_json="$(repos --json --prs 2>/dev/null || echo 'null')"
+else
+    repos_json="$(repos --json 2>/dev/null || echo 'null')"
+fi
 vault_json="$(severino-vault-mcp brief --days "$DAYS" 2>/dev/null || echo 'null')"
 writeups_json="$(severino-vault-mcp list-writeups --filter all 2>/dev/null || echo 'null')"
 
-prs_json='null'
-if (( PRS )); then
-    items=()
-    while IFS=$'\t' read -r rname rpath; do
-        [[ -n "$rpath" ]] || continue
-        list="$(cd "$rpath" && gh pr list --json number,title,state -L 10 2>/dev/null || echo '[]')"
-        [[ "$list" == "[]" || -z "$list" ]] && continue
-        items+=("{\"repo\":\"$rname\",\"prs\":$list}")
-    done < <(printf '%s' "$repos_json" | node "$TOOLS_HOME/lib/brief/remotes.mjs")
-    prs_json="[$(IFS=,; echo "${items[*]:-}")]"
-fi
-
 mode="human"; (( JSON )) && mode="json"
-printf '{"repos":%s,"vault":%s,"writeups":%s,"prs":%s}' \
-    "$repos_json" "$vault_json" "$writeups_json" "$prs_json" \
-    | node "$TOOLS_HOME/lib/brief/render.mjs" "$mode"
+printf '{"repos":%s,"vault":%s,"writeups":%s}' \
+    "$repos_json" "$vault_json" "$writeups_json" \
+    | node "$TOOLS_HOME/lib/brief/render.mjs" "$mode" "$PRS"
