@@ -538,8 +538,8 @@ Kits land in $BRAND_HOME/kits. The engine lives in $ENGINE_HOME and comes in as 
 
 | Invocation | Arguments / options | Effect | Summary |
 |---|---|---|---|
-| `brand build` | — | `local_write` | Rebuild every kit from brand/ + the social cards |
-| `brand kit <slug> <hex> <initials> [wordmark]` | `<slug>`<br>`<hex>`<br>`<initials>`<br>`[wordmark]`<br>`--font <FONT>`<br>`--only <LIST>`<br>`--out <DIR>` | `local_write` | Render a one-off kit into severino-brand/kits/<slug> |
+| `brand build` | Delegated: severino-brand — surface owned by its cordon emitter (contract/brand.json); flags by branding-engine | `local_write` | Rebuild every kit from brand/ + the social cards |
+| `brand kit` | Delegated: severino-brand — positionals slug/hex/initials/wordmark and flags live in its cordon emitter (contract/brand.json) + branding-engine | `local_write` | Render a one-off kit into severino-brand/kits/<slug> |
 | `brand figure <spec>` | `<spec>`<br>`--out <PNG>`<br>`--tokens <CSS>`<br>`--scale <N>` | `local_write` | Render a brand-themed graphic (cover, banner, diagram) from a JSON spec |
 | `brand status` | — | `read` | Show engine + brand locations and git state |
 
