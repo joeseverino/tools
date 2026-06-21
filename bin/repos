@@ -24,43 +24,53 @@ describe_spec() {
     desc_leaf_commands
     desc_synopsis "repos [options] [name] | repos tui [options] [name]"
     desc_effect read
-    desc_opt --tui        -- "Open the interactive repo fleet explorer (can execute ship/resync actions)"
+    desc_opt --tui        -- "Open the interactive repo fleet explorer (can execute ship/land/resync actions)"
     desc_opt --json       -- "Machine-readable output (one JSON object, \"repos\" array)"
     desc_opt --dirty      -- "Only repos with uncommitted changes"
     desc_opt --unpushed   -- "Only repos with no remote, no upstream, or unpushed commits"
+    desc_opt --prs        -- "Fold each repo's open-PR state (number, CI, review) into the output via gh (network; one gh call per repo with a remote)"
+    desc_opt --fetch      -- "git fetch --prune each repo before computing ahead/behind/gone, so the remote-tracking state is true now, not as of the last manual fetch (network; slower)"
     desc_opt --pm PM      -- "Only repos whose package manager is PM (pnpm|npm|yarn|bun|none)"
     desc_opt --sizes      -- "Include node_modules size (slower; runs du)"
     desc_opt --icloud     -- "Count iCloud conflict duplicates ('name 2.ext') per repo"
     desc_opt --root DIR   -- "Scan DIR instead of the defaults (repeatable)"
     desc_pos name         -- "Only repos whose name contains NAME"
     desc_para "Default roots are \$CODE_HOME/Assets and \$CODE_HOME/Projects. A directory is listed if it is a git work tree or carries a project manifest (package.json, pyproject.toml, go.mod, Cargo.toml). Use 'repos --pm npm' to see what is left to migrate, 'repos --unpushed' before stepping away, and 'repos --json' to consume the whole fleet in one parse."
+    desc_para "repos owns the read half of the workspace loop; the write half reads back from it. 'repos --prs' adds the PR/CI state ship and land act on (it is what 'land' previews against), and 'repos --fetch' makes the behind/gone signal honest before you rely on it. The behind/upstream-gone counts without --fetch are only as fresh as the last fetch in that repo."
     desc_example "repos tui" -- "open the fleet explorer"
     desc_example "repos --unpushed --json" -- "machine-read repos needing push, upstream setup, or stale-branch cleanup"
-    desc_cmd tui -- "Open the interactive repo dashboard and run ship/resync/shell actions"
+    desc_example "repos --prs --fetch --json" -- "the full honest snapshot: fresh behind/gone plus open-PR/CI state, in one parse"
+    desc_cmd tui -- "Open the interactive repo dashboard and run ship/land/resync/shell actions"
     desc_effect remote_write +network +interactive
     desc_opt --dirty      -- "Start on repos with uncommitted changes"
     desc_opt --unpushed   -- "Start on repos with no remote, no upstream, unpushed commits, or gone upstream"
+    desc_opt --fetch      -- "git fetch --prune each repo on load so behind/gone state is current"
     desc_opt --pm PM      -- "Only repos whose package manager is PM (pnpm|npm|yarn|bun|none)"
     desc_opt --sizes      -- "Include node_modules size (slower; runs du)"
     desc_opt --icloud     -- "Count iCloud conflict duplicates ('name 2.ext') per repo"
     desc_opt --root DIR   -- "Scan DIR instead of the defaults (repeatable)"
     desc_pos name +optional -- "Only repos whose name contains NAME"
-    desc_para "The TUI renders the same repos --json fleet snapshot, then launches the existing workflow owners instead of reimplementing them: ship handles commit/push/PR, resync handles merged-branch cleanup, and shell actions drop into the selected repo."
+    desc_para "The TUI renders the same repos --json fleet snapshot, then launches the existing workflow owners instead of reimplementing them: ship handles commit/push/PR, land merges the green PR, resync handles merged-branch cleanup, and shell actions drop into the selected repo. It paints from the fast local snapshot first, then hydrates open-PR/CI state (repos --prs) in the background so startup stays instant."
     desc_example "repos tui" -- "start from the workspace dashboard"
 }
 
 desc_help_intercept "$@"
 
 # ---------- args ----------
-JSON=0 TUI=0 DIRTY=0 UNPUSHED=0 SIZES=0 ICLOUD=0
+JSON=0 TUI=0 DIRTY=0 UNPUSHED=0 SIZES=0 ICLOUD=0 PRS=0 FETCH=0
 PM_FILTER="" NAME_FILTER=""
 ROOTS=()
+# Routed through a var so the test suite can shadow `gh` with a hermetic stub
+# (no network, no auth) — same pattern as KEY_SECURITY_BIN / DRIFT_REVIEW_BIN.
+GH_BIN="${GH_BIN:-gh}"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         tui|--tui)  TUI=1; shift ;;
         --json)     JSON=1; shift ;;
         --dirty)    DIRTY=1; shift ;;
         --unpushed) UNPUSHED=1; shift ;;
+        --prs)      PRS=1; shift ;;
+        --fetch)    FETCH=1; shift ;;
         --sizes)    SIZES=1; shift ;;
         --icloud)   ICLOUD=1; shift ;;
         --pm)       PM_FILTER="${2:-}"; shift 2 ;;
@@ -75,6 +85,7 @@ if (( TUI )); then
     args=()
     (( DIRTY )) && args+=(--dirty)
     (( UNPUSHED )) && args+=(--unpushed)
+    (( FETCH )) && args+=(--fetch)
     (( SIZES )) && args+=(--sizes)
     (( ICLOUD )) && args+=(--icloud)
     [[ -n "$PM_FILTER" ]] && args+=(--pm "$PM_FILTER")
@@ -88,8 +99,9 @@ R_NAME=() R_ROOT=() R_PATH=() R_GIT=() R_BRANCH=() R_REMOTE=() R_HASREMOTE=()
 R_DIRTY=() R_UNTRACKED=() R_AHEAD=() R_BEHIND=() R_UPSTREAM=() R_UPSTREAM_NAME=()
 R_UPSTREAM_TRACK=() R_UPSTREAM_GONE=()
 R_SHA=() R_DATE=() R_SUBJ=() R_LANG=() R_PM=() R_PMFIELD=() R_NVMRC=()
-R_NM=() R_NMSIZE=() R_CI=() R_IDUPS=()
+R_NM=() R_NMSIZE=() R_CI=() R_IDUPS=() R_STASH=()
 R_LOCAL_OK=() R_NEEDS_SHIP=() R_NEEDS_RESYNC=() R_NEEDS_ATTENTION=()
+R_PR_NUM=() R_PR_STATE=() R_PR_CI=() R_PR_REVIEW=() R_PR_URL=()
 
 repo_local_ok() {
     local name="$1" path="$2" item
@@ -110,9 +122,12 @@ collect() {
     (( is_git || has_manifest )) || return 0
 
     local branch='-' remote='' has_remote=0 dirty=0 untracked=0 ahead=0 behind=0 upstream=0 upstream_name='' upstream_track='' upstream_gone=0
-    local local_ok=0 needs_ship=0 needs_resync=0 needs_attention=0
+    local local_ok=0 needs_ship=0 needs_resync=0 needs_attention=0 stash=0
     local sha='' cdate='' subj=''
     if (( is_git )); then
+        # --fetch refreshes remote-tracking refs first, so the ahead/behind/gone
+        # computed below is true now, not as of the repo's last manual fetch.
+        if (( FETCH )); then git -C "$d" fetch -q origin --prune 2>/dev/null || true; fi
         branch="$(git -C "$d" symbolic-ref --quiet --short HEAD 2>/dev/null || git -C "$d" rev-parse --short HEAD 2>/dev/null || echo '-')"
         remote="$(git -C "$d" remote get-url origin 2>/dev/null || true)"
         [[ -n "$remote" ]] && has_remote=1
@@ -132,6 +147,7 @@ collect() {
         [[ -n "$upstream_name" ]] && upstream=1
         local lc; lc="$(git -C "$d" log -1 --format='%h%x1f%cs%x1f%s' 2>/dev/null || true)"
         [[ -n "$lc" ]] && { IFS=$'\x1f' read -r sha cdate subj <<<"$lc" || true; }
+        stash="$(git -C "$d" stash list 2>/dev/null | grep -c . || true)"; [[ -n "$stash" ]] || stash=0
     fi
 
     local pm='-'
@@ -185,8 +201,10 @@ collect() {
     R_UPSTREAM_NAME+=("$upstream_name"); R_UPSTREAM_TRACK+=("$upstream_track"); R_UPSTREAM_GONE+=("$upstream_gone")
     R_SHA+=("$sha"); R_DATE+=("$cdate"); R_SUBJ+=("$subj"); R_LANG+=("$lang")
     R_PM+=("$pm"); R_PMFIELD+=("$pmfield"); R_NVMRC+=("$nvmrc")
-    R_NM+=("$nm"); R_NMSIZE+=("$nmsize"); R_CI+=("$ci"); R_IDUPS+=("$idups")
+    R_NM+=("$nm"); R_NMSIZE+=("$nmsize"); R_CI+=("$ci"); R_IDUPS+=("$idups"); R_STASH+=("$stash")
     R_LOCAL_OK+=("$local_ok"); R_NEEDS_SHIP+=("$needs_ship"); R_NEEDS_RESYNC+=("$needs_resync"); R_NEEDS_ATTENTION+=("$needs_attention")
+    # PR fields default to "no open PR"; the --prs post-pass overwrites them.
+    R_PR_NUM+=(0); R_PR_STATE+=("none"); R_PR_CI+=("none"); R_PR_REVIEW+=("none"); R_PR_URL+=("")
 }
 
 for root in "${ROOTS[@]}"; do
@@ -201,6 +219,31 @@ done
 
 N=${#R_NAME[@]}
 
+# ---------- PR state (--prs) ----------
+# The read owner also owns open-PR/CI state: fan one `gh pr view` out per repo
+# with a remote (in parallel — gh round-trips dominate), then project every blob
+# back in one node pass and splice into the parallel arrays by index. A repo with
+# no gh, no auth, or no PR stays at the "none" default emitted above.
+if (( PRS )) && (( N > 0 )); then
+    pr_tmp="$(mktemp -d)"
+    i=0
+    while (( i < N )); do
+        if [[ "${R_GIT[$i]}" == "1" && "${R_HASREMOTE[$i]}" == "1" && "${R_BRANCH[$i]}" != "-" ]]; then
+            ( cd "${R_PATH[$i]}" && "$GH_BIN" pr view "${R_BRANCH[$i]}" \
+                --json number,url,state,isDraft,reviewDecision,statusCheckRollup \
+                > "$pr_tmp/$i.json" 2>/dev/null || true ) &
+        fi
+        i=$(( i + 1 ))
+    done
+    wait
+    while IFS=$'\t' read -r idx num state prci review url; do
+        [[ -n "$idx" ]] || continue
+        R_PR_NUM[idx]="$num"; R_PR_STATE[idx]="$state"; R_PR_CI[idx]="$prci"
+        R_PR_REVIEW[idx]="$review"; R_PR_URL[idx]="$url"
+    done < <(node "$TOOLS_HOME/lib/repos/pr.mjs" "$pr_tmp")
+    rm -rf "$pr_tmp"
+fi
+
 # ---------- JSON surface ----------
 if (( JSON )); then
     printf '{"ok":true,"roots":['
@@ -212,16 +255,22 @@ if (( JSON )); then
     i=0
     while (( i < N )); do
         (( i )) && printf ','
-        printf '{"name":"%s","path":"%s","root":"%s","git":%s,"branch":"%s","remote":"%s","has_remote":%s,"dirty":%d,"untracked":%d,"ahead":%d,"behind":%d,"upstream":%s,"upstream_name":"%s","upstream_track":"%s","upstream_gone":%s,"local_ok":%s,"needs_ship":%s,"needs_resync":%s,"needs_attention":%s,"last_commit":{"sha":"%s","date":"%s","subject":"%s"},"lang":"%s","pm":"%s","package_manager":"%s","nvmrc":"%s","node_modules":%s,"node_modules_size":%s,"ci":%d' \
+        printf '{"name":"%s","path":"%s","root":"%s","git":%s,"branch":"%s","remote":"%s","has_remote":%s,"dirty":%d,"untracked":%d,"ahead":%d,"behind":%d,"upstream":%s,"upstream_name":"%s","upstream_track":"%s","upstream_gone":%s,"local_ok":%s,"needs_ship":%s,"needs_resync":%s,"needs_attention":%s,"stash":%d,"last_commit":{"sha":"%s","date":"%s","subject":"%s"},"lang":"%s","pm":"%s","package_manager":"%s","nvmrc":"%s","node_modules":%s,"node_modules_size":%s,"ci":%d' \
             "$(json_escape "${R_NAME[$i]}")" "$(json_escape "${R_PATH[$i]}")" "$(json_escape "${R_ROOT[$i]}")" \
             "$(json_bool "${R_GIT[$i]}")" "$(json_escape "${R_BRANCH[$i]}")" "$(json_escape "${R_REMOTE[$i]}")" "$(json_bool "${R_HASREMOTE[$i]}")" \
             "${R_DIRTY[$i]}" "${R_UNTRACKED[$i]}" "${R_AHEAD[$i]}" "${R_BEHIND[$i]}" "$(json_bool "${R_UPSTREAM[$i]}")" \
             "$(json_escape "${R_UPSTREAM_NAME[$i]}")" "$(json_escape "${R_UPSTREAM_TRACK[$i]}")" "$(json_bool "${R_UPSTREAM_GONE[$i]}")" \
             "$(json_bool "${R_LOCAL_OK[$i]}")" "$(json_bool "${R_NEEDS_SHIP[$i]}")" "$(json_bool "${R_NEEDS_RESYNC[$i]}")" "$(json_bool "${R_NEEDS_ATTENTION[$i]}")" \
+            "${R_STASH[$i]}" \
             "$(json_escape "${R_SHA[$i]}")" "$(json_escape "${R_DATE[$i]}")" "$(json_escape "${R_SUBJ[$i]}")" \
             "$(json_escape "${R_LANG[$i]}")" "$(json_escape "${R_PM[$i]}")" "$(json_escape "${R_PMFIELD[$i]}")" "$(json_escape "${R_NVMRC[$i]}")" \
             "$(json_bool "${R_NM[$i]}")" "${R_NMSIZE[$i]}" "${R_CI[$i]}"
         (( ICLOUD )) && printf ',"icloud_dups":%d' "${R_IDUPS[$i]}"
+        if (( PRS )); then
+            printf ',"pr":{"number":%d,"state":"%s","ci":"%s","review":"%s","url":"%s"}' \
+                "${R_PR_NUM[$i]}" "$(json_escape "${R_PR_STATE[$i]}")" "$(json_escape "${R_PR_CI[$i]}")" \
+                "$(json_escape "${R_PR_REVIEW[$i]}")" "$(json_escape "${R_PR_URL[$i]}")"
+        fi
         printf '}'
         i=$(( i + 1 ))
     done
@@ -241,7 +290,11 @@ if (( N == 0 )); then
     echo; exit 0
 fi
 
-printf '  %s%-22s %-9s %-6s %-17s %-4s %s%s\n' "$BOLD" "REPO" "ROOT" "PM" "STATUS" "CI" "LAST COMMIT" "$RESET"
+if (( PRS )); then
+    printf '  %s%-22s %-9s %-6s %-17s %-4s %-13s %s%s\n' "$BOLD" "REPO" "ROOT" "PM" "STATUS" "CI" "PR" "LAST COMMIT" "$RESET"
+else
+    printf '  %s%-22s %-9s %-6s %-17s %-4s %s%s\n' "$BOLD" "REPO" "ROOT" "PM" "STATUS" "CI" "LAST COMMIT" "$RESET"
+fi
 n_dirty=0 n_unpushed=0
 i=0
 while (( i < N )); do
@@ -252,6 +305,7 @@ while (( i < N )); do
     (( ${R_UNTRACKED[$i]} > 0 ))  && st+="?${R_UNTRACKED[$i]} "
     (( ${R_AHEAD[$i]} > 0 ))      && st+="↑${R_AHEAD[$i]} "
     (( ${R_BEHIND[$i]} > 0 ))     && st+="↓${R_BEHIND[$i]} "
+    (( ${R_STASH[$i]} > 0 ))      && st+="⚑${R_STASH[$i]} "
     (( ${R_UPSTREAM_GONE[$i]} > 0 )) && st+="gone "
     [[ -z "$st" ]] && st="clean"; st="${st% }"
     (( ${R_DIRTY[$i]} + ${R_UNTRACKED[$i]} > 0 )) && n_dirty=$(( n_dirty + 1 ))
@@ -264,7 +318,18 @@ while (( i < N )); do
     printf '  '; pad "$nm" 22
     printf ' %-9s %-6s ' "${R_ROOT[$i]}" "${R_PM[$i]}"
     printf '%s' "$color"; pad "$st" 17; printf '%s' "$RESET"
-    printf ' %-4s %s %s\n' "$ci" "${R_DATE[$i]:--}" "$subj"
+    printf ' %-4s ' "$ci"
+    if (( PRS )); then
+        pr=""; prcolor="$DIM"
+        if [[ "${R_PR_STATE[$i]}" != "none" ]]; then
+            pr="#${R_PR_NUM[$i]} ${R_PR_CI[$i]}"
+            case "${R_PR_CI[$i]}" in passing) prcolor="$GREEN" ;; failing) prcolor="$RED" ;; pending) prcolor="$YELLOW" ;; esac
+        else
+            pr="-"
+        fi
+        printf '%s' "$prcolor"; pad "$pr" 13; printf '%s ' "$RESET"
+    fi
+    printf '%s %s\n' "${R_DATE[$i]:--}" "$subj"
     i=$(( i + 1 ))
 done
 
