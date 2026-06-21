@@ -66,6 +66,7 @@ tools/
     repos       # Fleet inventory of every repo under ~/Documents/Code.
     brief       # One emit-once snapshot of repos, vault, and writeups.
     ship        # Commit, push, and PR pending work — one repo, or the whole fleet.
+    land        # Merge a green PR and delete its branch — the merge beat of the loop.
     resync      # Reconcile local repos with the remote after merging PRs on GitHub.
   .github/               # CI workflows and repository automation
   archive/               # retired scripts kept for reference
@@ -629,13 +630,15 @@ Fleet inventory of every repo under ~/Documents/Code.
 
 Default roots are $CODE_HOME/Assets and $CODE_HOME/Projects. A directory is listed if it is a git work tree or carries a project manifest (package.json, pyproject.toml, go.mod, Cargo.toml). Use 'repos --pm npm' to see what is left to migrate, 'repos --unpushed' before stepping away, and 'repos --json' to consume the whole fleet in one parse.
 
+repos owns the read half of the workspace loop; the write half reads back from it. 'repos --prs' adds the PR/CI state ship and land act on (it is what 'land' previews against), and 'repos --fetch' makes the behind/gone signal honest before you rely on it. The behind/upstream-gone counts without --fetch are only as fresh as the last fetch in that repo.
+
 | Invocation | Arguments / options | Effect | Summary |
 |---|---|---|---|
-| `repos tui [name]` | `[name]`<br>`--dirty`<br>`--unpushed`<br>`--pm <PM>`<br>`--sizes`<br>`--icloud`<br>`--root <DIR>` | `remote_write + network + interactive` | Open the interactive repo dashboard and run ship/resync/shell actions |
+| `repos tui [name]` | `[name]`<br>`--dirty`<br>`--unpushed`<br>`--fetch`<br>`--pm <PM>`<br>`--sizes`<br>`--icloud`<br>`--root <DIR>` | `remote_write + network + interactive` | Open the interactive repo dashboard and run ship/land/resync/shell actions |
 
 **`repos tui` details**
 
-The TUI renders the same repos --json fleet snapshot, then launches the existing workflow owners instead of reimplementing them: ship handles commit/push/PR, resync handles merged-branch cleanup, and shell actions drop into the selected repo.
+The TUI renders the same repos --json fleet snapshot, then launches the existing workflow owners instead of reimplementing them: ship handles commit/push/PR, land merges the green PR, resync handles merged-branch cleanup, and shell actions drop into the selected repo. It paints from the fast local snapshot first, then hydrates open-PR/CI state (repos --prs) in the background so startup stays instant.
 
 **Examples**
 
@@ -648,23 +651,35 @@ repos tui  # start from the workspace dashboard
 ```sh
 repos tui  # open the fleet explorer
 repos --unpushed --json  # machine-read repos needing push, upstream setup, or stale-branch cleanup
+repos --prs --fetch --json  # the full honest snapshot: fresh behind/gone plus open-PR/CI state, in one parse
 ```
 
 #### `brief`
 
 One emit-once snapshot of repos, vault, and writeups.
 
-Pure aggregator: it never re-implements a fact. Repo state comes from 'repos', and every vault fact (recent changes, docs to review, inbox) comes from 'severino-vault-mcp brief' and 'list-writeups' — the vault's one owner. Run 'brief' to orient at the start of a session, 'brief --json' to consume the whole workspace state in a single parse.
+Pure aggregator: it never re-implements a fact. Repo and PR state come from 'repos' (--prs folds in 'repos --prs', the one PR/CI owner — brief runs no gh of its own), and every vault fact (recent changes, docs to review, inbox) comes from 'severino-vault-mcp brief' and 'list-writeups' — the vault's one owner. Run 'brief' to orient at the start of a session, 'brief --json' to consume the whole workspace state in a single parse, or 'brief tui' for the interactive cockpit. The 'next' block names the loop verbs from that one classification: ship (dirty), land (green PR, with --prs), resync (merged).
 
-Usage: `brief`
+| Invocation | Arguments / options | Effect | Summary |
+|---|---|---|---|
+| `brief tui` | `--days <DAYS>` | `remote_write + network + interactive` | Open the workspace cockpit — a ranked queue of what needs you, run ship/land/resync |
 
-| Argument | Description |
-|---|---|
-| `--json` | Machine-readable digest (one JSON object) |
-| `--prs` | Include open GitHub PRs per repo (slower; runs gh) |
-| `--days <DAYS>` | Vault recent-changes window in days (default 7) |
+**`brief tui` details**
 
-Effect: `read + network`
+The cockpit renders 'brief --json --prs' as one severity-ranked action queue across every surface — green PRs to land, repos to ship, branches to resync, vault docs to review, writeup drafts — and runs the loop verbs (ship/land/resync/inbox) on the shared TUI runner. It reads the same digest as 'brief' and never scans on its own; vault/writeup rows are reminders that copy a useful string. Enter copies, x runs, o opens a PR on GitHub, r refreshes.
+
+**Examples**
+
+```sh
+brief tui  # open the workspace cockpit
+```
+
+**Examples**
+
+```sh
+brief --prs  # morning orient with open-PR/CI state and the land verbs
+brief tui  # the interactive workspace cockpit
+```
 
 #### `ship`
 
@@ -687,6 +702,27 @@ Usage: `ship <name>`
 | `--no-pr` | Commit and push only; do not open a PR |
 | `--check` | Run the repo's own local gate (tools check / scripts/check.sh / npm test) before pushing; skip the repo if it fails |
 | `--watch` | After opening/updating the PR, poll 'gh pr checks' until CI is green or red |
+| `<name>` | Only repos whose name contains NAME |
+
+Effect: `remote_write + network`
+
+#### `land`
+
+Merge a green PR and delete its branch — the merge beat of the loop.
+
+Preview with 'land' or 'land <name>'; execute with --go. A single repo needs no --all; a fleet land requires --all so it can never happen by accident. land reads the open-PR and CI state from 'repos --json --prs', so what it previews is exactly what 'repos --prs' shows. It merges the PR for the repo's current branch (the branch ship pushed), squash by default, and deletes the remote branch.
+
+A PR whose checks are not green is skipped with a note, not merged — pass --admin to override (solo repos, or landing ahead of CI). After a merge the branch is gone on GitHub; run 'resync <name>' to fast-forward the default branch locally and prune the merged branch. The loop closes there.
+
+Usage: `land <name>`
+
+| Argument | Description |
+|---|---|
+| `--go` | Actually merge (default is a dry-run preview) |
+| `--all` | Required to land more than one repo (a guard against accidental fleet merges) |
+| `--admin` | Merge with gh pr merge --admin — bypass branch protection / required checks. For solo repos where you are the reviewer, or to land before CI is green. |
+| `--merge` | Use a merge commit instead of the default squash |
+| `--rebase` | Rebase-merge instead of the default squash |
 | `<name>` | Only repos whose name contains NAME |
 
 Effect: `remote_write + network`

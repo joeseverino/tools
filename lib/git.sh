@@ -9,6 +9,10 @@
 # Each function operates on the current working directory — callers cd into the
 # repo first. Functions echo their primary result (branch name, PR URL, body) and
 # return 0 on success, non-zero on failure, so they compose cleanly under set -e.
+#
+# All GitHub calls go through "${GH_BIN:-gh}" so the test suite can shadow gh with
+# a hermetic stub (no network, no auth) — the same indirection bin/repos and
+# bin/land use. Never call bare `gh` here; add a call site through GH_BIN.
 
 # Default branch name (origin/HEAD), falling back to main.
 git_default_branch() {
@@ -101,27 +105,39 @@ git_pr_body_summary() {
 git_open_or_update_pr() {
     local base="$1" title="${2:-}" body="${3:-}" update_body="${4:-0}" head url
     head="$(git symbolic-ref --short -q HEAD 2>/dev/null || true)"
-    url="$(gh pr list --head "$head" --base "$base" --json url -q '.[0].url' 2>/dev/null || true)"
+    url="$("${GH_BIN:-gh}" pr list --head "$head" --base "$base" --json url -q '.[0].url' 2>/dev/null || true)"
     if [[ -n "$url" ]]; then
         local args=()
         [[ -n "$title" ]] && args+=(--title "$title")
         (( update_body )) && [[ -n "$body" ]] && args+=(--body "$body")
-        (( ${#args[@]} )) && { gh pr edit "$url" "${args[@]}" >/dev/null 2>&1 || true; }
+        (( ${#args[@]} )) && { "${GH_BIN:-gh}" pr edit "$url" "${args[@]}" >/dev/null 2>&1 || true; }
         printf '%s' "$url"; return 0
     fi
     if [[ -n "$title" ]]; then
-        gh pr create --base "$base" --title "$title" --body "$body" >/dev/null 2>&1 || return 1
+        "${GH_BIN:-gh}" pr create --base "$base" --title "$title" --body "$body" >/dev/null 2>&1 || return 1
     else
-        gh pr create --base "$base" --fill >/dev/null 2>&1 || return 1
+        "${GH_BIN:-gh}" pr create --base "$base" --fill >/dev/null 2>&1 || return 1
     fi
-    gh pr view --json url -q .url 2>/dev/null || true
+    "${GH_BIN:-gh}" pr view --json url -q .url 2>/dev/null || true
+}
+
+# Merge the current branch's PR and delete its remote branch. <strategy> is one of
+# --squash (default) | --merge | --rebase; <admin>=1 adds --admin to bypass branch
+# protection / required checks. Returns gh's exit status. The single merge
+# mechanic — git_land (require-green policy) and bin/land (explicit policy) both
+# ride this so "how we merge a PR" lives in exactly one place.
+git_merge_pr() {
+    local strategy="${1:---squash}" admin="${2:-0}" args
+    args=(pr merge "$strategy" --delete-branch)
+    (( admin )) && args+=(--admin)
+    "${GH_BIN:-gh}" "${args[@]}"
 }
 
 # Land the current branch's PR: require green checks, then squash-merge + delete.
 # Returns 2 when checks are not green, 1 on merge failure.
 git_land() {
-    gh pr checks >/dev/null 2>&1 || return 2
-    gh pr merge --squash --delete-branch
+    "${GH_BIN:-gh}" pr checks >/dev/null 2>&1 || return 2
+    git_merge_pr --squash 0
 }
 
 # True when local branch <1>'s upstream is gone (its remote branch was deleted,

@@ -287,6 +287,54 @@ it (installed fingerprint vs source).
   `completions/_tools-suite` and README CLI reference/inventory both consume
   `--describe`; never hand-edit either generated block.
 
+## Workspace loop (`repos` · `ship` · `land` · `resync`)
+
+The fleet workflow is one loop with one read owner and one write owner — match
+that split when extending it, don't add a second scanner or a second merge path.
+
+- **`repos` owns every *read*.** Git state and PR/CI state both come from
+  `repos --json`. `--prs` folds each repo's open-PR state (number, CI rollup,
+  review) in via one `gh pr view` per repo with a remote (network; parallel fan-out
+  → `lib/repos/pr.mjs` projects the blobs back in one pass). `--fetch` refreshes
+  remote-tracking refs first so `behind`/`upstream_gone` are true *now*, not as of
+  the last manual fetch — the unfetched counts are stale, so trust them only with
+  `--fetch`. `stash` is always emitted. `ship`, `land`, and `resync` all read this
+  one surface and never re-derive git state (the emit-once rule). `land`'s preview
+  *is* `repos --prs`.
+- **`lib/git.sh` owns every *write* mechanic.** Commit/push/PR/merge/sync live
+  there, not inlined in a driver. The single merge mechanic is **`git_merge_pr`**
+  (`--squash|--merge|--rebase` + optional `--admin`); `git_land` (require-green
+  policy, used by `bin/site`) and `bin/land` (explicit green-gate + `--admin`
+  policy) both ride it. Add a new git/PR mechanic here and call it from the driver.
+- **`land` is the merge beat** (`ship → land → resync`): merges the open PR for the
+  current branch and deletes it. Dry-run + single-repo by default, fleet behind
+  `--all` (same guard shape as `ship`). It skips a non-green PR unless `--admin`
+  (the solo-repo / land-ahead-of-CI override). `ship --watch` ends by pointing at
+  `land`; `land` ends by pointing at `resync`.
+- **All GitHub calls go through `"${GH_BIN:-gh}"`** — in `bin/repos`, `bin/land`,
+  and `lib/git.sh` — so the bats suite shadows `gh` with `tests/fixtures/gh` (a
+  hermetic stub: branch-name → canned PR JSON; `pr merge` logged to
+  `$GH_MERGE_LOG`). Never call bare `gh`; add the call site through `GH_BIN`.
+- **The `repos tui` PR tier loads in two phases.** It paints the fast local
+  snapshot (`repos --json`), then hydrates PR/CI state (`repos --json --prs`)
+  asynchronously and splices it in by path (`mergePrs`) — startup stays instant.
+  Tests opt into PR rendering with `REPOS_TUI_PRS=1` (sync merge against the gh
+  stub). Actions tagged `background:true` (open a URL) run detached and never tear
+  down the alt-screen; foreground actions (ship/land/resync/diff/shell) use the
+  leave-alt dance.
+- **`brief tui` is the workspace cockpit** — the interactive face of `brief`. It
+  renders `brief --json --prs` (no scanning of its own) as ONE severity-ranked
+  "what needs you" queue across surfaces: green PRs → `land`, dirty → `ship`,
+  merged → `resync`, then vault to-review / inbox / writeup drafts (reminders that
+  copy a string). It re-invokes `brief --json --prs` via `$BRIEF_BIN` (tests feed a
+  canned digest stub — no repos/vault/gh). `brief` is a leaf-with-subcommand
+  (`desc_leaf_commands` + `desc_cmd tui`), so bare `brief` still runs the briefing.
+- **The action runner is shared (`lib/tui.mjs`), not per-TUI.** `runForegroundAction`
+  (the raw-mode/alt-screen/`waitForReturn` dance) and `spawnDetached`/`spawnInherit`
+  live in `lib/tui.mjs`; both `repos tui` and `brief tui` import them. A new TUI
+  imports the runner — it does not reimplement the spawn dance, exactly as it
+  imports the palette/width helpers.
+
 ## Site visual comparison
 
 When reviewing a local site change against production, use the viewer:
@@ -339,7 +387,15 @@ For a fast inner loop while editing one area:
   code — `!` negates `$?` to 0; capture with `|| rc=$?` instead.
 - Keychain access in `lib/key.sh` goes through `$KEY_SECURITY_BIN`
   (default `/usr/bin/security`) so bats can stub it — keep new call sites on
-  the variable.
+  the variable. GitHub access goes through `$GH_BIN` (default `gh`) the same way
+  — see the Workspace-loop section.
+- **Bats 1.13 fails a test only on its *last* command** — there is no per-line
+  errexit. A stack of bare `[[ … ]]` assertions does *not* all gate: every line
+  but the last can be false and the test still passes (this masked stale
+  assertions in `repos-tui.bats`). When a test must assert several things, chain
+  them into ONE statement (`grep -qF a <<<"$output" && grep -qF b …`) or pipe to a
+  single `python3 -c 'assert …'`, so each part actually gates. Watch for `grep`
+  eating a leading-dash needle (`grep -qF -- "--admin"`).
 - Don't vendor external projects into `lib/` — tools that outgrow a script live
   in their own repo and are launched by path.
 - The tools repo often carries a large in-flight changeset. Don't bundle an

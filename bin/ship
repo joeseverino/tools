@@ -195,6 +195,8 @@ done <<< "$plan"
 echo
 if (( GO )); then
     msg "$GREEN" "shipped" "$shipped repo(s)"
+    # Point at the next beat of the loop: the PR is open, land merges it once green.
+    (( shipped > 0 )) && msg "$DIM" "next" "land${NAME:+ $NAME} once CI is green, then resync"
 else
     n_hint="ship <name> --go"; (( ALL )) && n_hint="ship --all --go"
     msg "$DIM" "next" "$n_hint"

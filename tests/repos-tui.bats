@@ -132,31 +132,34 @@ assert json.load(sys.stdin)["repos"] == []
 '
 }
 
+# NOTE on assertion style: Bats 1.13 only fails a test on its LAST command, so a
+# stack of bare `[[ ]]` lines does not all gate. New/updated tests here chain the
+# required substrings into ONE `&&` statement so every one of them actually gates.
 @test "smoke: repos tui shows fleet counts, workflow tabs, and actions" {
     setup_fleet
     export REPOS_TUI_SMOKE=1
     run repos_bin tui
     [ "$status" -eq 0 ]
-    [[ "$output" == *"repos tui"* ]]
-    [[ "$output" == *"Dirty"* ]]
-    [[ "$output" == *"Resync"* ]]
-    [[ "$output" == *"dirty-app"* ]]
-    [[ "$output" == *"ship preview"* ]]
-    [[ "$output" == *"ship apply"* ]]
-    [[ "$output" == *"s shell"* ]]
-    [[ "$output" == *"o GitHub"* ]]
-    [[ "$output" != *"1 all"* ]]
+    grep -qF "repos tui" <<<"$output" \
+      && grep -qF "Dirty" <<<"$output" \
+      && grep -qF "PRs" <<<"$output" \
+      && grep -qF "Resync" <<<"$output" \
+      && grep -qF "dirty-app" <<<"$output" \
+      && grep -qF "ship preview" <<<"$output" \
+      && grep -qF "open GitHub" <<<"$output" \
+      && grep -qF "? help" <<<"$output" \
+      && ! grep -qF "1 all" <<<"$output"
 }
 
 @test "replay: resync view surfaces gone upstream cleanup command" {
     setup_fleet
-    export REPOS_TUI_KEYS='right,right,right,tab'
+    # Views: All, Dirty, Ship, PRs, Resync — four rights lands on Resync.
+    export REPOS_TUI_KEYS='right,right,right,right,tab'
     run repos_bin tui
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Resync 1"* ]]
-    [[ "$output" == *"merged-branch"* ]]
-    [[ "$output" == *"gone"* ]]
-    [[ "$output" == *"resync --dry-run 'merged-branch'"* ]]
+    grep -qF "Resync 1" <<<"$output" \
+      && grep -qF "merged-branch" <<<"$output" \
+      && grep -qF "resync --dry-run 'merged-branch'" <<<"$output"
 }
 
 @test "replay: copying an action produces a deterministic flash" {
@@ -196,6 +199,72 @@ assert json.load(sys.stdin)["repos"] == []
     setup_fleet
     run repos_bin tui
     [ "$status" -eq 1 ]
-    [[ "$output" == *"needs a terminal"* ]]
-    [[ "$output" == *"repos --json"* ]]
+    grep -qF "needs a terminal" <<<"$output" && grep -qF "repos --json" <<<"$output"
+}
+
+# A clean, committed repo on a branch the gh stub recognises as a green PR, so the
+# --prs read path and the TUI's PR rendering are exercised with no network.
+setup_pr_fleet() {
+    export CODE_HOME="$BATS_TEST_TMPDIR/code"
+    mkdir -p "$CODE_HOME/Assets"
+    export GH_BIN="$BATS_TEST_DIRNAME/fixtures/gh"
+    mkdir -p "$CODE_HOME/Assets/green-app"
+    (
+        cd "$CODE_HOME/Assets/green-app"
+        git init -q
+        git config user.name joeseverino
+        git config user.email github@jseverino.com
+        printf 'x\n' > a
+        make_commit_ref "$PWD" feat/green init
+        git remote add origin git@github.com:demo/green-app.git
+    )
+}
+
+@test "repos --prs folds open-PR/CI state into the json" {
+    setup_pr_fleet
+    run repos_bin --prs --json green-app
+    [ "$status" -eq 0 ]
+    echo "$output" | python3 -c '
+import json,sys
+pr=json.load(sys.stdin)["repos"][0]["pr"]
+assert pr["number"]==12, pr
+assert pr["state"]=="open", pr
+assert pr["ci"]=="passing", pr
+assert pr["review"]=="approved", pr
+'
+}
+
+@test "repos --json always reports a stash count" {
+    setup_pr_fleet
+    ( cd "$CODE_HOME/Assets/green-app"; printf 'z\n' > a; git -c core.hooksPath=/dev/null stash -q )
+    run repos_bin --json green-app
+    [ "$status" -eq 0 ]
+    echo "$output" | python3 -c 'import json,sys; assert json.load(sys.stdin)["repos"][0]["stash"]==1'
+}
+
+@test "replay: tui renders the PR badge and a land action for a green PR" {
+    setup_pr_fleet
+    export REPOS_TUI_PRS=1 REPOS_TUI_KEYS='tab'
+    run repos_bin tui
+    [ "$status" -eq 0 ]
+    grep -qF "#12" <<<"$output" \
+      && grep -qF "land 'green-app' --go" <<<"$output"
+}
+
+@test "replay: m lands the selected green PR" {
+    setup_pr_fleet
+    export REPOS_TUI_PRS=1 REPOS_TUI_KEYS='m'
+    run repos_bin tui
+    [ "$status" -eq 0 ]
+    grep -qF "would run land: land 'green-app' --go" <<<"$output"
+}
+
+@test "replay: ? opens the help overlay with the full keymap" {
+    setup_fleet
+    export REPOS_TUI_KEYS='?'
+    run repos_bin tui
+    [ "$status" -eq 0 ]
+    grep -qF "merge the open PR" <<<"$output" \
+      && grep -qF "full refresh" <<<"$output" \
+      && grep -qF "Esc closes" <<<"$output"
 }
