@@ -238,7 +238,9 @@ The console script is on PATH (`uv tool install`). Existing subcommands:
 infra-dataset layer `infra [<id>] [--refresh]` (read a dataset's cache, or
 live) and `infra-write <id>` (stdin JSON → write the dataset's JSON cache,
 regenerate the doc table, stamp `last_reviewed` — the drift guards' pull
-writer); `topology --emit ...`; plus `prepare-writeup-publish`,
+writer); `topology --emit ...` and `topology-write` (the authored inventory's
+validated write — regenerates `Topology.md` + the figure); plus
+`prepare-writeup-publish`,
 `list-writeups`, `technology-catalog`, `validate-all-writeups`,
 `reorder-featured`, `update-writeup`, `writeup-dashboard`,
 `apply-writeup-plan`, `hq-manifest`, `schema`, `doctor`. Each prints JSON and
