@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # adguard — fetch the live AdGuard Home DNS rewrites and diff them against the
-# vault mirror. Drift-guard sibling of cf-dns / ts-acl; the show/diff/pull
+# vault cache. Drift-guard sibling of cf-dns / ts-acl; the show/diff/pull
 # mechanics live in lib/drift.sh.
 set -euo pipefail
 
@@ -13,15 +13,14 @@ source "$TOOLS_HOME/lib/drift.sh"
 DRIFT_DATASET_ID="${ADGUARD_DATASET_ID:-dns_rewrites}"
 
 describe_spec() {
-    desc_tool "adguard" "Fetch the live AdGuard Home DNS rewrites and diff them against the vault mirror."
+    desc_tool "adguard" "Fetch the live AdGuard Home DNS rewrites and diff them against the vault cache."
     desc_inventory "Drift guards" 110
     desc_synopsis "adguard <command>"
     desc_para "Rewrites are normalized to domain/answer, sorted by domain."
     drift_describe_commands
     desc_env ADGUARD_CREDS         -- "age-encrypted env holding ADGUARD_USER + ADGUARD_PASS"
     desc_env ADGUARD_URL           -- "AdGuard Home base URL (e.g. http://192.168.1.233:3001)"
-    desc_env ADGUARD_VAULT_DOC     -- "vault doc holding the mirror"
-    desc_env ADGUARD_VAULT_HEADING -- "heading whose fenced \`\`\`json block is the mirror"
+    desc_env ADGUARD_DATASET_ID    -- "infra-dataset id for the cache (default dns_rewrites)"
 }
 
 # Decrypt the creds env and echo "user:pass" for curl basic auth. In memory only.

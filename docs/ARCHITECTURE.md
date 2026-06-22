@@ -78,10 +78,12 @@ model and the scoped-lookup AI path.
 `lib/drift.sh` is the shared core (`drift_main`), and each guard supplies only
 `get_token` / `fetch_live` / `normalize` + config. They expose the same
 `show` / `diff` / `pull` surface (declared once in `drift_describe_commands`, so
-all four inherit it — including their effects). A `pull` writes the live state
-back into a section-scoped mirror block in the Obsidian vault through the MCP's
-`update-mirror-block` (one atomic write that also stamps `last_reviewed`), with a
-scoped awk rewrite as the offline fallback.
+all four inherit it — including their effects). Each guard owns a
+`DRIFT_DATASET_ID`; a `pull` writes the live state through the MCP's
+`infra-write` (one call that writes the dataset's JSON cache, regenerates the
+doc's table, and stamps `last_reviewed`), and `diff` reads the cache via `infra`.
+The dataset and its render columns are declared once in the vault's
+infra-dataset registry.
 
 ## The MCP boundary
 
