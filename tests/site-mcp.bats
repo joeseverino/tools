@@ -73,7 +73,7 @@ site_bin() {
 
     [ "$status" -ne 0 ]
     [[ "$output" == *"installed severino-vault-mcp (stale-fingerprint) does not match source ($SOURCE_FP)"* ]]
-    [[ "$output" == *"run \`site reinstall-mcp\`, then retry"* ]]
+    [[ "$output" == *"run \`site reinstall-mcp --yes\`, then retry"* ]]
     [[ "$output" != *"invalid choice"* ]]
     [[ "$output" != *"usage: severino-vault-mcp"* ]]
 }
