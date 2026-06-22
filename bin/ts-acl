@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ts-acl — fetch the live Tailscale ACL and diff it against the vault mirror.
+# ts-acl — fetch the live Tailscale ACL and diff it against the vault cache.
 # Drift-guard sibling of cf-dns / adguard; the show/diff/pull mechanics live in
 # lib/drift.sh. Uses a read-only (acl:read) OAuth client whose credentials live
 # age-encrypted at $TS_ACL_CREDS — no plaintext ever touches disk (decrypt -p
@@ -11,17 +11,18 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "ts-acl" "$@"
 source "$TOOLS_HOME/lib/drift.sh"
 
 API="https://api.tailscale.com/api/v2"
-DRIFT_VAULT_DOC="${TS_ACL_VAULT_DOC:-}"
-DRIFT_VAULT_HEADING="## Access Controls"
+# New model: the cache is the `tailscale_acl` JSON file in the infra-dataset
+# registry, read/written through the vault MCP. drift.sh keys off DRIFT_DATASET_ID.
+DRIFT_DATASET_ID="${TS_ACL_DATASET_ID:-tailscale_acl}"
 
 describe_spec() {
-    desc_tool "ts-acl" "Fetch the live Tailscale ACL policy and diff it against the vault mirror."
+    desc_tool "ts-acl" "Fetch the live Tailscale ACL policy and diff it against the vault cache."
     desc_inventory "Drift guards" 90
     desc_synopsis "ts-acl <command>"
     drift_describe_commands
     desc_env TS_ACL_CREDS     -- "age-encrypted env with either TS_API_TOKEN, or TS_OAUTH_CLIENT_ID + TS_OAUTH_CLIENT_SECRET"
     desc_env TS_TAILNET       -- "tailnet to query (default \"-\": the credential's own)"
-    desc_env TS_ACL_VAULT_DOC -- "vault doc whose \`\`\`json block is the stored mirror"
+    desc_env TS_ACL_DATASET_ID -- "infra-dataset id for the cache (default tailscale_acl)"
 }
 
 # Resolve a Bearer token from the encrypted env and echo it. Supports either a

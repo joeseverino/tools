@@ -193,12 +193,13 @@ type; both stay in sync because there is only one implementation.
   `drift.sh`, `doctor.sh`); tool-specific support files under `lib/<tool>/`
   (e.g. `lib/site/`, `lib/doc-to-pdf/`). `drift.sh` is the shared core for
   the drift-guard tools (`ts-acl`, `cf-dns`, `adguard`, `nginx`): they
-  provide `get_token`/`fetch_live`/`normalize` + config and call `drift_main`.
-  All block parsing is scoped to the mirror's own heading section. A
-  successful `pull` writes through the MCP's `update-mirror-block` — one
-  atomic write that replaces the block *and* stamps `last_reviewed` (a pull
-  is a review); it falls back to a scoped awk rewrite + `touch-reviewed` when
-  the MCP CLI or `$NOTES_HOME` isn't available. `doctor.sh` owns the
+  provide `get_token`/`fetch_live`/`normalize` + config (a `DRIFT_DATASET_ID`)
+  and call `drift_main`. The cache is a JSON file owned by the vault's
+  infra-dataset registry: `diff` reads it via `severino-vault-mcp infra <id>`,
+  and a successful `pull` writes it via `infra-write <id>` — one MCP call that
+  writes the JSON cache, regenerates the doc's table, and stamps `last_reviewed`
+  (a pull is a review). The guard never touches vault files directly.
+  `doctor.sh` owns the
   `check`/`check_warn`/`gate`/`doctor_finish` plumbing and the gate registry
   behind `tools doctor --all` / `--live` (a gate's only contract: exit 0 when
   healthy).
@@ -233,16 +234,19 @@ Add new call sites through `svmc`, never inline — an inline call that forgets
 `SVMC_VAULT_PATH` silently falls back to the MCP's own configured default vault.
 
 The console script is on PATH (`uv tool install`). Existing subcommands:
-`touch-reviewed <relative-path>` (set `last_reviewed` to today) and
-`update-mirror-block <relative-path> --heading <h> [--touch-reviewed]`
-(stdin JSON → replace a fenced ```json mirror block, section-scoped, one
-atomic write — the drift guards' pull writer; **both are CLI-only fast paths:
-no MCP tool, no vault-cache rebuild**), plus `prepare-writeup-publish`,
+`touch-reviewed <relative-path>` (set `last_reviewed` to today); the
+infra-dataset layer `infra [<id>] [--refresh]` (read a dataset's cache, or
+live) and `infra-write <id>` (stdin JSON → write the dataset's JSON cache,
+regenerate the doc table, stamp `last_reviewed` — the drift guards' pull
+writer); `topology --emit ...` and `topology-write` (the authored inventory's
+validated write — regenerates `Topology.md` + the figure); plus
+`prepare-writeup-publish`,
 `list-writeups`, `technology-catalog`, `validate-all-writeups`,
 `reorder-featured`, `update-writeup`, `writeup-dashboard`,
 `apply-writeup-plan`, `hq-manifest`, `schema`, `doctor`. Each prints JSON and
-exits 0/1 on `ok`. `bin/site` is the reference caller; `lib/drift.sh:drift_touch_reviewed`
-is the minimal one (overridable via `$DRIFT_REVIEW_BIN` so bats can stub it).
+exits 0/1 on `ok`. `bin/site` is the reference caller; the drift guards read
+via `infra` and write via `infra-write` (binary overridable via
+`$DRIFT_REVIEW_BIN` so bats can stub it).
 
 **Shared frontmatter schema:** the MCP's `schema.py` is the one canonical enum
 contract; `severino-vault-mcp schema --json` emits it. `hq schema` regenerates

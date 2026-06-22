@@ -538,7 +538,7 @@ assert binset == set(names), (binset ^ set(names))
     run "$TOOLS_HOME/bin/adguard" pull -h
     [ "$status" -eq 0 ]
     [[ "$output" == *"Usage: adguard pull"* ]]
-    [[ "$output" == *"Regenerate the vault mirror block"* ]]
+    [[ "$output" == *"Regenerate the vault cache"* ]]
     [[ "$output" == *"-h, --help"* ]]
     # --help is the same render as -h here too.
     run "$TOOLS_HOME/bin/adguard" diff --help
