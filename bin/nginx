@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # nginx — fetch the live Nginx Proxy Manager proxy hosts and diff them against
-# the vault mirror. Drift-guard sibling of cf-dns / adguard; show / diff / pull
+# the vault cache. Drift-guard sibling of cf-dns / adguard; show / diff / pull
 # live in lib/drift.sh. NPM has no API tokens at rest: we exchange the web-UI
 # credentials (age-encrypted at $NGINX_CREDS) for a short-lived Bearer per call.
 set -euo pipefail
@@ -9,13 +9,12 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "nginx" "$@"
 # shellcheck source=lib/drift.sh
 source "$TOOLS_HOME/lib/drift.sh"
 
-# :- defaults so `-h`/`--describe` work in a bare env (init.sh skips config on
-# those paths); show/diff/pull source config and get the real values.
-DRIFT_VAULT_DOC="${NGINX_VAULT_DOC:-}"
-DRIFT_VAULT_HEADING="${NGINX_VAULT_HEADING:-}"
+# New model: the cache is the `proxy_hosts` JSON file in the infra-dataset
+# registry, read/written through the vault MCP. drift.sh keys off DRIFT_DATASET_ID.
+DRIFT_DATASET_ID="${NGINX_DATASET_ID:-proxy_hosts}"
 
 describe_spec() {
-    desc_tool "nginx" "Fetch the live Nginx Proxy Manager proxy hosts and diff them against the vault mirror."
+    desc_tool "nginx" "Fetch the live Nginx Proxy Manager proxy hosts and diff them against the vault cache."
     desc_inventory "Drift guards" 120
     desc_synopsis "nginx <command>"
     desc_para "Proxy hosts are normalized to domain_names / forward_scheme / forward_host /"
@@ -23,8 +22,7 @@ describe_spec() {
     drift_describe_commands
     desc_env NGINX_CREDS         -- "age-encrypted env holding NGINX_EMAIL + NGINX_PASSWORD"
     desc_env NGINX_URL           -- "Nginx Proxy Manager API base (e.g. http://host:81/api)"
-    desc_env NGINX_VAULT_DOC     -- "vault doc holding the mirror"
-    desc_env NGINX_VAULT_HEADING -- "heading whose fenced \`\`\`json block is the mirror"
+    desc_env NGINX_DATASET_ID    -- "infra-dataset id for the cache (default proxy_hosts)"
 }
 
 # Decrypt the creds env and echo "email<TAB>secret". In memory only, never on disk.

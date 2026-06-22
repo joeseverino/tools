@@ -50,10 +50,10 @@ tools/
     # Diagnostics
     dns-test    # Compare DNS resolver latency across paths.
     # Drift guards
-    ts-acl      # Fetch the live Tailscale ACL policy and diff it against the vault mirror.
-    cf-dns      # Fetch the live Cloudflare DNS records and diff them against the vault mirror.
-    adguard     # Fetch the live AdGuard Home DNS rewrites and diff them against the vault mirror.
-    nginx       # Fetch the live Nginx Proxy Manager proxy hosts and diff them against the vault mirror.
+    ts-acl      # Fetch the live Tailscale ACL policy and diff it against the vault cache.
+    cf-dns      # Fetch the live Cloudflare DNS records and diff them against the vault cache.
+    adguard     # Fetch the live AdGuard Home DNS rewrites and diff them against the vault cache.
+    nginx       # Fetch the live Nginx Proxy Manager proxy hosts and diff them against the vault cache.
     # Integrations
     hq          # Sync vault frontmatter to Severino HQ, plus routine HQ deployment ops.
     site        # Public jseverino.com Astro site workflow.
@@ -349,17 +349,17 @@ Effect: `read + network`
 
 #### `ts-acl`
 
-Fetch the live Tailscale ACL policy and diff it against the vault mirror.
+Fetch the live Tailscale ACL policy and diff it against the vault cache.
 
 | Invocation | Arguments / options | Effect | Summary |
 |---|---|---|---|
 | `ts-acl show` | — | `read + network` | Fetch and print the live state (normalized, sorted JSON) |
-| `ts-acl diff` | — | `read + network` | Diff live vs the vault mirror; exit 1 on drift |
-| `ts-acl pull` | — | `vault_write + network` | Regenerate the vault mirror block from live (accept drift) |
+| `ts-acl diff` | — | `read + network` | Diff live vs the vault cache; exit 1 on drift |
+| `ts-acl pull` | — | `vault_write + network` | Regenerate the vault cache (JSON + doc table) from live (accept drift) |
 
 #### `cf-dns`
 
-Fetch the live Cloudflare DNS records and diff them against the vault mirror.
+Fetch the live Cloudflare DNS records and diff them against the vault cache.
 
 Records are normalized to type/name/content/proxied (+ priority for MX);
 
@@ -368,24 +368,24 @@ Cloudflare-internal fields (id, timestamps, meta) are dropped.
 | Invocation | Arguments / options | Effect | Summary |
 |---|---|---|---|
 | `cf-dns show` | — | `read + network` | Fetch and print the live state (normalized, sorted JSON) |
-| `cf-dns diff` | — | `read + network` | Diff live vs the vault mirror; exit 1 on drift |
-| `cf-dns pull` | — | `vault_write + network` | Regenerate the vault mirror block from live (accept drift) |
+| `cf-dns diff` | — | `read + network` | Diff live vs the vault cache; exit 1 on drift |
+| `cf-dns pull` | — | `vault_write + network` | Regenerate the vault cache (JSON + doc table) from live (accept drift) |
 
 #### `adguard`
 
-Fetch the live AdGuard Home DNS rewrites and diff them against the vault mirror.
+Fetch the live AdGuard Home DNS rewrites and diff them against the vault cache.
 
 Rewrites are normalized to domain/answer, sorted by domain.
 
 | Invocation | Arguments / options | Effect | Summary |
 |---|---|---|---|
 | `adguard show` | — | `read + network` | Fetch and print the live state (normalized, sorted JSON) |
-| `adguard diff` | — | `read + network` | Diff live vs the vault mirror; exit 1 on drift |
-| `adguard pull` | — | `vault_write + network` | Regenerate the vault mirror block from live (accept drift) |
+| `adguard diff` | — | `read + network` | Diff live vs the vault cache; exit 1 on drift |
+| `adguard pull` | — | `vault_write + network` | Regenerate the vault cache (JSON + doc table) from live (accept drift) |
 
 #### `nginx`
 
-Fetch the live Nginx Proxy Manager proxy hosts and diff them against the vault mirror.
+Fetch the live Nginx Proxy Manager proxy hosts and diff them against the vault cache.
 
 Proxy hosts are normalized to domain_names / forward_scheme / forward_host /
 
@@ -394,8 +394,8 @@ forward_port / enabled, sorted by domain.
 | Invocation | Arguments / options | Effect | Summary |
 |---|---|---|---|
 | `nginx show` | — | `read + network` | Fetch and print the live state (normalized, sorted JSON) |
-| `nginx diff` | — | `read + network` | Diff live vs the vault mirror; exit 1 on drift |
-| `nginx pull` | — | `vault_write + network` | Regenerate the vault mirror block from live (accept drift) |
+| `nginx diff` | — | `read + network` | Diff live vs the vault cache; exit 1 on drift |
+| `nginx pull` | — | `vault_write + network` | Regenerate the vault cache (JSON + doc table) from live (accept drift) |
 
 #### `hq`
 
@@ -779,21 +779,18 @@ with `<name> pull`.
 Add `--verify` to either scaffold command to regenerate derived surfaces
 and run `tools check --no-bench`.
 
-A successful `pull` writes the regenerated block through the
+A successful `pull` writes through the
 [`severino-vault-mcp`](https://github.com/joeseverino/severino-vault-mcp)
-console script (`severino-vault-mcp update-mirror-block
-<vault-relative-path> --heading <h> --touch-reviewed`, JSON on stdin) —
-never a raw file write. The replacement is scoped to the mirror's own
-heading section (a second mirror in the same doc can never be matched or
-clobbered), validated to parse as JSON, and lands in **one** atomic write
-that also stamps the doc's `last_reviewed` to today — a pull is a review.
-When the MCP CLI isn't installed or the doc lives outside `$NOTES_HOME`,
-`pull` falls back to an awk rewrite with the same section scoping, staged
-in the doc's own directory, and stamps `last_reviewed` via
-`touch-reviewed`, best-effort. `diff` reads with the same scoping and
-fails loudly when the section has no block (instead of comparing against
-nothing). Either way the loop is `<tool> diff` → reconcile the prose →
-`<tool> pull` → `hq sync`.
+console script (`severino-vault-mcp infra-write <dataset-id>`, JSON on
+stdin) — never a raw file write. The MCP writes the dataset's JSON cache
+file, regenerates the doc's generated table region from the declared
+columns, and stamps `last_reviewed` to today (a pull is a review), in
+atomic-per-file writes — so the cache and the human table can never drift.
+`diff` reads the cache via `severino-vault-mcp infra <dataset-id>` and
+fails loudly when there is no cache (instead of comparing against nothing).
+The dataset, its cache path, and its render columns are declared once in
+the vault's infra-dataset registry. The loop is `<tool> diff` → reconcile
+the prose → `<tool> pull` → `hq sync`.
 
 #### tools describe — the command-surface contract
 
