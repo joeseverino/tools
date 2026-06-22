@@ -86,8 +86,16 @@ print(json.dumps(out, indent=2) if os.environ["TOOLS_DESC_PRETTY"] == "1" else j
     local cache_dir cache_file="" body="" sig=""
     cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/severino-tools"
     if [[ -z "${TOOLS_DESCRIBE_NO_CACHE:-}" ]]; then
-        sig=$(cat "$TOOLS_HOME"/bin/* "$TOOLS_HOME"/lib/*.sh \
-            "$TOOLS_HOME"/lib/tools/describe.sh 2>/dev/null | cksum) || sig=""
+        if (( repos )); then
+            local obsidian_contract="${CODE_HOME:-$HOME/Documents/Code}/Projects/severino-obsidian/contract/obsidian-commands.json"
+            sig=$({ cat "$TOOLS_HOME"/bin/* "$TOOLS_HOME"/lib/*.sh \
+                "$TOOLS_HOME"/lib/tools/describe.sh 2>/dev/null
+                [[ -r "$obsidian_contract" ]] && cat "$obsidian_contract"
+            } | cksum) || sig=""
+        else
+            sig=$(cat "$TOOLS_HOME"/bin/* "$TOOLS_HOME"/lib/*.sh \
+                "$TOOLS_HOME"/lib/tools/describe.sh 2>/dev/null | cksum) || sig=""
+        fi
         sig=${sig%% *}
     fi
     if [[ -n "$sig" ]]; then
@@ -117,6 +125,10 @@ print(json.dumps(out, indent=2) if os.environ["TOOLS_DESC_PRETTY"] == "1" else j
                     sib_objs+=("$out")
                 fi
             done
+            local obsidian_contract="${CODE_HOME:-$HOME/Documents/Code}/Projects/severino-obsidian/contract/obsidian-commands.json"
+            if [[ -r "$obsidian_contract" ]] && out=$(cat "$obsidian_contract") && [[ "$out" == \{* ]]; then
+                sib_objs+=("$out")
+            fi
             siblings=$(printf ',"siblings":[%s]' "$(json_join "${sib_objs[@]:-}")")
         fi
 
