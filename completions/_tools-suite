@@ -103,8 +103,8 @@ _tools_suite_contract() {
     ts-acl)
       commands=(
         'show:Fetch and print the live state (normalized, sorted JSON)'
-        'diff:Diff live vs the vault mirror; exit 1 on drift'
-        'pull:Regenerate the vault mirror block from live (accept drift)'
+        'diff:Diff live vs the vault cache; exit 1 on drift'
+        'pull:Regenerate the vault cache (JSON + doc table) from live (accept drift)'
       )
       _arguments -C \
         '(-h --help)'{-h,--help}'[show help]' \
@@ -120,8 +120,8 @@ _tools_suite_contract() {
     cf-dns)
       commands=(
         'show:Fetch and print the live state (normalized, sorted JSON)'
-        'diff:Diff live vs the vault mirror; exit 1 on drift'
-        'pull:Regenerate the vault mirror block from live (accept drift)'
+        'diff:Diff live vs the vault cache; exit 1 on drift'
+        'pull:Regenerate the vault cache (JSON + doc table) from live (accept drift)'
       )
       _arguments -C \
         '(-h --help)'{-h,--help}'[show help]' \
@@ -137,8 +137,8 @@ _tools_suite_contract() {
     adguard)
       commands=(
         'show:Fetch and print the live state (normalized, sorted JSON)'
-        'diff:Diff live vs the vault mirror; exit 1 on drift'
-        'pull:Regenerate the vault mirror block from live (accept drift)'
+        'diff:Diff live vs the vault cache; exit 1 on drift'
+        'pull:Regenerate the vault cache (JSON + doc table) from live (accept drift)'
       )
       _arguments -C \
         '(-h --help)'{-h,--help}'[show help]' \
@@ -154,8 +154,8 @@ _tools_suite_contract() {
     nginx)
       commands=(
         'show:Fetch and print the live state (normalized, sorted JSON)'
-        'diff:Diff live vs the vault mirror; exit 1 on drift'
-        'pull:Regenerate the vault mirror block from live (accept drift)'
+        'diff:Diff live vs the vault cache; exit 1 on drift'
+        'pull:Regenerate the vault cache (JSON + doc table) from live (accept drift)'
       )
       _arguments -C \
         '(-h --help)'{-h,--help}'[show help]' \

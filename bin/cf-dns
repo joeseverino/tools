@@ -15,7 +15,7 @@ API="https://api.cloudflare.com/client/v4"
 DRIFT_DATASET_ID="${CF_DNS_DATASET_ID:-public_dns}"
 
 describe_spec() {
-    desc_tool "cf-dns" "Fetch the live Cloudflare DNS records and diff them against the vault mirror."
+    desc_tool "cf-dns" "Fetch the live Cloudflare DNS records and diff them against the vault cache."
     desc_inventory "Drift guards" 100
     desc_synopsis "cf-dns <command>"
     desc_para "Records are normalized to type/name/content/proxied (+ priority for MX);"

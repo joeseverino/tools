@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # nginx — fetch the live Nginx Proxy Manager proxy hosts and diff them against
-# the vault mirror. Drift-guard sibling of cf-dns / adguard; show / diff / pull
+# the vault cache. Drift-guard sibling of cf-dns / adguard; show / diff / pull
 # live in lib/drift.sh. NPM has no API tokens at rest: we exchange the web-UI
 # credentials (age-encrypted at $NGINX_CREDS) for a short-lived Bearer per call.
 set -euo pipefail
@@ -14,7 +14,7 @@ source "$TOOLS_HOME/lib/drift.sh"
 DRIFT_DATASET_ID="${NGINX_DATASET_ID:-proxy_hosts}"
 
 describe_spec() {
-    desc_tool "nginx" "Fetch the live Nginx Proxy Manager proxy hosts and diff them against the vault mirror."
+    desc_tool "nginx" "Fetch the live Nginx Proxy Manager proxy hosts and diff them against the vault cache."
     desc_inventory "Drift guards" 120
     desc_synopsis "nginx <command>"
     desc_para "Proxy hosts are normalized to domain_names / forward_scheme / forward_host /"
