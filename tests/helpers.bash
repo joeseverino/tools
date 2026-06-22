@@ -21,6 +21,12 @@ unset NOTES_HOME VAULT INBOX_DIR KEYS_HOME BACKUPS_HOME AGE_PUBKEY AGE_KEY \
       CF_DNS_VAULT_HEADING TS_ACL_VAULT_DOC TS_ACL_VAULT_HEADING \
       NGINX_VAULT_DOC NGINX_VAULT_HEADING 2>/dev/null || true
 
+# Repo bin FIRST on PATH, so any tool that shells out to a sibling by bare name
+# (and the cross-repo `describe` federation) resolves to THIS checkout, never a
+# stale installed copy in ~/.local/bin. This is the PATH-vs-repo trap that gave
+# false greens locally and red on CI: local must exercise repo code, like CI.
+export PATH="$TOOLS_HOME/bin:$PATH"
+
 # setup_crypt — generate a throwaway key pair laid out the way
 # config/crypt.sh expects ($KEYS_HOME/file_key/file_key{,.pub}).
 setup_crypt() {
