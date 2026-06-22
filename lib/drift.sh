@@ -55,11 +55,45 @@ drift_vault_block() {
         || die "error" "invalid ${DRIFT_VAULT_HEADING} \`\`\`json block in $DRIFT_VAULT_DOC (run: pull)" >&2
 }
 
+# New model (set DRIFT_DATASET_ID): the cache is a JSON file owned by the
+# infra-dataset registry, read/written through the vault MCP. Legacy model (set
+# DRIFT_VAULT_DOC/HEADING): the cache is a ```json block in a doc. drift_diff /
+# drift_pull pick the path by which is set, so guards migrate one at a time.
+DRIFT_DATASET_ID="${DRIFT_DATASET_ID:-}"
+
+# Read the registry's cached value for this dataset and re-normalize it, so it
+# compares byte-for-byte against fetch_live.
+drift_registry_cached() {
+    local out
+    out=$(SVMC_VAULT_PATH="$NOTES_HOME" "$DRIFT_REVIEW_BIN" infra "$DRIFT_DATASET_ID" 2>/dev/null) \
+        || die "error" "vault-mcp infra $DRIFT_DATASET_ID failed (is the MCP installed?)" >&2
+    jq -e '.ok == true and (.data != null)' <<<"$out" >/dev/null 2>&1 \
+        || die "error" "no cache for $DRIFT_DATASET_ID: $(jq -r '.error // "withheld/empty"' <<<"$out")" >&2
+    jq '.data' <<<"$out" | normalize
+}
+
+# Write live state through the MCP: the JSON cache + the doc's table + the
+# last_reviewed stamp, one canonical write.
+drift_registry_pull() {
+    local live="$1" out
+    out=$(printf '%s\n' "$live" \
+        | SVMC_VAULT_PATH="$NOTES_HOME" "$DRIFT_REVIEW_BIN" infra-write "$DRIFT_DATASET_ID") \
+        || die "error" "vault-mcp infra-write $DRIFT_DATASET_ID failed: ${out:-no output}"
+    msg "$DIM" "wrote" "$(jq -r '.wrote // "cache"' <<<"$out") ($(jq -r '.records // "?"' <<<"$out") records)"
+    local docu; docu=$(jq -r '.doc_updated // ""' <<<"$out")
+    [[ -n $docu ]] && msg "$DIM" "doc" "regenerated table → $docu"
+    msg "$DIM" "reviewed" "last_reviewed → $(jq -r '.reviewed // "today"' <<<"$out") (vault-mcp)"
+}
+
 # Diff live vs the vault mirror. Exit 1 on drift.
 drift_diff() {
     local live vault diff_out
     live=$(fetch_live)
-    vault=$(drift_vault_block) || exit 1
+    if [[ -n $DRIFT_DATASET_ID ]]; then
+        vault=$(drift_registry_cached) || exit 1
+    else
+        vault=$(drift_vault_block) || exit 1
+    fi
     if diff_out=$(diff <(echo "$vault") <(echo "$live")); then
         msg "$GREEN" "in sync" "live matches the vault mirror"
         echo
@@ -184,21 +218,25 @@ drift_awk_pull() {
     rm -f "$jsonf"
 }
 
-# Regenerate the mirror block from live.
+# Regenerate the cache (JSON file in the new model, ```json block in legacy)
+# from live.
 drift_pull() {
-    [[ -f $DRIFT_VAULT_DOC ]] || die "error" "vault doc not found: $DRIFT_VAULT_DOC"
-
     local live
     live=$(fetch_live)
 
-    if ! drift_mcp_pull "$live"; then
-        drift_awk_pull "$live"
-        drift_touch_reviewed "$DRIFT_VAULT_DOC"
+    if [[ -n $DRIFT_DATASET_ID ]]; then
+        drift_registry_pull "$live"
+    else
+        [[ -f $DRIFT_VAULT_DOC ]] || die "error" "vault doc not found: $DRIFT_VAULT_DOC"
+        if ! drift_mcp_pull "$live"; then
+            drift_awk_pull "$live"
+            drift_touch_reviewed "$DRIFT_VAULT_DOC"
+        fi
     fi
 
     local n; n=$(jq 'length' <<<"$live")
     echo
-    msg "$GREEN" "pulled" "$n records → $(basename "$DRIFT_VAULT_DOC")"
+    msg "$GREEN" "pulled" "$n records → ${DRIFT_DATASET_ID:-$(basename "$DRIFT_VAULT_DOC")}"
     msg "$DIM"   "next"   "review the diff, reconcile the prose, then: hq sync"
     echo
 }
