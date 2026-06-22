@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
 # drift.bats — hermetic tests for lib/drift.sh, the shared drift-guard core
-# behind ts-acl / cf-dns / adguard. A fake tool injects fetch_live + normalize,
-# so vault_block / diff / pull are exercised with no network, creds, or decrypt.
+# behind ts-acl / cf-dns / adguard / nginx. A fake tool injects fetch_live +
+# normalize and points DRIFT_REVIEW_BIN at a stub MCP that maintains the JSON
+# cache, so show / diff / pull are exercised with no network, creds, or vault.
 
 load helpers
 
@@ -11,8 +12,7 @@ setup() {
 
     # drift_main's preflight requires curl/jq/decrypt on PATH. The fake tool
     # injects fetch_live (no network, no creds), so it never calls curl or
-    # decrypt — stub them so the check passes in a hermetic env where the bin/
-    # tools aren't on PATH (CI). jq is real: normalize needs it.
+    # decrypt — stub them. jq is real: normalize and the stub MCP need it.
     STUBS="$DRIFT_DIR/stubs"
     mkdir -p "$STUBS"
     local c
@@ -23,8 +23,10 @@ setup() {
     export PATH="$STUBS:$PATH"
 
     LIVE_JSON="$DRIFT_DIR/live.json"
-    VAULT_DOC="$DRIFT_DIR/doc.md"
+    CACHE="$DRIFT_DIR/cache.json"        # the stub MCP's backing store
     TOOL="$DRIFT_DIR/faketool"
+    export CACHE
+    export NOTES_HOME="$DRIFT_DIR/vault"; mkdir -p "$NOTES_HOME"
 
     # Canned live state — deliberately unsorted so normalize has to order it.
     cat > "$LIVE_JSON" <<'JSON'
@@ -34,16 +36,32 @@ setup() {
 ]
 JSON
 
-    # A fake drift tool: the real lib/drift.sh with injected hooks. fetch_live
-    # reads the canned file (the only thing a real tool does differently).
+    # Stub MCP: `infra <id>` returns {ok,data} from $CACHE; `infra-write <id>`
+    # stores stdin into $CACHE and reports records — the new-model read/write.
+    local mcp="$DRIFT_DIR/severino-vault-mcp"
+    cat > "$mcp" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+  infra)
+    if [[ -f "$CACHE" ]]; then printf '{"ok":true,"data":%s}\n' "$(cat "$CACHE")"
+    else printf '{"ok":false,"error":"no cache"}\n'; fi ;;
+  infra-write)
+    cat > "$CACHE"
+    printf '{"ok":true,"wrote":"%s.json","records":%s,"reviewed":"today"}\n' \
+        "$2" "$(jq 'length' < "$CACHE" 2>/dev/null || echo 0)" ;;
+esac
+EOF
+    chmod +x "$mcp"
+    export DRIFT_REVIEW_BIN="$mcp"
+
+    # A fake drift tool: the real lib/drift.sh with injected hooks.
     cat > "$TOOL" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 source "$TOOLS_HOME/lib/common.sh"
 source "$TOOLS_HOME/lib/describe.sh"
 source "$TOOLS_HOME/lib/drift.sh"
-DRIFT_VAULT_DOC="\${DRIFT_VAULT_DOC:-$VAULT_DOC}"
-DRIFT_VAULT_HEADING="## Mirror"
+DRIFT_DATASET_ID="\${FAKE_DATASET_ID-test_ds}"
 usage() { echo "usage text"; }
 normalize() { jq -S 'sort_by(.id)'; }
 fetch_live() { normalize < "$LIVE_JSON"; }
@@ -52,197 +70,66 @@ EOF
     chmod +x "$TOOL"
 }
 
-# write_doc <block> — vault doc with surrounding frontmatter + prose and the
-# given JSON between the mirror fences.
-write_doc() {
-    cat > "$VAULT_DOC" <<EOF
----
-doc_id: test
----
-
-## Intro
-
-prose stays.
-
-## Mirror
-
-note line.
-
-\`\`\`json
-$1
-\`\`\`
-
-## After
-
-tail prose.
-EOF
-}
-
+seed_cache() { jq -S 'sort_by(.id)' <<<"$1" > "$CACHE"; }
 normalized_live() { jq -S 'sort_by(.id)' < "$LIVE_JSON"; }
 
-@test "diff: in sync when the stored block matches live" {
-    write_doc "$(normalized_live)"
+@test "diff: in sync when the cache matches live" {
+    seed_cache "$(cat "$LIVE_JSON")"
     run "$TOOL" diff
     [ "$status" -eq 0 ]
     [[ "$output" == *"in sync"* ]]
 }
 
-@test "diff: drift (exit 1) when the block differs from live" {
-    write_doc '[]'
+@test "diff: drift (exit 1) when the cache differs from live" {
+    seed_cache '[]'
     run "$TOOL" diff
     [ "$status" -eq 1 ]
     [[ "$output" == *"drift"* ]]
 }
 
-@test "diff: ordering in the stored block never causes false drift" {
-    # Same records as live, but written in the opposite order — normalize on
-    # both sides must canonicalize them to equal.
-    write_doc '[{"id":"b","val":2},{"id":"a","val":1}]'
+@test "diff: ordering in the cache never causes false drift" {
+    seed_cache '[{"id":"a","val":1},{"id":"b","val":2}]'
     run "$TOOL" diff
     [ "$status" -eq 0 ]
     [[ "$output" == *"in sync"* ]]
 }
 
-@test "pull: seeds an empty placeholder, then diff is in sync (round trip)" {
-    write_doc '[]'
+@test "pull: writes the cache, then diff is in sync (round trip)" {
+    rm -f "$CACHE"
     run "$TOOL" pull
     [ "$status" -eq 0 ]
     [[ "$output" == *"pulled"* ]]
-    run "$TOOL" diff
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"in sync"* ]]
-}
-
-@test "pull: replaces an existing block, preserving surrounding prose" {
-    write_doc '[{"id":"stale","val":9}]'
-    run "$TOOL" pull
-    [ "$status" -eq 0 ]
-    grep -q "prose stays." "$VAULT_DOC"
-    grep -q "^## After"    "$VAULT_DOC"
-    grep -q "tail prose."  "$VAULT_DOC"
-    grep -q '"id": "a"'    "$VAULT_DOC"
-    ! grep -q "stale"      "$VAULT_DOC"
-}
-
-@test "pull: appends the section when the heading is absent" {
-    cat > "$VAULT_DOC" <<'EOF'
----
-doc_id: test
----
-
-## Intro
-
-no mirror heading here yet.
-EOF
-    run "$TOOL" pull
-    [ "$status" -eq 0 ]
-    grep -q "^## Mirror" "$VAULT_DOC"
-    run "$TOOL" diff
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"in sync"* ]]
-}
-
-@test "pull: routes the write through the vault-mcp update-mirror-block CLI" {
-    # Stub the MCP binary; record argv so we can assert the subcommand, the
-    # vault-relative path, and the heading drift.sh hands it. The stub answers
-    # the --help support probe and the real call alike; the last write wins.
-    local stub="$DRIFT_DIR/severino-vault-mcp"
-    cat > "$stub" <<EOF
-#!/usr/bin/env bash
-printf '%s\n' "\$*" > "$DRIFT_DIR/mcp.args"
-echo '{"ok":true}'
-EOF
-    chmod +x "$stub"
-    export DRIFT_REVIEW_BIN="$stub"
-    # The doc must live under NOTES_HOME for the relative-path math to fire.
-    export NOTES_HOME="$DRIFT_DIR/vault"
-    export DRIFT_VAULT_DOC="$NOTES_HOME/sub/doc.md"
-    mkdir -p "$NOTES_HOME/sub"
-    cat > "$DRIFT_VAULT_DOC" <<'EOF'
----
-doc_id: test
----
-
-## Mirror
-
-```json
-[]
-```
-EOF
-    run "$TOOL" pull
-    [ "$status" -eq 0 ]
     [[ "$output" == *"reviewed"* ]]
-    run cat "$DRIFT_DIR/mcp.args"
-    [ "$output" = "update-mirror-block sub/doc.md --heading ## Mirror --touch-reviewed" ]
-}
-
-@test "pull: falls back to the awk writer cleanly when the MCP binary is absent" {
-    export DRIFT_REVIEW_BIN="$DRIFT_DIR/no-such-mcp"
-    write_doc '[]'
-    run "$TOOL" pull
-    [ "$status" -eq 0 ]
-    [[ "$output" != *"reviewed"* ]]
     run "$TOOL" diff
     [ "$status" -eq 0 ]
+    [[ "$output" == *"in sync"* ]]
 }
 
-# Regression pair: the old awk matched the first ```json block anywhere after
-# the heading, so a mirror under a *different* heading could be read or
-# clobbered. Both paths are now scoped to the heading's own section.
+@test "pull: routes the write through the vault-mcp infra-write CLI" {
+    rm -f "$CACHE"
+    run "$TOOL" pull
+    [ "$status" -eq 0 ]
+    # The stub stored the normalized live payload as the cache.
+    run diff <(jq -S 'sort_by(.id)' < "$CACHE") <(normalized_live)
+    [ "$status" -eq 0 ]
+}
 
-@test "diff: a mirror under a different heading is never matched" {
-    cat > "$VAULT_DOC" <<'EOF'
----
-doc_id: test
----
-
-## Mirror
-
-no block here yet.
-
-## Other
-
-```json
-[{"id":"z","val":9}]
-```
-EOF
+@test "diff: clear error when the dataset has no cache" {
+    rm -f "$CACHE"
     run "$TOOL" diff
     [ "$status" -ne 0 ]
-    [[ "$output" == *"no ## Mirror"* ]]
+    [[ "$output" == *"no cache"* ]]
 }
 
-@test "pull: inserts under its own heading, leaving another section's mirror alone" {
-    cat > "$VAULT_DOC" <<'EOF'
----
-doc_id: test
----
-
-## Mirror
-
-no block here yet.
-
-## Other
-
-```json
-[{"id":"z","val":9}]
-```
-EOF
-    run "$TOOL" pull
-    [ "$status" -eq 0 ]
-    grep -q '"id":"z"' "$VAULT_DOC"            # other section untouched
-    new_line="$(grep -n '"id": "a"' "$VAULT_DOC" | head -1 | cut -d: -f1)"
-    other_line="$(grep -n '^## Other' "$VAULT_DOC" | cut -d: -f1)"
-    [ -n "$new_line" ]
-    [ "$new_line" -lt "$other_line" ]          # new block landed in ## Mirror
-    run "$TOOL" diff
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"in sync"* ]]
+@test "guard: missing DRIFT_DATASET_ID is a configuration error" {
+    seed_cache '[]'
+    FAKE_DATASET_ID="" run "$TOOL" diff
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"DRIFT_DATASET_ID"* ]]
 }
 
 @test "pull: clean teardown — no set -u unbound-variable error" {
-    # Regression guard: the EXIT-trap-on-locals bug printed
-    # "jsonf: unbound variable" after a successful pull.
-    write_doc '[]'
+    rm -f "$CACHE"
     run "$TOOL" pull
     [ "$status" -eq 0 ]
     [[ "$output" != *"unbound variable"* ]]
