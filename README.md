@@ -468,7 +468,7 @@ Public jseverino.com Astro site workflow.
 | `site release <version>` | `<version>`<br>`--ship` | `deploy + network` | Bump package.json, run publish:check, commit + signed tag, push, create the GitHub release |
 | `site test` | `--visual`<br>`--ui`<br>`--update` | `local_write` | Run the Playwright end-to-end suite |
 | `site doctor` | — | `read + network` | Pre-flight health check: CLI/npm drift, vault-mcp install, security, contrast, parity, type check, audit. No build |
-| `site reinstall-mcp` | — | `local_write` | Reinstall the severino-vault-mcp package from source |
+| `site reinstall-mcp` | `--yes`<br>`--editable` | `local_write` | Reinstall the severino-vault-mcp package from source |
 | `site new-writeup <slug>` | `<slug>` | `vault_write` | Scaffold a new vault writeup folder from the template (starts published: false) |
 | `site seo <page>` | `<page>`<br>`-r, --result` | `read` | Preview the Google-style search result snippet for a built page |
 | `site dev` | `--drafts` | `local_write + interactive` | Start the local Astro dev server |

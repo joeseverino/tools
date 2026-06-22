@@ -109,6 +109,8 @@ describe_spec() {
     desc_effect read +network
     desc_cmd reinstall-mcp  -- "Reinstall the severino-vault-mcp package from source"
     desc_effect local_write
+    desc_opt --yes          -- "Run non-interactively; do not prompt before reinstalling"
+    desc_opt --editable     -- "Install the MCP source checkout in editable mode for local development"
     desc_cmd new-writeup    -- "Scaffold a new vault writeup folder from the template (starts published: false)"
     desc_effect vault_write
     desc_pos slug           -- "Lowercase-kebab-case slug; becomes the /portfolio/<slug>/ URL path"
@@ -308,17 +310,17 @@ mcp_reinstall_prompt() {
 
     msg "$YELLOW" "stale" "$reason"
     if [[ "${SITE_MCP_AUTO_REINSTALL:-}" == "1" ]]; then
-        cmd_reinstall_mcp
+        cmd_reinstall_mcp --yes
         return
     fi
     if [[ ! -t 0 || ! -t 1 ]]; then
-        die "error" "run \`site reinstall-mcp\`, then retry" 1
+        die "error" "run \`site reinstall-mcp --yes\`, then retry" 1
     fi
 
     printf '  Reinstall severino-vault-mcp now? [Y/n] ' > /dev/tty
     IFS= read -r answer < /dev/tty || answer="n"
     case "${answer:-y}" in
-        y|Y|yes|YES|Yes) cmd_reinstall_mcp ;;
+        y|Y|yes|YES|Yes) cmd_reinstall_mcp --yes ;;
         *) die "error" "reinstall cancelled; run \`site reinstall-mcp\` when ready" 1 ;;
     esac
 }
@@ -367,43 +369,10 @@ cmd_validate() {
     [[ -d "$NOTES_HOME/05 Writeups/$slug" ]] \
         || die "error" "writeup folder not found: $NOTES_HOME/05 Writeups/$slug"
 
-    local report
-    report="$(svmc prepare-writeup-publish "$slug" 2>/dev/null || true)"
-    [[ -n "$report" ]] || die "error" "prepare-writeup-publish returned no report"
+    local args=("$slug" "--pretty")
+    [[ -n "$draft" ]] && args=("--draft" "${args[@]}")
 
-    if printf '%s' "$report" | node -e '
-        let raw = "";
-        process.stdin.on("data", (d) => (raw += d));
-        process.stdin.on("end", () => {
-            const draft = process.argv[1] === "1";
-            const r = JSON.parse(raw);
-            const v = r.validation || {};
-            let blockers = v.blockers || [];
-            if (draft) blockers = blockers.filter((b) => !/^published is false|^published_at empty/.test(b));
-            const sections = [
-                ["blockers", blockers],
-                ["missing tech slugs", v.missing_tech_slugs || []],
-                ["missing images", v.missing_images || []],
-                ["unresolved refs", v.unresolved_refs || []],
-                ["nits (non-blocking)", v.nits || []],
-            ];
-            for (const [label, items] of sections) {
-                if (!items.length) continue;
-                console.log(label + ":");
-                for (const item of items) console.log("  - " + item);
-            }
-            const featured = r.featured_set || {};
-            if (featured.this_writeup_position != null) {
-                console.log("featured slot: " + featured.this_writeup_position + " of " + (featured.order || []).length);
-            }
-            const ok =
-                !blockers.length &&
-                !(v.missing_tech_slugs || []).length &&
-                !(v.missing_images || []).length &&
-                !(v.unresolved_refs || []).length;
-            process.exit(ok ? 0 : 1);
-        });
-    ' "$draft"; then
+    if svmc validate-writeup "${args[@]}"; then
         msg "$GREEN" "validate" "ok${draft:+ (draft mode)} — $slug"
     else
         die "error" "gate reports issues for $slug${draft:+ (draft mode)}" 1
@@ -1082,14 +1051,34 @@ cmd_doctor() {
 
 cmd_reinstall_mcp() {
     local mcp_home="${MCP_HOME:-$CODE_HOME/Assets/severino-vault-mcp}"
-    local installed_fp source_fp
+    local installed_fp source_fp yes="" editable=""
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+            --yes) yes="1"; shift ;;
+            --editable) editable="1"; shift ;;
+            -*) die_unknown flag "$1" reinstall-mcp ;;
+            *) die_unknown arg "$1" reinstall-mcp ;;
+        esac
+    done
+    if [[ -z "$yes" && ( ! -t 0 || ! -t 1 ) ]]; then
+        die "error" "non-interactive reinstall requires --yes" 1
+    fi
     [[ -d "$mcp_home" ]] || die "error" "MCP repo not found: $mcp_home"
-    msg "$DIM" "step" "uv tool install --reinstall ."
-    (cd "$mcp_home" && uv tool install --reinstall .)
+    if [[ -n "$editable" ]]; then
+        msg "$DIM" "step" "uv tool install --reinstall --editable ."
+        (cd "$mcp_home" && uv tool install --reinstall --editable .)
+    else
+        msg "$DIM" "step" "uv tool install --reinstall ."
+        (cd "$mcp_home" && uv tool install --reinstall .)
+    fi
     installed_fp="$(severino-vault-mcp --fingerprint 2>/dev/null || true)"
     source_fp="$(mcp_source_fingerprint 2>/dev/null || true)"
     if [[ -n "$source_fp" && "$installed_fp" != "$source_fp" ]]; then
-        die "error" "reinstall completed but fingerprint still differs" 1
+        if [[ -n "$editable" ]]; then
+            msg "$YELLOW" "note" "editable install fingerprint differs; source edits may be uncommitted"
+        else
+            die "error" "reinstall completed but fingerprint still differs" 1
+        fi
     fi
     msg "$GREEN" "reinstalled" "severino-vault-mcp ${installed_fp:-installed}"
     msg "$DIM" "note" "reconnect long-running MCP clients only if their tool schema must refresh"
