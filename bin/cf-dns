@@ -10,8 +10,9 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "cf-dns" "$@"
 source "$TOOLS_HOME/lib/drift.sh"
 
 API="https://api.cloudflare.com/client/v4"
-DRIFT_VAULT_DOC="${CF_DNS_VAULT_DOC:-}"
-DRIFT_VAULT_HEADING="${CF_DNS_VAULT_HEADING:-}"
+# New model: the cache is the `public_dns` JSON file in the infra-dataset
+# registry, read/written through the vault MCP. drift.sh keys off DRIFT_DATASET_ID.
+DRIFT_DATASET_ID="${CF_DNS_DATASET_ID:-public_dns}"
 
 describe_spec() {
     desc_tool "cf-dns" "Fetch the live Cloudflare DNS records and diff them against the vault mirror."
@@ -23,8 +24,7 @@ describe_spec() {
     desc_env CF_DNS_CREDS         -- "age-encrypted env holding CF_API_TOKEN"
     desc_env CF_ZONE              -- "zone name to query (resolved to an id via the API)"
     desc_env CF_ZONE_ID           -- "pin the zone id and skip name resolution"
-    desc_env CF_DNS_VAULT_DOC     -- "vault doc holding the mirror"
-    desc_env CF_DNS_VAULT_HEADING -- "heading whose fenced \`\`\`json block is the mirror"
+    desc_env CF_DNS_DATASET_ID    -- "infra-dataset id for the cache (default public_dns)"
 }
 
 # Decrypt the creds env and echo CF_API_TOKEN. The secret stays in memory for
