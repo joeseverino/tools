@@ -764,6 +764,7 @@ Usage: `resync <name>`
 | Argument | Description |
 |---|---|
 | `-n, --dry-run` | Show what would be reconciled; change nothing local |
+| `--reap` | Also delete local branches whose PR has merged but whose remote was not auto-deleted (one gh lookup per branch; never touches base, the current branch, or unmerged work) |
 | `<name>` | Only repos whose name contains NAME |
 
 Effect: `local_write + network`

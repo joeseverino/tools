@@ -384,6 +384,7 @@ _tools_suite_contract() {
     resync)
       _arguments \
         '{-n,--dry-run}[Show what would be reconciled; change nothing local]' \
+        '--reap[Also delete local branches whose PR has merged but whose remote was not auto-deleted (one gh lookup per branch; never touches base, the current branch, or unmerged work)]' \
         '1:Only repos whose name contains NAME:' \
         '(-h --help)'{-h,--help}'[show help]'
       ;;

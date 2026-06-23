@@ -83,6 +83,17 @@ while [[ $# -gt 0 ]]; do
 done
 (( ${#ROOTS[@]} )) || ROOTS=("$CODE_HOME/Assets" "$CODE_HOME/Projects")
 
+# Exact-name preference: when NAME names a repo dir exactly (e.g. `cordon`), match
+# ONLY that repo, never every repo that contains the string (`cordon-starter`).
+# Falls back to substring when NAME matches no dir exactly, so partial names still
+# work. This is what keeps `ship cordon` / `land cordon` off a sibling's branch.
+NAME_EXACT=0
+if [[ -n "$NAME_FILTER" ]]; then
+    for root in "${ROOTS[@]}"; do
+        [[ -d "$root/$NAME_FILTER" ]] && { NAME_EXACT=1; break; }
+    done
+fi
+
 if (( TUI )); then
     args=()
     (( DIRTY )) && args+=(--dirty)
@@ -200,7 +211,10 @@ collect() {
     (( needs_ship > 0 || needs_resync > 0 || (has_remote == 0 && local_ok == 0) )) && needs_attention=1
 
     # filters
-    [[ -n "$NAME_FILTER" && "$name" != *"$NAME_FILTER"* ]] && return 0
+    if [[ -n "$NAME_FILTER" ]]; then
+        if (( NAME_EXACT )); then [[ "$name" != "$NAME_FILTER" ]] && return 0
+        else [[ "$name" != *"$NAME_FILTER"* ]] && return 0; fi
+    fi
     [[ -n "$PM_FILTER" && "$pm" != "$PM_FILTER" ]] && return 0
     (( DIRTY )) && (( dirty + untracked == 0 )) && return 0
     if (( UNPUSHED )); then
