@@ -44,10 +44,15 @@ STUBEOF
 @test "help and describe work with no env (command-surface contract)" {
     run "$TOOLS_HOME/bin/backlog" -h
     [ "$status" -eq 0 ]
-    [[ "$output" == *"thin client over the vault MCP"* ]]
+    # -h renders the synopsis + prose (the rich paras supersede the one-line
+    # tagline by design — see describe.sh's description blurb).
+    [[ "$output" == *"Usage: backlog [board"* ]]
+    [[ "$output" == *"renders what the MCP emits"* ]]
     run "$TOOLS_HOME/bin/backlog" --describe
     [ "$status" -eq 0 ]
     [[ "$output" == *'"name":"backlog"'* ]]
+    # the one-line description is the --describe contract's "description" field.
+    [[ "$output" == *"thin client over the vault MCP"* ]]
 }
 
 @test "board renders the MCP task-list JSON, grouped by project" {
