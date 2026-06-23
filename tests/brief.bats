@@ -84,6 +84,18 @@ assert pr["green-app"]["review"]=="approved", pr
         -lt "$(grep -nF 'land green-app' <<<"$output" | cut -d: -f1)" ]
 }
 
+@test "render: a stale branch_state surfaces as a rebranch row (consumes the owner)" {
+    payload='{"repos":{"repos":[{"name":"old-app","pm":"npm","branch_state":"stale"}]}}'
+    # json digest carries the stale repo
+    run bash -c 'printf "%s" "$1" | node "$TOOLS_HOME/lib/brief/render.mjs" json 1' _ "$payload"
+    [ "$status" -eq 0 ]
+    echo "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["repos"]["stale"]==["old-app"], d["repos"]'
+    # human briefing names the recovery verb
+    run bash -c 'printf "%s" "$1" | node "$TOOLS_HOME/lib/brief/render.mjs" human 1' _ "$payload"
+    [ "$status" -eq 0 ]
+    grep -qF "ship old-app --rebranch --go" <<<"$output"
+}
+
 @test "brief without --prs shows no PR section and no land verb" {
     setup_brief_fleet
     run brief_bin

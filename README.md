@@ -65,6 +65,7 @@ tools/
     # Workspace
     repos       # Fleet inventory of every repo under ~/Documents/Code.
     brief       # One emit-once snapshot of repos, vault, and writeups.
+    start       # Begin new work on a fresh branch off the default branch.
     ship        # Commit, push, and PR pending work — one repo, or the whole fleet.
     land        # Merge a green PR and delete its branch — the merge beat of the loop.
     resync      # Reconcile local repos with the remote after merging PRs on GitHub.
@@ -681,6 +682,30 @@ brief --prs  # morning orient with open-PR/CI state and the land verbs
 brief tui  # the interactive workspace cockpit
 ```
 
+#### `start`
+
+Begin new work on a fresh branch off the default branch.
+
+The opening beat of the workspace loop (start -> work -> ship -> land -> resync). Run it before touching code, from inside the repo: it fetches origin, cuts a fresh branch off the current origin/<base>, and carries any uncommitted edits in the tree onto it, so neither you nor an agent ever commits onto main or piles onto a stale branch (the mistake that turns one change into a merge-conflict cleanup).
+
+Committed-but-unpushed work on the current branch is left where it is (start never moves committed history) and reported, so nothing is silently stranded. Pair it with ship: 'ship --check --go' to open the PR, 'land' to merge, 'resync' to reconcile.
+
+Usage: `start <slug>`
+
+| Argument | Description |
+|---|---|
+| `--from <BASE>` | Branch off origin/BASE instead of the repo's default branch |
+| `<slug>` | Short name for the work; becomes the branch (kebab-cased). Omit for a timestamped name. |
+
+Effect: `local_write + network`
+
+**Examples**
+
+```sh
+start "fix dns rewrites"  # fresh branch fix-dns-rewrites off origin/main, carrying current edits
+start --from develop hotfix  # branch hotfix off origin/develop
+```
+
 #### `ship`
 
 Commit, push, and PR pending work — one repo, or the whole fleet.
@@ -702,6 +727,7 @@ Usage: `ship <name>`
 | `--no-pr` | Commit and push only; do not open a PR |
 | `--check` | Run the repo's own local gate (tools check / scripts/check.sh / npm test) before pushing; skip the repo if it fails |
 | `--watch` | After opening/updating the PR, poll 'gh pr checks' until CI is green or red |
+| `--rebranch` | Recover a stale branch: replay its commits onto a fresh branch off origin/<base>, dropping any already merged (leaves the old branch untouched) |
 | `<name>` | Only repos whose name contains NAME |
 
 Effect: `remote_write + network`
