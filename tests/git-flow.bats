@@ -154,6 +154,51 @@ advance_origin() {
     [ "$status" -eq 0 ]               # unique work, no merged PR -> kept
 }
 
+@test "git_sync_clean: steps off and prunes a squash-merged CURRENT branch" {
+    setup_flow
+    # On a branch whose PR merged (stub: *wasmerged*) and whose remote was
+    # deleted, but with a unique commit (the squash rewrote it). resync must step
+    # back to main and prune it, not strand us on the gone branch (the jseverino
+    # "needs resync / gone after resync" bug — same squash case as the pruner).
+    git checkout -q -b feat/wasmerged origin/main
+    printf 'sq\n' > sq.txt; git add sq.txt; git commit -q -m "feat: sq"
+    git push -q -u origin feat/wasmerged
+    git push -q origin --delete feat/wasmerged
+    git_sync_clean main                              # still ON feat/wasmerged
+    # Assertions chained (&&): bats 1.13 gates only a test's LAST command, so an
+    # unchained earlier check would be silently skipped locally and only fail CI.
+    [ "$(git symbolic-ref --short HEAD)" = "main" ] \
+        && ! git show-ref --verify --quiet refs/heads/feat/wasmerged
+}
+
+@test "git_merged_branches: lists fully-merged branches, never base/current/unpushed" {
+    setup_flow
+    # feat/wasmerged is pushed (its upstream is origin/feat/wasmerged, not ahead),
+    # so it is genuinely reapable; feat/keepme is not merged (name not *wasmerged*).
+    git checkout -q -b feat/wasmerged origin/main
+    printf 'x\n' > x.txt; git add x.txt; git commit -q -m "feat: x"
+    git push -q -u origin feat/wasmerged
+    git checkout -q -b feat/keepme origin/main
+    printf 'k\n' > k.txt; git add k.txt; git commit -q -m "feat: k"
+    git push -q -u origin feat/keepme
+    git checkout -q main
+    run git_merged_branches main
+    [[ "$output" == *"feat/wasmerged"* ]] \
+        && [[ "$output" != *"feat/keepme"* ]] \
+        && [[ "$output" != *"main"* ]]
+}
+
+@test "git_merged_branches: protects a merged branch with commits ahead of its upstream" {
+    setup_flow
+    git checkout -q -b feat/wasmerged origin/main
+    printf 'x\n' > x.txt; git add x.txt; git commit -q -m "feat: x"
+    git push -q -u origin feat/wasmerged
+    printf 'more\n' > more.txt; git add more.txt; git commit -q -m "feat: more"  # ahead 1, unpushed
+    git checkout -q main
+    run git_merged_branches main
+    [ -z "$output" ]                                  # unpushed work -> never reaped
+}
+
 @test "start: cuts a slug branch off origin/main carrying uncommitted edits" {
     setup_flow
     printf 'edit\n' > new.txt          # uncommitted work started on main

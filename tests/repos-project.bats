@@ -43,3 +43,25 @@ plan() { # plan <module.mjs> <json-payload>  [env=val ...]
     run plan lib/ship/plan.mjs "$payload" SHIP_INCLUDE_CLEAN_BRANCH=1
     [ "$output" = $'tools\t/tmp/tools\tship/demo\t0\t0\t1' ]
 }
+
+@test "repos --json NAME prefers an exact repo-name match over substring" {
+    export CODE_HOME="$BATS_TEST_TMPDIR/code"
+    mkdir -p "$CODE_HOME/Assets/cordon" "$CODE_HOME/Assets/cordon-starter"
+    git -C "$CODE_HOME/Assets/cordon" init -q
+    git -C "$CODE_HOME/Assets/cordon-starter" init -q
+    # "cordon" is also a substring of "cordon-starter"; exact name must win so a
+    # ship/land/resync scoped to `cordon` never touches the sibling.
+    run "$TOOLS_HOME/bin/repos" --json cordon
+    exact="$output"
+    # a partial name with no exact match still falls back to substring (both).
+    run "$TOOLS_HOME/bin/repos" --json cord
+    # One python check asserts both (the last command, so bats 1.13 gates it):
+    # exact name -> only cordon; partial -> substring (both).
+    python3 -c '
+import json,sys
+e=sorted(r["name"] for r in json.loads(sys.argv[1])["repos"])
+s=sorted(r["name"] for r in json.loads(sys.argv[2])["repos"])
+assert e==["cordon"], e
+assert s==["cordon","cordon-starter"], s
+' "$exact" "$output"
+}

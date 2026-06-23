@@ -275,9 +275,13 @@ git_sync_clean() {
     git fetch -q origin --prune || return 1
     cur="$(git symbolic-ref --short -q HEAD 2>/dev/null || true)"
 
-    if [[ -n "$cur" && "$cur" != "$base" ]] \
-       && git_branch_gone "$cur" \
-       && [[ "$(git_unique_commits "$base")" == "0" ]]; then
+    # Step off the current branch when its remote is gone AND it is done: either
+    # nothing unique on it, OR its PR merged (a squash-merge rewrites the commits,
+    # so it still looks "unique" vs base — the same case the pruner handles). Then
+    # it can be fast-forwarded and pruned below. A live branch with unmerged work
+    # is left put.
+    if [[ -n "$cur" && "$cur" != "$base" ]] && git_branch_gone "$cur" \
+       && { [[ "$(git_unique_commits "$base")" == "0" ]] || git_branch_pr_merged "$cur"; }; then
         git checkout -q "$base" 2>/dev/null && cur="$base"
     fi
 
@@ -297,4 +301,25 @@ git_sync_clean() {
         fi
         git branch -q -D "$b" 2>/dev/null || true
     done < <(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/heads | awk '/\[gone\]/{print $1}')
+}
+
+# Names of local branches whose PR has merged on GitHub — regardless of whether
+# the remote branch was auto-deleted ([gone]). The broader sweep `resync --reap`
+# uses to clear accumulated post-merge branches the [gone] prune misses (merged
+# without auto-delete, or never fetched as gone). Never includes <base> or the
+# current branch, and a branch with no merged PR (genuine unmerged work) is never
+# listed. Echoes them newline-separated; runs one gh lookup per branch.
+git_merged_branches() {
+    local base="${1:-}" cur b ahead
+    [[ -n "$base" ]] || base="$(git_default_branch)"
+    cur="$(git symbolic-ref --short -q HEAD 2>/dev/null || true)"
+    while read -r b; do
+        [[ -n "$b" && "$b" != "$base" && "$b" != "$cur" ]] || continue
+        git_branch_pr_merged "$b" || continue
+        # Protect unpushed work: a branch ahead of its own upstream carries local
+        # commits beyond the merged PR — never reap those. (No upstream -> 0, the
+        # gone/squash case the prune already covers.)
+        ahead="$(git rev-list --count "${b}@{upstream}..${b}" 2>/dev/null || echo 0)"
+        [[ "$ahead" == "0" ]] && printf '%s\n' "$b"
+    done < <(git for-each-ref --format='%(refname:short)' refs/heads)
 }
