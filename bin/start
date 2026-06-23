@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# start [options] [slug] — begin new work on a fresh branch off the default branch.
+#
+# The opening beat of the workspace loop (start → work → ship → land → resync).
+# It fixes the most expensive mistake in the loop: starting work without
+# branching first, so commits pile onto main or a stale feature branch and have
+# to be untangled later. `start` makes branching-first one word — fetch, cut a
+# clean branch off the current origin/<base>, and carry any edits already in the
+# tree onto it. lib/git.sh owns the mechanics; this is the front door.
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
+# shellcheck source=lib/git.sh
+source "$TOOLS_HOME/lib/git.sh"
+
+describe_spec() {
+    desc_tool "start" "Begin new work on a fresh branch off the default branch."
+    desc_inventory "Workspace" 205
+    desc_synopsis "start [options] [slug]"
+    desc_effect local_write +network
+    desc_opt --from BASE -- "Branch off origin/BASE instead of the repo's default branch"
+    desc_pos slug        -- "Short name for the work; becomes the branch (kebab-cased). Omit for a timestamped name."
+    desc_para "The opening beat of the workspace loop (start -> work -> ship -> land -> resync). Run it before touching code, from inside the repo: it fetches origin, cuts a fresh branch off the current origin/<base>, and carries any uncommitted edits in the tree onto it, so neither you nor an agent ever commits onto main or piles onto a stale branch (the mistake that turns one change into a merge-conflict cleanup)."
+    desc_para "Committed-but-unpushed work on the current branch is left where it is (start never moves committed history) and reported, so nothing is silently stranded. Pair it with ship: 'ship --check --go' to open the PR, 'land' to merge, 'resync' to reconcile."
+    desc_example "start \"fix dns rewrites\"" -- "fresh branch fix-dns-rewrites off origin/main, carrying current edits"
+    desc_example "start --from develop hotfix" -- "branch hotfix off origin/develop"
+}
+
+desc_help_intercept "$@"
+
+BASE="" SLUG=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --from) BASE="${2:-}"; shift 2 ;;
+        -*)     die_unknown option "$1" ;;
+        *)      SLUG="${SLUG:+$SLUG }$1"; shift ;;
+    esac
+done
+
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+    || die "repo" "not inside a git work tree — cd into the repo first" 2
+
+header "start" 1
+git fetch -q origin --prune 2>/dev/null || true
+[[ -n "$BASE" ]] || BASE="$(git_default_branch)"
+
+git rev-parse --verify -q "origin/$BASE" >/dev/null 2>&1 \
+    || die "base" "origin/$BASE not found — is the remote reachable and the branch pushed?" 1
+
+# Slugify the name into a branch-safe kebab; default to a timestamp. A collision
+# with an existing local branch falls back to a unique timestamped name.
+slug="$(printf '%s' "$SLUG" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
+[[ -n "$slug" ]] || slug="$(git_fresh_name work)"
+if git show-ref --verify -q "refs/heads/$slug"; then
+    slug="$(git_fresh_name "$slug")"
+fi
+
+# Note any committed-but-unpushed work on the current branch — start leaves it
+# in place rather than dragging it onto the fresh branch.
+cur="$(git symbolic-ref --short -q HEAD 2>/dev/null || echo HEAD)"
+left="$(git_unique_commits "$BASE")"
+carried=0; git_worktree_dirty && carried=1
+
+fresh="$(git_cut_fresh "$BASE" "$slug")" \
+    || die "branch" "could not cut '$slug' off origin/$BASE" 1
+
+msg "$GREEN" "start" "$fresh ${DIM}off origin/$BASE${RESET}"
+(( carried )) && msg "$DIM" "carried" "uncommitted edits moved onto $fresh"
+if [[ "$cur" != "$BASE" && "$cur" != "main" && "$cur" != "master" && "$left" != "0" ]]; then
+    msg "$YELLOW" "left" "$left commit(s) on '$cur' — not moved (cherry-pick them if you still want them)"
+fi
+msg "$DIM" "next" "edit · ship --check --go · land · resync"
+echo

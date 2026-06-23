@@ -171,13 +171,14 @@ type; both stay in sync because there is only one implementation.
 
 ## Repo conventions
 
-- **Solo-authored, but never commit to `main` — branch → PR.** Branch from a
-  freshly fetched `origin/main` (`git fetch origin && git checkout -b <name>
-  origin/main`), never from a stale local tree (multiple sessions touch these
-  repos, so local `main` lags). Push, open a PR, and hand back only on green CI
-  with no unresolved review comments; Joe approves or comments, then it merges.
-  No `Co-Authored-By` / "Claude" trailers in commits, no AI attribution in
-  messages. Commit/push/PR only when asked.
+- **Solo-authored, but never commit to `main` — branch → PR.** Open work with
+  `start "<slug>"` (it fetches and cuts a fresh branch off `origin/main`, carrying
+  any edits), never from a stale local tree (multiple sessions touch these repos,
+  so local `main` lags). Then `ship --check --go` (don't `git push` / `gh pr
+  create` by hand — see the Workspace loop), and hand back only on green CI with no
+  unresolved review comments; Joe approves or comments, then it merges. No
+  `Co-Authored-By` / "Claude" trailers in commits, no AI attribution in messages.
+  Commit/push/PR only when asked.
 - After meaningful vault-affecting work, the operator runs `hq sync`. This is
   checked, not remembered: `hq sync` records the shipped manifest hash at
   `${XDG_STATE_HOME:-~/.local/state}/severino-tools/hq-sync.json`, and
@@ -291,18 +292,39 @@ it (installed fingerprint vs source).
   `completions/_tools-suite` and README CLI reference/inventory both consume
   `--describe`; never hand-edit either generated block.
 
-## Workspace loop (`repos` · `ship` · `land` · `resync`)
+## Workspace loop (`start` · `repos` · `ship` · `land` · `resync`)
 
 The fleet workflow is one loop with one read owner and one write owner — match
 that split when extending it, don't add a second scanner or a second merge path.
 
+**The PR path, every time — never `git push` / `gh pr create` by hand:**
+
+> `start "<slug>"` (fresh branch off origin/main) → edit → `ship --check --go`
+> (gate locally, push, open/sync a *conventional* PR title) → `ship --watch` or
+> `land --go` (squash-merge) → `resync` (ff main + prune). Let `ship` own the PR
+> title; don't hand-write it. This is what keeps two sessions (you and an agent)
+> from colliding: each change is a clean branch off current main, gated before it
+> leaves the machine.
+
+- **Branch safety is decided once, in `lib/git.sh` (`git_branch_state`).** Never
+  commit to `main` and never pile onto a stale branch: the single ladder classes
+  the current branch `trunk|zombie|pr|current|stale` vs `origin/<base>`, and every
+  consumer reads it — `git_target_branch` (ship's write-time gate), `repos --json`
+  (`branch_state` field), and the TUI queues. `start` cuts a fresh branch off
+  `origin/<base>` carrying the working tree (the opening beat that makes
+  branching-first one word). When ship hits a **stale** branch (committed work,
+  behind base, no PR — the conflict-cascade trap) it STOPS and guides rather than
+  inheriting it; `ship --rebranch` replays the commits onto a fresh branch off
+  base, dropping any already merged. Don't add a second branch heuristic anywhere.
 - **`repos` owns every *read*.** Git state and PR/CI state both come from
-  `repos --json`. `--prs` folds each repo's open-PR state (number, CI rollup,
-  review) in via one `gh pr view` per repo with a remote (network; parallel fan-out
-  → `lib/repos/pr.mjs` projects the blobs back in one pass). `--fetch` refreshes
-  remote-tracking refs first so `behind`/`upstream_gone` are true *now*, not as of
-  the last manual fetch — the unfetched counts are stale, so trust them only with
-  `--fetch`. `stash` is always emitted. `ship`, `land`, and `resync` all read this
+  `repos --json`. `branch_state` is the owned branch-safety verdict (above), a
+  network-free hint by default and corrected to `pr` under `--prs`. `--prs` folds
+  each repo's open-PR state (number, CI rollup, review) in via one `gh pr view` per
+  repo with a remote (network; parallel fan-out → `lib/repos/pr.mjs` projects the
+  blobs back in one pass). `--fetch` refreshes remote-tracking refs first so
+  `behind`/`upstream_gone`/`branch_state` are true *now*, not as of the last manual
+  fetch — the unfetched counts are stale, so trust them only with `--fetch`.
+  `stash` is always emitted. `start`, `ship`, `land`, and `resync` all read this
   one surface and never re-derive git state (the emit-once rule). `land`'s preview
   *is* `repos --prs`.
 - **`lib/git.sh` owns every *write* mechanic.** Commit/push/PR/merge/sync live

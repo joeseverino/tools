@@ -38,4 +38,28 @@ if [[ "${1:-}" == "pr" && "${2:-}" == "merge" ]]; then
     exit 0
 fi
 
+# `gh pr list --head <b> [--state open|merged] --json <f> -q '.[0].<f>'` — used by
+# git_branch_has_open_pr / git_branch_pr_merged / git_open_or_update_pr. These
+# callers extract a bare scalar via -q, so the stub emits the bare value (like
+# real gh with -q), or NOTHING when there is no matching PR — never a literal
+# "[]", which would read as "a PR exists". Branches opt in by name: *haspr* = an
+# open PR, *wasmerged* = a merged PR. State-aware so open/merged don't cross-fire.
+if [[ "${1:-}" == "pr" && "${2:-}" == "list" ]]; then
+    head=""; state="open"; want_url=0; prev=""
+    for a in "$@"; do
+        [[ "$prev" == "--head" ]] && head="$a"
+        [[ "$prev" == "--state" ]] && state="$a"
+        [[ "$a" == *url* ]] && want_url=1
+        prev="$a"
+    done
+    if [[ "$state" == "open" && "$head" == *haspr* ]]; then
+        (( want_url )) && echo "https://github.com/demo/x/pull/99" || echo "99"
+        exit 0
+    fi
+    if [[ "$state" == "merged" && "$head" == *wasmerged* ]]; then
+        echo "98"; exit 0
+    fi
+    exit 0
+fi
+
 exit 0

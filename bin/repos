@@ -6,6 +6,8 @@
 set -euo pipefail
 
 source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
+# shellcheck source=lib/git.sh
+source "$TOOLS_HOME/lib/git.sh"   # the branch-state verdict (git_branch_state) lives here, not re-derived
 
 : "${CODE_HOME:=$HOME/Documents/Code}"
 
@@ -100,7 +102,7 @@ R_DIRTY=() R_UNTRACKED=() R_AHEAD=() R_BEHIND=() R_UPSTREAM=() R_UPSTREAM_NAME=(
 R_UPSTREAM_TRACK=() R_UPSTREAM_GONE=()
 R_SHA=() R_DATE=() R_SUBJ=() R_LANG=() R_PM=() R_PMFIELD=() R_NVMRC=()
 R_NM=() R_NMSIZE=() R_CI=() R_IDUPS=() R_STASH=()
-R_LOCAL_OK=() R_NEEDS_SHIP=() R_NEEDS_RESYNC=() R_NEEDS_ATTENTION=()
+R_LOCAL_OK=() R_NEEDS_SHIP=() R_NEEDS_RESYNC=() R_NEEDS_ATTENTION=() R_STATE=()
 R_PR_NUM=() R_PR_STATE=() R_PR_CI=() R_PR_REVIEW=() R_PR_URL=()
 
 repo_local_ok() {
@@ -148,6 +150,16 @@ collect() {
         local lc; lc="$(git -C "$d" log -1 --format='%h%x1f%cs%x1f%s' 2>/dev/null || true)"
         [[ -n "$lc" ]] && { IFS=$'\x1f' read -r sha cdate subj <<<"$lc" || true; }
         stash="$(git -C "$d" stash list 2>/dev/null | grep -c . || true)"; [[ -n "$stash" ]] || stash=0
+    fi
+
+    # Branch-state verdict from the one owner (lib/git.sh), never re-derived here.
+    # want_pr=0 keeps the default tier network-free (PR knowledge folds in during
+    # the --prs pass below), so a stale-looking branch that actually has an open
+    # PR is corrected to "pr" only when PR state is fetched.
+    local branch_state='-'
+    if (( is_git )) && (( has_remote )); then
+        branch_state="$( cd "$d" && git_branch_state "$(git_default_branch)" 0 2>/dev/null || echo '-' )"
+        [[ -n "$branch_state" ]] || branch_state='-'
     fi
 
     local pm='-'
@@ -202,7 +214,7 @@ collect() {
     R_SHA+=("$sha"); R_DATE+=("$cdate"); R_SUBJ+=("$subj"); R_LANG+=("$lang")
     R_PM+=("$pm"); R_PMFIELD+=("$pmfield"); R_NVMRC+=("$nvmrc")
     R_NM+=("$nm"); R_NMSIZE+=("$nmsize"); R_CI+=("$ci"); R_IDUPS+=("$idups"); R_STASH+=("$stash")
-    R_LOCAL_OK+=("$local_ok"); R_NEEDS_SHIP+=("$needs_ship"); R_NEEDS_RESYNC+=("$needs_resync"); R_NEEDS_ATTENTION+=("$needs_attention")
+    R_LOCAL_OK+=("$local_ok"); R_NEEDS_SHIP+=("$needs_ship"); R_NEEDS_RESYNC+=("$needs_resync"); R_NEEDS_ATTENTION+=("$needs_attention"); R_STATE+=("$branch_state")
     # PR fields default to "no open PR"; the --prs post-pass overwrites them.
     R_PR_NUM+=(0); R_PR_STATE+=("none"); R_PR_CI+=("none"); R_PR_REVIEW+=("none"); R_PR_URL+=("")
 }
@@ -240,6 +252,9 @@ if (( PRS )) && (( N > 0 )); then
         [[ -n "$idx" ]] || continue
         R_PR_NUM[idx]="$num"; R_PR_STATE[idx]="$state"; R_PR_CI[idx]="$prci"
         R_PR_REVIEW[idx]="$review"; R_PR_URL[idx]="$url"
+        # Correct the network-free hint: an open PR means the branch is its PR's
+        # home (iterate), not stale — the want_pr=1 arm of git_branch_state.
+        [[ "$state" == "open" ]] && R_STATE[idx]="pr"
     done < <(node "$TOOLS_HOME/lib/repos/pr.mjs" "$pr_tmp")
     rm -rf "$pr_tmp"
 fi
@@ -255,7 +270,7 @@ if (( JSON )); then
     i=0
     while (( i < N )); do
         (( i )) && printf ','
-        printf '{"name":"%s","path":"%s","root":"%s","git":%s,"branch":"%s","remote":"%s","has_remote":%s,"dirty":%d,"untracked":%d,"ahead":%d,"behind":%d,"upstream":%s,"upstream_name":"%s","upstream_track":"%s","upstream_gone":%s,"local_ok":%s,"needs_ship":%s,"needs_resync":%s,"needs_attention":%s,"stash":%d,"last_commit":{"sha":"%s","date":"%s","subject":"%s"},"lang":"%s","pm":"%s","package_manager":"%s","nvmrc":"%s","node_modules":%s,"node_modules_size":%s,"ci":%d' \
+        printf '{"name":"%s","path":"%s","root":"%s","git":%s,"branch":"%s","remote":"%s","has_remote":%s,"dirty":%d,"untracked":%d,"ahead":%d,"behind":%d,"upstream":%s,"upstream_name":"%s","upstream_track":"%s","upstream_gone":%s,"local_ok":%s,"needs_ship":%s,"needs_resync":%s,"needs_attention":%s,"stash":%d,"last_commit":{"sha":"%s","date":"%s","subject":"%s"},"lang":"%s","pm":"%s","package_manager":"%s","nvmrc":"%s","node_modules":%s,"node_modules_size":%s,"ci":%d,"branch_state":"%s"' \
             "$(json_escape "${R_NAME[$i]}")" "$(json_escape "${R_PATH[$i]}")" "$(json_escape "${R_ROOT[$i]}")" \
             "$(json_bool "${R_GIT[$i]}")" "$(json_escape "${R_BRANCH[$i]}")" "$(json_escape "${R_REMOTE[$i]}")" "$(json_bool "${R_HASREMOTE[$i]}")" \
             "${R_DIRTY[$i]}" "${R_UNTRACKED[$i]}" "${R_AHEAD[$i]}" "${R_BEHIND[$i]}" "$(json_bool "${R_UPSTREAM[$i]}")" \
@@ -264,7 +279,7 @@ if (( JSON )); then
             "${R_STASH[$i]}" \
             "$(json_escape "${R_SHA[$i]}")" "$(json_escape "${R_DATE[$i]}")" "$(json_escape "${R_SUBJ[$i]}")" \
             "$(json_escape "${R_LANG[$i]}")" "$(json_escape "${R_PM[$i]}")" "$(json_escape "${R_PMFIELD[$i]}")" "$(json_escape "${R_NVMRC[$i]}")" \
-            "$(json_bool "${R_NM[$i]}")" "${R_NMSIZE[$i]}" "${R_CI[$i]}"
+            "$(json_bool "${R_NM[$i]}")" "${R_NMSIZE[$i]}" "${R_CI[$i]}" "$(json_escape "${R_STATE[$i]}")"
         (( ICLOUD )) && printf ',"icloud_dups":%d' "${R_IDUPS[$i]}"
         if (( PRS )); then
             printf ',"pr":{"number":%d,"state":"%s","ci":"%s","review":"%s","url":"%s"}' \

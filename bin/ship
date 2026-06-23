@@ -44,6 +44,7 @@ describe_spec() {
     desc_opt --no-pr      -- "Commit and push only; do not open a PR"
     desc_opt --check      -- "Run the repo's own local gate (tools check / scripts/check.sh / npm test) before pushing; skip the repo if it fails"
     desc_opt --watch      -- "After opening/updating the PR, poll 'gh pr checks' until CI is green or red"
+    desc_opt --rebranch   -- "Recover a stale branch: replay its commits onto a fresh branch off origin/<base>, dropping any already merged (leaves the old branch untouched)"
     desc_pos name         -- "Only repos whose name contains NAME"
     desc_para "Preview with 'ship' or 'ship <name>'; execute with --go. A single repo needs no --all; a fleet ship requires --all so it can never happen by accident. Pass '-- path ...' to commit only those paths instead of everything. If you are on main (or a branch whose remote was merged and deleted) ship cuts a fresh 'ship/<timestamp>' branch off the default branch so main is never committed to and zombie branches are never pushed. The PR body defaults to a clean file summary; pass --body (or let an agent pass one) for a richer PR."
     desc_para "--check runs the repo's local gate before pushing so a failure is caught here, not after a CI round-trip; a repo that fails its gate is left unpushed. --watch then follows the PR's checks to green or red instead of you polling by hand. Together they close the write half of the loop: gate locally, ship, watch CI, then 'resync' once it merges."
@@ -52,7 +53,7 @@ describe_spec() {
 
 desc_help_intercept "$@"
 
-GO=0 ALL=0 NOPR=0 CHECK=0 WATCH=0 BODY_SET=0 MSG="" BODY="" NAME=""
+GO=0 ALL=0 NOPR=0 CHECK=0 WATCH=0 REBRANCH=0 BODY_SET=0 MSG="" BODY="" NAME=""
 PATHS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -61,6 +62,7 @@ while [[ $# -gt 0 ]]; do
         --no-pr)      NOPR=1; shift ;;
         --check)      CHECK=1; shift ;;
         --watch)      WATCH=1; shift ;;
+        --rebranch)   REBRANCH=1; shift ;;
         -m|--message) MSG="${2:-}"; shift 2 ;;
         --body)       BODY="${2:-}"; BODY_SET=1; shift 2 ;;
         --)           shift; PATHS=("$@"); break ;;
@@ -124,9 +126,32 @@ while IFS=$'\t' read -r name path branch uncommitted ahead has_remote; do
         git fetch -q origin --prune 2>/dev/null || true
         base="$(git_default_branch)"
 
-        # lib/git.sh owns the mechanics (zombie-safe branch, commit, push, PR).
-        git_target_branch "$base" ship >/dev/null \
-            || { printf '  %s%-10s%s %s\n' "$RED$BOLD" "skip" "$RESET" "$name: could not branch off origin/$base"; exit 0; }
+        # lib/git.sh decides whether this branch is a safe home for new work and
+        # otherwise starts clean off origin/<base> — so neither you nor an agent
+        # ever has to remember to branch first. --rebranch recovers a stale
+        # branch by replaying its commits onto a fresh one.
+        if (( REBRANCH )); then
+            if ! newb="$(git_rebranch "$base" ship)"; then
+                printf '  %s%-10s%s %s\n' "$RED$BOLD" "skip" "$RESET" \
+                    "$name: couldn't replay onto a fresh branch — a commit conflicts with already-merged work; rebase by hand: git rebase origin/$base"
+                exit 0
+            fi
+            printf '  %s%-10s%s %s\n' "$DIM" "rebranch" "$RESET" "replayed onto $newb off origin/$base"
+        else
+            tb=0; git_target_branch "$base" ship >/dev/null || tb=$?
+            if (( tb == GIT_TARGET_STALE )); then
+                cur="$(git symbolic-ref --short -q HEAD 2>/dev/null || echo HEAD)"
+                printf '  %s%-10s%s %s\n' "$YELLOW$BOLD" "stale" "$RESET" \
+                    "$name: on '$cur' — behind origin/$base by $(git_behind_commits "$base") · $(git_unique_commits "$base") committed commit(s) · no PR"
+                printf '  %s%-12s%s %s\n' "$DIM" "" "$RESET" "shipping here would re-inherit work that may already be merged."
+                printf '  %s%-12s%s %s\n' "$DIM" "→ start" "$RESET" "start \"<slug>\"           (clean branch off origin/$base, then redo)"
+                printf '  %s%-12s%s %s\n' "$DIM" "→ replay" "$RESET" "ship${NAME:+ $NAME} --rebranch --go   (carry these commits onto a fresh branch)"
+                exit 0
+            elif (( tb != GIT_TARGET_OK )); then
+                printf '  %s%-10s%s %s\n' "$RED$BOLD" "skip" "$RESET" "$name: could not branch off origin/$base"
+                exit 0
+            fi
+        fi
 
         if (( uncommitted > 0 )); then
             if (( ${#PATHS[@]} )); then git_commit "$MSG" "${PATHS[@]}" || true; else git_commit "$MSG" || true; fi
