@@ -1,0 +1,161 @@
+#!/usr/bin/env bash
+# backlog [view] [options] — the fleet backlog, a thin client over the MCP.
+# The severino-vault-mcp MCP is the one task brain: it indexes the vault and
+# owns task reads (task-list) and writes (task-add / task-move). backlog renders
+# its board and delegates writes — it holds no task logic, scans nothing, parses
+# nothing. Tasks live with their project (01 Projects/<project>/tasks/) or in the
+# 07 Backlog/ cross-cutting bucket. `--json` is the MCP's machine surface, raw.
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
+
+# Routed through a var so the test suite can shadow the MCP with a hermetic stub.
+SVMC="${SVMC_BIN:-severino-vault-mcp}"
+
+describe_spec() {
+    desc_tool "backlog" "The fleet backlog — a thin client over the vault MCP's task brain."
+    desc_inventory "Workspace" 225
+    desc_leaf_commands
+    desc_synopsis "backlog [board|list|stale] [options] | backlog add|move|close ..."
+    desc_effect read
+    desc_opt --json       -- "Machine-readable output (the MCP's task-list JSON, \"tasks\" array)"
+    desc_opt --status S   -- "Only tasks with status S (open|active|parked|done|wontfix)"
+    desc_opt --project P  -- "Only tasks owned by or touching project P"
+    desc_opt --stale      -- "Only stale tasks (open/active, untouched > N days)"
+    desc_opt --all        -- "Include parked/done/wontfix (default shows only open + active)"
+    desc_opt --days N     -- "Stale window in days (default 14)"
+    desc_para "backlog renders what the MCP emits and never re-derives it: 'severino-vault-mcp task-list' is the one brain (it indexes the vault, so there is no second scanner), and 'task-add'/'task-move' are the one writer (schema-validated, atomic). The board groups by project — each project's open work, plus the cross-cutting bucket — so the vault's project pages and this board show the same tasks. Status moves go through 'backlog move'/'close' so the task file changes in place and the board stays honest."
+    desc_para "A task lives with its project under 01 Projects/<project>/tasks/, or in 07 Backlog/ when it is cross-cutting or non-project. Run 'backlog' to see what's open, 'backlog stale' for the review nudge, 'backlog --json' to consume the ledger in one parse."
+    desc_example "backlog" -- "the board: open + active work, grouped by project"
+    desc_example "backlog stale" -- "open/active tasks untouched > 14 days"
+    desc_example "backlog --project tools --json" -- "machine-read every tools task"
+    desc_example "backlog add \"Fix the bats PATH trap\" --project tools --effort S" -- "capture a task"
+    desc_example "backlog close backlog-cli" -- "mark it done (stamps closed:)"
+
+    desc_cmd board -- "The default board, grouped by project"
+    desc_effect read
+    desc_opt --json -- "Machine-readable output"
+    desc_opt --status S -- "Filter by status"
+    desc_opt --project P -- "Filter by project"
+    desc_opt --stale -- "Only stale tasks"
+    desc_opt --all -- "Include parked/done/wontfix"
+
+    desc_cmd list -- "Flat list view (same filters as the board)"
+    desc_effect read
+    desc_opt --json -- "Machine-readable output"
+    desc_opt --status S -- "Filter by status"
+    desc_opt --project P -- "Filter by project"
+    desc_opt --all -- "Include parked/done/wontfix"
+
+    desc_cmd stale -- "Open/active tasks untouched past the stale window — the review nudge"
+    desc_effect read
+    desc_opt --days N -- "Stale window in days (default 14)"
+    desc_opt --json -- "Machine-readable output"
+
+    desc_cmd add -- "Capture a new task (delegates to the MCP's add_task)"
+    desc_effect vault_write
+    desc_opt --project P  -- "Owning project — colocates at 01 Projects/<project>/tasks/"
+    desc_opt --effort E   -- "Effort S|M|L (default S)"
+    desc_opt --priority P -- "Priority high|med|low (default med)"
+    desc_opt --related-projects PROJECTS -- "Projects a cross-cutting task touches (space-separated)"
+    desc_pos title +variadic -- "Imperative task title (joined)"
+
+    desc_cmd move -- "Transition a task to a new status (stamps closed: on done)"
+    desc_effect vault_write
+    desc_pos id     -- "Task id or slug (task-foo or foo)"
+    desc_pos status -- "Target status (open|active|parked|done|wontfix)"
+
+    desc_cmd close -- "Shorthand for 'move <id> done'"
+    desc_effect vault_write
+    desc_pos id -- "Task id or slug"
+
+    desc_env SVMC_BIN -- "Override the severino-vault-mcp binary (tests stub it)"
+}
+
+desc_help_intercept "$@"
+
+# Format the MCP's {ok,...} result envelope into one tab-record for the shell.
+fmt_result() {
+    # shellcheck disable=SC2016  # the node script is meant to be literal
+    node -e '
+let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",c=>s+=c);
+process.stdin.on("end",()=>{let j={};try{j=JSON.parse(s)}catch{};
+if(j.ok){process.stdout.write(`ok\t${j.doc_id||""}\t${j.status||""}\t${j.previous||""}\t${j.relative_path||""}`)}
+else{process.stdout.write(`err\t${j.error||"failed"}`);process.exitCode=1}});'
+}
+
+CMD="board"
+case "${1:-}" in
+    board|list|stale|add|move|close) CMD="$1"; shift ;;
+    ""|-*) CMD="board" ;;
+    *) die_unknown command "$1" ;;
+esac
+
+# ---------- write paths ----------
+if [[ "$CMD" == "add" || "$CMD" == "move" || "$CMD" == "close" ]]; then
+    if [[ "$CMD" == "add" ]]; then
+        ADD_FLAGS=()
+        TITLE=()
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+                --project)   ADD_FLAGS+=(--project "${2:-}"); shift 2 ;;
+                --effort)    ADD_FLAGS+=(--effort "${2:-}"); shift 2 ;;
+                --priority)  ADD_FLAGS+=(--priority "${2:-}"); shift 2 ;;
+                --related-projects) shift; while [[ $# -gt 0 && "$1" != -* ]]; do ADD_FLAGS+=(--related-projects "$1"); shift; done ;;
+                --)          shift; break ;;
+                -*)          die_unknown flag "$1" add ;;
+                *)           TITLE+=("$1"); shift ;;
+            esac
+        done
+        (( $# )) && TITLE+=("$@")
+        (( ${#TITLE[@]} )) || die "usage" "add needs a title (try -h)" 2
+        set +e
+        out="$("$SVMC" task-add "${TITLE[*]}" ${ADD_FLAGS[@]+"${ADD_FLAGS[@]}"} | fmt_result)"; rc=$?
+        set -e
+    else
+        ID="${1:-}"; [[ -n "$ID" ]] || die "usage" "$CMD needs a task id (try -h)" 2
+        STATUS="${2:-}"; [[ "$CMD" == "close" ]] && STATUS="done"
+        [[ -n "$STATUS" ]] || die "usage" "move needs a target status (try -h)" 2
+        set +e
+        out="$("$SVMC" task-move "$ID" "$STATUS" | fmt_result)"; rc=$?
+        set -e
+    fi
+
+    IFS=$'\t' read -r kind a b c _ <<<"$out"
+    echo
+    if [[ "$kind" == "ok" ]]; then
+        case "$CMD" in
+            add)  msg "$GREEN" "captured" "$a" ;;
+            *)    msg "$GREEN" "$b" "$a${c:+  (was $c)}" ;;
+        esac
+    else
+        msg "$RED" "error" "$a"
+    fi
+    echo
+    exit "$rc"
+fi
+
+# ---------- read paths (board / list / stale) ----------
+MODE="$CMD"; [[ "$MODE" == "stale" ]] && MODE="list"
+JSON=0
+MCP_FLAGS=()
+[[ "$CMD" == "stale" ]] && MCP_FLAGS+=(--stale-only)
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --json)    JSON=1; shift ;;
+        --status)  MCP_FLAGS+=(--status "${2:-}"); shift 2 ;;
+        --project) MCP_FLAGS+=(--project "${2:-}"); shift 2 ;;
+        --stale)   MCP_FLAGS+=(--stale-only); shift ;;
+        --all)     MCP_FLAGS+=(--all); shift ;;
+        --days)    MCP_FLAGS+=(--stale-days "${2:-}"); shift 2 ;;
+        -*)        die_unknown flag "$1" "$CMD" ;;
+        *)         die_unknown argument "$1" "$CMD" ;;
+    esac
+done
+
+board_json="$("$SVMC" task-list ${MCP_FLAGS[@]+"${MCP_FLAGS[@]}"})"
+if (( JSON )); then
+    printf '%s\n' "$board_json"
+else
+    printf '%s' "$board_json" | node "$TOOLS_HOME/lib/backlog/render.mjs" "$MODE"
+fi
