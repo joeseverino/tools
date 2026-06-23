@@ -22,16 +22,18 @@ describe_spec() {
     desc_synopsis "resync [options] [name]"
     desc_effect local_write +network
     desc_opt -n --dry-run -- "Show what would be reconciled; change nothing local"
+    desc_opt --reap       -- "Also delete local branches whose PR has merged but whose remote was not auto-deleted (one gh lookup per branch; never touches base, the current branch, or unmerged work)"
     desc_pos name         -- "Only repos whose name contains NAME"
     desc_para "The closing beat of the workspace loop (resync → work → ship → merge → resync). For each clean repo with a remote: fetch + prune, fast-forward the default branch, and delete local branches whose upstream was merged and auto-deleted on GitHub. If you are stranded on such a branch (you merged the PR on GitHub and came back to the terminal still on it) resync steps you back onto the default branch first, then prunes it. It never deletes a branch that still has unique local commits — those are reported as 'kept (diverged)' so you can decide — and it never touches a repo with uncommitted changes. Defaults to the whole fleet; pass NAME to scope to one repo. --dry-run fetches (harmless) and reports the plan without changing any local branch or working tree."
 }
 
 desc_help_intercept "$@"
 
-DRY=0 NAME=""
+DRY=0 REAP=0 NAME=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -n|--dry-run) DRY=1; shift ;;
+        --reap)       REAP=1; shift ;;
         -*)           die_unknown option "$1" ;;
         *)            NAME="$1"; shift ;;
     esac
@@ -72,7 +74,11 @@ while IFS=$'\t' read -r name path dirty; do
             local_drop="" local_keep=""
             while read -r b; do
                 [[ -n "$b" ]] || continue
-                if [[ "$(git rev-list --count "origin/$base..$b" 2>/dev/null || echo 1)" == "0" ]]; then
+                # Match apply (git_sync_clean): a [gone] branch drops when it has
+                # no unique commits OR its PR merged (the squash case); otherwise
+                # it is genuine diverged work and is kept.
+                if [[ "$(git rev-list --count "origin/$base..$b" 2>/dev/null || echo 1)" == "0" ]] \
+                   || git_branch_pr_merged "$b"; then
                     local_drop+="${local_drop:+,}$b"
                 else
                     local_keep+="${local_keep:+,}$b"
@@ -84,6 +90,10 @@ while IFS=$'\t' read -r name path dirty; do
             [[ "$behind" != "0" ]]   && parts+="ff $base ↓$behind"
             [[ -n "$local_drop" ]]   && parts+="${parts:+ · }would drop: $local_drop"
             [[ -n "$local_keep" ]]   && parts+="${parts:+ · }would keep (diverged): $local_keep"
+            if (( REAP )); then
+                reapable="$(git_merged_branches "$base" | paste -sd, - || true)"
+                [[ -n "$reapable" ]] && parts+="${parts:+ · }would reap (merged): $reapable"
+            fi
             msg "$DIM" "$name" "${parts:-already clean}"
             exit 0
         fi
@@ -106,6 +116,15 @@ while IFS=$'\t' read -r name path dirty; do
         kept="$(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/heads \
                     | awk -v base="$base" '/\[gone\]/ && $1 != base {print $1}' | paste -sd, - || true)"
         [[ -n "$kept" ]] && parts+="${parts:+ · }kept (diverged): $kept"
+
+        if (( REAP )); then
+            reaped=""
+            while read -r rb; do
+                [[ -n "$rb" ]] || continue
+                git branch -qD "$rb" 2>/dev/null && reaped="${reaped:+$reaped,}$rb"
+            done < <(git_merged_branches "$base")
+            [[ -n "$reaped" ]] && parts+="${parts:+ · }reaped: $reaped"
+        fi
 
         if [[ -n "$parts" ]]; then
             msg "$GREEN" "$name" "$parts"
