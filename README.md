@@ -69,6 +69,7 @@ tools/
     ship        # Commit, push, and PR pending work — one repo, or the whole fleet.
     land        # Merge a green PR and delete its branch — the merge beat of the loop.
     resync      # Reconcile local repos with the remote after merging PRs on GitHub.
+    backlog     # The fleet backlog — a thin client over the vault MCP's task brain.
   .github/               # CI workflows and repository automation
   archive/               # retired scripts kept for reference
   bench/                 # measured claims asserted in CI
@@ -768,6 +769,33 @@ Usage: `resync <name>`
 | `<name>` | Only repos whose name contains NAME |
 
 Effect: `local_write + network`
+
+#### `backlog`
+
+The fleet backlog — a thin client over the vault MCP's task brain.
+
+backlog renders what the MCP emits and never re-derives it: 'severino-vault-mcp task-list' is the one brain (it indexes the vault, so there is no second scanner), and 'task-add'/'task-move' are the one writer (schema-validated, atomic). The board groups by project — each project's open work, plus the cross-cutting bucket — so the vault's project pages and this board show the same tasks. Status moves go through 'backlog move'/'close' so the task file changes in place and the board stays honest.
+
+A task lives with its project under 01 Projects/<project>/tasks/, or in 07 Backlog/ when it is cross-cutting or non-project. Run 'backlog' to see what's open, 'backlog stale' for the review nudge, 'backlog --json' to consume the ledger in one parse.
+
+| Invocation | Arguments / options | Effect | Summary |
+|---|---|---|---|
+| `backlog board` | `--json`<br>`--status <S>`<br>`--project <P>`<br>`--stale`<br>`--all` | `read` | The default board, grouped by project |
+| `backlog list` | `--json`<br>`--status <S>`<br>`--project <P>`<br>`--all` | `read` | Flat list view (same filters as the board) |
+| `backlog stale` | `--days <N>`<br>`--json` | `read` | Open/active tasks untouched past the stale window — the review nudge |
+| `backlog add <title>...` | `<title>...`<br>`--project <P>`<br>`--effort <E>`<br>`--priority <P>`<br>`--related-projects <PROJECTS>` | `vault_write` | Capture a new task (delegates to the MCP's add_task) |
+| `backlog move <id> <status>` | `<id>`<br>`<status>` | `vault_write` | Transition a task to a new status (stamps closed: on done) |
+| `backlog close <id>` | `<id>` | `vault_write` | Shorthand for 'move <id> done' |
+
+**Examples**
+
+```sh
+backlog  # the board: open + active work, grouped by project
+backlog stale  # open/active tasks untouched > 14 days
+backlog --project tools --json  # machine-read every tools task
+backlog add "Fix the bats PATH trap" --project tools --effort S  # capture a task
+backlog close backlog-cli  # mark it done (stamps closed:)
+```
 <!-- END GENERATED CLI REFERENCE -->
 
 ### tools
