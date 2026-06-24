@@ -268,3 +268,30 @@ assert pr["review"]=="approved", pr
       && grep -qF "full refresh" <<<"$output" \
       && grep -qF "Esc closes" <<<"$output"
 }
+
+@test "smoke: the footer surfaces resync and refresh (derived from KEYMAP)" {
+    setup_fleet
+    export REPOS_TUI_SMOKE=1 REPOS_TUI_COLUMNS=160
+    run repos_bin tui
+    [ "$status" -eq 0 ]
+    # The footer is built from KEYMAP's foot labels, so A/F can't be undiscoverable.
+    grep -qF "A resync" <<<"$output" && grep -qF "F refresh" <<<"$output"
+}
+
+@test "replay: d on a repo with tracked changes pages git diff HEAD" {
+    setup_fleet
+    # Wide frame so the long tmpdir path in the command isn't clipped off the line.
+    export REPOS_TUI_KEYS='d' REPOS_TUI_COLUMNS=240   # cursor starts on dirty-app
+    run repos_bin tui
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"would run diff: git -C "*"dirty-app' diff HEAD"* ]]
+}
+
+@test "replay: d on a clean repo flashes in place instead of an empty pager" {
+    setup_fleet
+    export REPOS_TUI_KEYS='j,d'   # j -> merged-branch (clean working tree)
+    run repos_bin tui
+    [ "$status" -eq 0 ]
+    grep -qF "merged-branch: no tracked changes to diff" <<<"$output"
+    ! grep -qF "would run diff" <<<"$output"
+}
