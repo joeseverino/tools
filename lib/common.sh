@@ -108,6 +108,17 @@ json_join() {
     printf '%s' "$*"
 }
 
+# svmc <subcommand> [args] — the ONE call into the severino-vault-mcp brain (the
+# vault's schema-validated, atomic reader/writer). Every tool that reads or
+# writes the vault routes through this — no inline `severino-vault-mcp` call site
+# — so two things can never be forgotten: the vault is pinned to $NOTES_HOME
+# (not the MCP's own configured default, whose silent fallback reads the wrong
+# vault), and the binary is named in one place via $SVMC_BIN (tests stub it),
+# mirroring the drift guards' $DRIFT_REVIEW_BIN seam.
+svmc() {
+    SVMC_VAULT_PATH="${NOTES_HOME:-}" "${SVMC_BIN:-severino-vault-mcp}" "$@"
+}
+
 # Trim age's noisy error to a single useful line.
 age_reason() {
     echo "$1" | head -1 | sed 's/^age: error: //'

@@ -223,16 +223,19 @@ We own the MCP (`~/Documents/Code/Assets/severino-vault-mcp/`). Shell tools call
 it as a plain CLI — **don't** hand-edit vault frontmatter or shell out to `yq`;
 the MCP is the schema-validated, atomic writer.
 
-In `bin/site`, every call goes through the **`svmc()`** wrapper, which sets
-`SVMC_VAULT_PATH="$NOTES_HOME"` and names the binary in one place:
+Every call goes through the shared **`svmc()`** wrapper in `lib/common.sh` (so
+every tool that sources `lib/init.sh` has it). It pins `SVMC_VAULT_PATH` to
+`$NOTES_HOME` AND names the binary in one place via `$SVMC_BIN` (the test seam),
+so a call site can neither read the MCP's own configured default vault nor dodge
+the hermetic stub:
 
 ```bash
-svmc <subcommand> [args] [--pretty]     # in bin/site
-SVMC_VAULT_PATH="$NOTES_HOME" severino-vault-mcp <subcommand> ...   # elsewhere
+svmc <subcommand> [args] [--pretty]     # bin/site, bin/backlog, bin/brief, …
 ```
 
-Add new call sites through `svmc`, never inline — an inline call that forgets
-`SVMC_VAULT_PATH` silently falls back to the MCP's own configured default vault.
+Add new call sites through `svmc`, never inline — an inline `severino-vault-mcp`
+call silently falls back to the MCP's own configured default vault (and bypasses
+`$SVMC_BIN`). One wrapper, every consumer (emit once, derive everywhere).
 
 The console script is on PATH (`uv tool install`). Existing subcommands:
 `touch-reviewed <relative-path>` (set `last_reviewed` to today); the
