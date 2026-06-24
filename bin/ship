@@ -201,15 +201,17 @@ while IFS=$'\t' read -r name path branch uncommitted ahead has_remote; do
             if (( WATCH )); then
                 printf '  %s%-10s%s %s\n' "$DIM" "watch" "$RESET" "polling gh pr checks…"
                 tries=0
-                until [[ -n "$(gh pr checks 2>/dev/null)" ]] || (( tries >= 12 )); do
+                until [[ -n "$("${GH_BIN:-gh}" pr checks 2>/dev/null)" ]] || (( tries >= 12 )); do
                     sleep 5; tries=$(( tries + 1 ))
                 done
-                if [[ -z "$(gh pr checks 2>/dev/null)" ]]; then
+                if [[ -z "$("${GH_BIN:-gh}" pr checks 2>/dev/null)" ]]; then
                     printf '  %s%-10s%s %s\n' "$DIM" "watch" "$RESET" "$name: no checks registered — nothing to watch"
-                elif gh pr checks --watch --interval 15 >/dev/null 2>&1; then
+                elif "${GH_BIN:-gh}" pr checks --watch --interval 15 >/dev/null 2>&1; then
                     printf '  %s%-10s%s %s\n' "$GREEN$BOLD" "green" "$RESET" "$name: all checks passed"
                 else
                     printf '  %s%-10s%s %s\n' "$RED$BOLD" "red" "$RESET" "$name: checks failed — see ${url:-the PR}"
+                    # Land the failure in the terminal, not behind three gh commands.
+                    git_print_failing_checks
                 fi
             fi
         fi

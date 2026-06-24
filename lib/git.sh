@@ -212,6 +212,24 @@ git_commit() {
     git commit -q -m "$msg"
 }
 
+# Print the current branch's PR's failing CI checks inline, so a red `ship
+# --watch` lands the failure in the terminal instead of behind three `gh run
+# view` commands. Read-only, best-effort: the failing check rows (name + URL)
+# always, then the failing run's failed-step log tail when gh allows it. All
+# GitHub access goes through $GH_BIN (the hermetic-stub seam).
+git_print_failing_checks() {
+    local gh="${GH_BIN:-gh}" rows log cname curl
+    rows="$("$gh" pr checks 2>/dev/null | awk -F'\t' '$2=="fail"')" || true
+    if [[ -n "$rows" ]]; then
+        while IFS=$'\t' read -r cname _ _ curl _; do
+            [[ -n "$cname" ]] && printf '  %s%-10s%s %s\n' "$RED" "fail" "$RESET" "$cname  ${DIM}${curl}${RESET}"
+        done <<< "$rows"
+    fi
+    log="$("$gh" run view --log-failed 2>/dev/null | tail -20)" || true
+    [[ -n "$log" ]] && printf '%s\n' "$log" | sed 's/^/    /'
+    return 0
+}
+
 # Push the current branch, setting upstream.
 git_push_current() {
     git push -q -u origin HEAD

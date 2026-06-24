@@ -234,3 +234,12 @@ advance_origin() {
         && ! grep -q ' 3\.bats' <<<"$tree" \
         && [ -f 'real 2.mjs' ] && [ -f 'notes 3.bats' ]
 }
+
+@test "git_print_failing_checks surfaces only the failing checks and the log tail" {
+    setup_flow
+    run git_print_failing_checks
+    # only the failing row (not the passing 'lint'), plus the failed-step log tail
+    grep -q 'cordon / gate' <<<"$output" \
+        && grep -q 'not ok 5 cordon gate' <<<"$output" \
+        && ! grep -q 'lint' <<<"$output"
+}
