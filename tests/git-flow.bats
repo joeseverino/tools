@@ -208,3 +208,29 @@ advance_origin() {
     [ "$status" -eq 0 ]
     [[ "$(git symbolic-ref --short HEAD)" == work/* ]]
 }
+
+@test "git_staged_icloud_conflicts matches '<stem> <n>[.ext]' duplicates only" {
+    setup_flow
+    : > "a 2.mjs"; : > "b.mjs"; : > "c2.mjs"; : > "d 3"
+    git add -A
+    run git_staged_icloud_conflicts
+    # one chained assertion so each clause gates under bats' last-command errexit
+    grep -qx 'a 2.mjs' <<<"$output" \
+        && grep -qx 'd 3' <<<"$output" \
+        && ! grep -q 'b.mjs' <<<"$output" \
+        && ! grep -q 'c2.mjs' <<<"$output"
+}
+
+@test "git_commit drops iCloud-conflict duplicates but keeps real files" {
+    setup_flow
+    printf 'real\n' > real.mjs
+    printf 'dupe\n' > "real 2.mjs"
+    printf 'dupe\n' > "notes 3.bats"
+    git_commit "feat: add real.mjs"
+    tree="$(git ls-tree -r --name-only HEAD)"
+    # committed real file present; both conflicts excluded yet left on disk
+    grep -qx 'real.mjs' <<<"$tree" \
+        && ! grep -q ' 2\.mjs' <<<"$tree" \
+        && ! grep -q ' 3\.bats' <<<"$tree" \
+        && [ -f 'real 2.mjs' ] && [ -f 'notes 3.bats' ]
+}
