@@ -278,13 +278,25 @@ assert pr["review"]=="approved", pr
     grep -qF "A resync" <<<"$output" && grep -qF "F refresh" <<<"$output"
 }
 
-@test "replay: d on a repo with tracked changes pages git diff HEAD" {
+@test "replay: d on a repo with tracked changes opens the diff in a scrollable overlay" {
     setup_fleet
-    # Wide frame so the long tmpdir path in the command isn't clipped off the line.
-    export REPOS_TUI_KEYS='d' REPOS_TUI_COLUMNS=240   # cursor starts on dirty-app
+    export REPOS_TUI_KEYS='d'   # cursor starts on dirty-app (highest severity)
     run repos_bin tui
     [ "$status" -eq 0 ]
-    [[ "$output" == *"would run diff: git -C "*"dirty-app' diff HEAD"* ]]
+    # In-TUI pane (no shell drop): the overlay header + the actual diff content.
+    grep -qF "diff · dirty-app" <<<"$output" \
+      && grep -qF "README.md" <<<"$output" \
+      && grep -qF "+dirty" <<<"$output" \
+      && grep -qF "q/esc close" <<<"$output"
+}
+
+@test "replay: closing the overlay returns to the dashboard" {
+    setup_fleet
+    export REPOS_TUI_KEYS='d,q'   # open the diff overlay, then close it
+    run repos_bin tui
+    [ "$status" -eq 0 ]
+    # Back on the dashboard footer, not the overlay's.
+    grep -qF "A resync" <<<"$output" && ! grep -qF "q/esc close" <<<"$output"
 }
 
 @test "replay: d on a clean repo flashes in place instead of an empty pager" {

@@ -128,6 +128,14 @@ collect() {
     local d="$1" root_label="$2"
     local name; name="$(basename "$d")"
 
+    # Name filter first — it depends only on the directory name, so a scoped scan
+    # (`repos NAME`, and every `ship/land/resync NAME`) skips the per-repo git work
+    # for the ~25 repos it doesn't want instead of paying for them and discarding.
+    if [[ -n "$NAME_FILTER" ]]; then
+        if (( NAME_EXACT )); then [[ "$name" != "$NAME_FILTER" ]] && return 0
+        else [[ "$name" != *"$NAME_FILTER"* ]] && return 0; fi
+    fi
+
     local is_git=0
     git -C "$d" rev-parse --is-inside-work-tree >/dev/null 2>&1 && is_git=1
     local has_manifest=0
@@ -210,37 +218,70 @@ collect() {
     (( upstream_gone > 0 || behind > 0 )) && needs_resync=1
     (( needs_ship > 0 || needs_resync > 0 || (has_remote == 0 && local_ok == 0) )) && needs_attention=1
 
-    # filters
-    if [[ -n "$NAME_FILTER" ]]; then
-        if (( NAME_EXACT )); then [[ "$name" != "$NAME_FILTER" ]] && return 0
-        else [[ "$name" != *"$NAME_FILTER"* ]] && return 0; fi
-    fi
+    # filters (name already applied up top, before the git work)
     [[ -n "$PM_FILTER" && "$pm" != "$PM_FILTER" ]] && return 0
     (( DIRTY )) && (( dirty + untracked == 0 )) && return 0
     if (( UNPUSHED )); then
         (( needs_ship == 1 || needs_resync == 1 || (has_remote == 0 && local_ok == 0) )) || return 0
     fi
 
-    R_NAME+=("$name"); R_ROOT+=("$root_label"); R_PATH+=("$d")
-    R_GIT+=("$is_git"); R_BRANCH+=("$branch"); R_REMOTE+=("$remote"); R_HASREMOTE+=("$has_remote")
-    R_DIRTY+=("$dirty"); R_UNTRACKED+=("$untracked"); R_AHEAD+=("$ahead"); R_BEHIND+=("$behind"); R_UPSTREAM+=("$upstream")
-    R_UPSTREAM_NAME+=("$upstream_name"); R_UPSTREAM_TRACK+=("$upstream_track"); R_UPSTREAM_GONE+=("$upstream_gone")
-    R_SHA+=("$sha"); R_DATE+=("$cdate"); R_SUBJ+=("$subj"); R_LANG+=("$lang")
-    R_PM+=("$pm"); R_PMFIELD+=("$pmfield"); R_NVMRC+=("$nvmrc")
-    R_NM+=("$nm"); R_NMSIZE+=("$nmsize"); R_CI+=("$ci"); R_IDUPS+=("$idups"); R_STASH+=("$stash")
-    R_LOCAL_OK+=("$local_ok"); R_NEEDS_SHIP+=("$needs_ship"); R_NEEDS_RESYNC+=("$needs_resync"); R_NEEDS_ATTENTION+=("$needs_attention"); R_STATE+=("$branch_state")
+    # Emit ONE \x1f-delimited record (no field holds \x1f or a newline — the
+    # commit subject is %s, a single line). The collect runs in parallel, one
+    # subshell per repo writing its record to a temp file; merge_record reads them
+    # back in order and appends to the arrays. Order: kept in lockstep with
+    # merge_record below — the single contract between the two halves.
+    printf '%s\x1f' \
+        "$name" "$root_label" "$d" "$is_git" "$branch" "$remote" "$has_remote" \
+        "$dirty" "$untracked" "$ahead" "$behind" "$upstream" \
+        "$upstream_name" "$upstream_track" "$upstream_gone" \
+        "$sha" "$cdate" "$subj" "$lang" "$pm" "$pmfield" "$nvmrc" \
+        "$nm" "$nmsize" "$ci" "$idups" "$stash" \
+        "$local_ok" "$needs_ship" "$needs_resync" "$needs_attention" "$branch_state"
+    printf '\n'
+}
+
+# Parse one collect record and append to the parallel arrays (the merge half of
+# the parallel scan). Field order mirrors collect's printf exactly.
+merge_record() {
+    local line="$1"
+    [[ -n "$line" ]] || return 0
+    local f; IFS=$'\x1f' read -r -a f <<<"$line"
+    R_NAME+=("${f[0]}"); R_ROOT+=("${f[1]}"); R_PATH+=("${f[2]}")
+    R_GIT+=("${f[3]}"); R_BRANCH+=("${f[4]}"); R_REMOTE+=("${f[5]}"); R_HASREMOTE+=("${f[6]}")
+    R_DIRTY+=("${f[7]}"); R_UNTRACKED+=("${f[8]}"); R_AHEAD+=("${f[9]}"); R_BEHIND+=("${f[10]}"); R_UPSTREAM+=("${f[11]}")
+    R_UPSTREAM_NAME+=("${f[12]}"); R_UPSTREAM_TRACK+=("${f[13]}"); R_UPSTREAM_GONE+=("${f[14]}")
+    R_SHA+=("${f[15]}"); R_DATE+=("${f[16]}"); R_SUBJ+=("${f[17]}"); R_LANG+=("${f[18]}")
+    R_PM+=("${f[19]}"); R_PMFIELD+=("${f[20]}"); R_NVMRC+=("${f[21]}")
+    R_NM+=("${f[22]}"); R_NMSIZE+=("${f[23]}"); R_CI+=("${f[24]}"); R_IDUPS+=("${f[25]}"); R_STASH+=("${f[26]}")
+    R_LOCAL_OK+=("${f[27]}"); R_NEEDS_SHIP+=("${f[28]}"); R_NEEDS_RESYNC+=("${f[29]}"); R_NEEDS_ATTENTION+=("${f[30]}"); R_STATE+=("${f[31]}")
     # PR fields default to "no open PR"; the --prs post-pass overwrites them.
     R_PR_NUM+=(0); R_PR_STATE+=("none"); R_PR_CI+=("none"); R_PR_REVIEW+=("none"); R_PR_URL+=("")
 }
 
+# Parallel scan: one collect subshell per repo (each writes its record to a temp
+# file), then merge the records back in directory order. The per-repo git work
+# (10+ subprocesses, or a network fetch under --fetch) dominates and is fully
+# independent, so fanning it out turns a sequential ~Nx130ms walk into one bounded
+# by the slowest single repo. Same temp-dir + wait pattern the --prs pass uses.
+SCAN_TMP="$(mktemp -d)"
+trap 'rm -rf "$SCAN_TMP"' EXIT
+scan_idx=0
 for root in "${ROOTS[@]}"; do
     [[ -d "$root" ]] || continue
     label="$(basename "$root")"
     for d in "$root"/*/; do
         d="${d%/}"
         [[ -d "$d" ]] || continue
-        collect "$d" "$label"
+        collect "$d" "$label" > "$SCAN_TMP/$scan_idx" &
+        scan_idx=$(( scan_idx + 1 ))
     done
+done
+wait
+
+merge_i=0
+while (( merge_i < scan_idx )); do
+    merge_record "$(cat "$SCAN_TMP/$merge_i" 2>/dev/null)"
+    merge_i=$(( merge_i + 1 ))
 done
 
 N=${#R_NAME[@]}
