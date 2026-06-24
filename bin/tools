@@ -47,6 +47,7 @@ describe_spec() {
     desc_cmd check    -- "Run the full CI suite locally: lint, tests, bench"
     desc_effect local_write
     desc_opt --no-bench -- "Skip the bench scripts (the slowest step)"
+    desc_opt --ci     -- "Run hermetically, as CI does: this checkout's bin first with the install dir off \$PATH (no stale shadow), an empty global/system git config (no leaked defaultBranch, aliases, or hooks), and the bats version surfaced. ship --check uses this mode; set TOOLS_CI_BATS_VERSION to fail on a bats version other than CI's."
 
     desc_cmd new      -- "Scaffold a new tool in bin/ with the house conventions"
     desc_effect local_write
@@ -377,18 +378,46 @@ cmd_generate() {
 # one place. Tools are discovered by shebang — adding a file to bin/ adds
 # it to every check automatically.
 
+# Surface the bats version under --ci — a recurring local↔CI divergence (1.13's
+# last-command-only errexit masked stale assertions) — and, when
+# TOOLS_CI_BATS_VERSION is set (the pin CI exports), fail on any other version.
+ci_bats_check() {
+    local want="${TOOLS_CI_BATS_VERSION:-}" have
+    if ! command -v bats >/dev/null; then
+        check "bats version" 0 "bats not installed (brew install bats-core)"
+        return 1
+    fi
+    have="$(bats --version 2>/dev/null | awk '{print $NF}')"
+    if [[ -n "$want" && "$have" != "$want" ]]; then
+        check "bats version" 0 "have $have, CI pins $want (TOOLS_CI_BATS_VERSION)"
+        return 1
+    fi
+    check "bats version" 1 "$have${want:+ · pinned}"
+}
+
 cmd_check() {
-    local run_bench=1 fail=0
+    local run_bench=1 fail=0 ci=0
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --no-bench) run_bench=0; shift ;;
+            --ci)       ci=1; shift ;;
             *) die_unknown option "$1" check ;;
         esac
     done
 
+    # --ci: make the local gate byte-for-byte CI. The CI-equivalent environment
+    # is defined once in lib/common.sh (shared with the bats harness) and applied
+    # here in-process, so every step below and every child it spawns (shellcheck,
+    # bats, bench, generate, sibling tools) inherits it. local must equal CI.
+    (( ci )) && ci_shell_env
+
     cd "$TOOLS_HOME"
     echo
     local f n err step_ok
+    if (( ci )); then
+        msg "$DIM" "ci" "hermetic gate · repo bin first, install dir off \$PATH · clean git config"
+        ci_bats_check || fail=1
+    fi
 
     # bash -n
     step_ok=1; n=0

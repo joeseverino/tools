@@ -143,6 +143,44 @@ inbox_count() {
     find "$1" -maxdepth 1 -type f -name '*.md' 2>/dev/null | wc -l | tr -d ' '
 }
 
+# ---------------------------------------------------------------------------
+# CI parity — ONE definition of the hermetic, CI-equivalent shell environment,
+# derived by both the bats harness (tests/helpers.bash) and `tools check --ci`
+# (emit once, derive everywhere). Every local↔CI divergence that has bitten is
+# neutralized here, once: a stale ~/.local/bin tool shadowing repo code on
+# $PATH, and the operator's global/system git config (init.defaultBranch, host
+# aliases, hooks) leaking into git operations.
+# ---------------------------------------------------------------------------
+
+# path_without <dir> [<path>] — echo <path> (default $PATH) with every segment
+# equal to <dir> removed (empty segments dropped). Pure; no side effects.
+path_without() {
+    local drop="$1" src="${2-$PATH}" out="" seg
+    local IFS=':'
+    for seg in $src; do
+        [[ -z "$seg" || "$seg" == "$drop" ]] && continue
+        out+="${out:+:}$seg"
+    done
+    printf '%s' "$out"
+}
+
+# ci_shell_env — apply the CI-equivalent environment to the current shell so a
+# local run exercises exactly what CI does. Reads $TOOLS_HOME; the install dir
+# from $TOOLS_INSTALL_DIR (default ~/.local/bin).
+#   PATH: this checkout's bin first, the install dir removed — a stale installed
+#         symlink can never shadow repo code (CI has no install dir). Idempotent:
+#         safe to call from a parent and again in a child it spawns.
+#   git:  empty global + system config so init.defaultBranch, host aliases, and
+#         hooks from the operator's machine don't leak (CI runs a clean config).
+ci_shell_env() {
+    : "${TOOLS_HOME:?ci_shell_env needs TOOLS_HOME}"
+    local bin="${TOOLS_HOME%/}/bin" install="${TOOLS_INSTALL_DIR:-$HOME/.local/bin}"
+    local rest
+    rest="$(path_without "$install" "$(path_without "$bin")")"
+    export PATH="$bin:$rest"
+    export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1
+}
+
 # hq_sync_state_file — where `hq sync` records what it shipped (manifest
 # hash + inputs), so `vault status` and `hq doctor` can detect staleness
 # exactly instead of relying on the "remember to run hq sync" convention.

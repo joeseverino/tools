@@ -18,7 +18,7 @@ source "$TOOLS_HOME/lib/git.sh"
 # through the repo's package manager. This is what --check runs before pushing.
 ship_gate_cmd() {
     local p="$1"
-    [[ -x "$p/bin/tools" ]]      && { printf 'tools check --no-bench'; return 0; }
+    [[ -x "$p/bin/tools" ]]      && { printf 'tools check --ci --no-bench'; return 0; }
     [[ -f "$p/scripts/check.sh" ]] && { printf 'bash scripts/check.sh'; return 0; }
     if [[ -f "$p/package.json" ]]; then
         local runner='npm run'
@@ -42,7 +42,7 @@ describe_spec() {
     desc_opt -m --message MSG -- "PR title + commit message (default: derived from changed paths)"
     desc_opt --body BODY  -- "PR body (default: a generated new/modified/removed file summary)"
     desc_opt --no-pr      -- "Commit and push only; do not open a PR"
-    desc_opt --check      -- "Run the repo's own local gate (tools check / scripts/check.sh / npm test) before pushing; skip the repo if it fails"
+    desc_opt --check      -- "Run the repo's own local gate (tools check --ci / scripts/check.sh / npm test) before pushing; skip the repo if it fails"
     desc_opt --watch      -- "After opening/updating the PR, poll 'gh pr checks' until CI is green or red"
     desc_opt --rebranch   -- "Recover a stale branch: replay its commits onto a fresh branch off origin/<base>, dropping any already merged (leaves the old branch untouched)"
     desc_pos name         -- "Only repos whose name contains NAME"

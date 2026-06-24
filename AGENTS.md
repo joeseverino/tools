@@ -381,7 +381,15 @@ unless the requested dev URL is already up.
 `node --check`, shellcheck, JSON Schema validation for every describe
 contract, generated-surface drift checks, the bats suite, and the bench
 assertions.
-`--no-bench` skips the slow step. `tools status --json` / `tools doctor --json`
+`--no-bench` skips the slow step. **`tools check --ci`** runs that same gate
+under the CI-equivalent environment — this checkout's `bin/` first with the
+install dir off `$PATH` (no stale `~/.local/bin` shadow), an empty global/system
+git config (no leaked `init.defaultBranch`, aliases, or hooks), and the bats
+version surfaced — so a local pass means a CI pass. That hermetic profile is
+defined once in `lib/common.sh` (`ci_shell_env`) and shared with the bats
+harness (`tests/helpers.bash`); `ship --check` runs `tools check --ci`. Set
+`TOOLS_CI_BATS_VERSION` to fail the gate on a bats version other than CI's.
+`tools status --json` / `tools doctor --json`
 give machine-readable state. `tools doctor --all` is the cross-system rollup
 (hq doctor, hq schema --check, site doctor); `--live` adds the drift guards
 (network + age key).
