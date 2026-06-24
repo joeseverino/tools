@@ -31,6 +31,27 @@ DRIFT_DATASET_ID="${DRIFT_DATASET_ID:-}"
 # stub it.
 DRIFT_REVIEW_BIN="${DRIFT_REVIEW_BIN:-severino-vault-mcp}"
 
+# drift_read_creds <creds-file> — decrypt an age creds env and echo its KEY=val
+# lines for a guard's get_token/get_creds to parse. The ONE place guards read
+# credentials: each declares only its file + the keys it pulls, never re-copying
+# the file-check and the decrypt. Errors go to STDERR and return non-zero (not
+# the captured-and-lost stdout the inline `done < <(decrypt …) || die` produced —
+# that die was dead anyway, since a while-loop's exit status is its body's, not
+# the process substitution's). Callers capture and gate:
+#   creds=$(drift_read_creds "$X_CREDS") || return 1
+drift_read_creds() {
+    local file="$1" out
+    if [[ ! -f "$file" ]]; then
+        msg "$RED" "error" "creds not found: $file (see -h)" >&2
+        return 1
+    fi
+    if ! out=$(decrypt -p "$file" 2>/dev/null); then
+        msg "$RED" "error" "could not decrypt $file (try: tools key test)" >&2
+        return 1
+    fi
+    printf '%s\n' "$out"
+}
+
 # Read the registry's cached value for this dataset and re-normalize it, so it
 # compares byte-for-byte against fetch_live.
 drift_registry_cached() {

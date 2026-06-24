@@ -689,18 +689,19 @@ describe_spec() {
     desc_env __PREFIX___DATASET_ID -- "infra-dataset id for the cache (default __NAME__)"
 }
 
-# Decrypt the creds env and echo the secret. Stays in memory only.
+# Decrypt the creds env and echo the secret. Stays in memory only. Credential
+# decryption is shared (drift_read_creds in lib/drift.sh) — declare only your
+# file + the keys you pull; never re-copy the file-check and decrypt.
 # TODO: read whatever key(s) your API needs (Bearer token, user/pass, ...).
 get_token() {
-    [[ -f ${__PREFIX___CREDS} ]] || die "error" "creds not found: ${__PREFIX___CREDS} (see -h)"
-    local token="" k v
+    local creds token="" k v
+    creds=$(drift_read_creds "${__PREFIX___CREDS}") || return 1
     while IFS='=' read -r k v; do
         case $k in
             __PREFIX___TOKEN) token=$v ;;
         esac
-    done < <(decrypt -p "${__PREFIX___CREDS}" 2>/dev/null) \
-        || die "error" "could not decrypt ${__PREFIX___CREDS} (try: tools key test)"
-    [[ -n $token ]] || die "error" "creds need __PREFIX___TOKEN=..."
+    done <<< "$creds"
+    [[ -n $token ]] || die "error" "creds need __PREFIX___TOKEN=..." >&2
     echo "$token"
 }
 

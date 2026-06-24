@@ -29,17 +29,15 @@ describe_spec() {
 # read-only OAuth client (preferred) or a plain API access token. The secret
 # stays in memory for the life of the call.
 get_token() {
-    [[ -f $TS_ACL_CREDS ]] || die "error" "creds not found: $TS_ACL_CREDS (see -h)"
-
-    local id="" secret="" api_token="" k v
+    local creds id="" secret="" api_token="" k v
+    creds=$(drift_read_creds "$TS_ACL_CREDS") || return 1
     while IFS='=' read -r k v; do
         case $k in
             TS_OAUTH_CLIENT_ID)     id=$v ;;
             TS_OAUTH_CLIENT_SECRET) secret=$v ;;
             TS_API_TOKEN)           api_token=$v ;;
         esac
-    done < <(decrypt -p "$TS_ACL_CREDS" 2>/dev/null) \
-        || die "error" "could not decrypt $TS_ACL_CREDS (try: tools key test)"
+    done <<< "$creds"
 
     # Plain API access token: used directly as the Bearer, no exchange.
     if [[ -n $api_token ]]; then
@@ -49,17 +47,17 @@ get_token() {
 
     # OAuth client: exchange id+secret for a short-lived access token.
     [[ -n $id && -n $secret ]] \
-        || die "error" "creds need TS_API_TOKEN, or TS_OAUTH_CLIENT_ID + TS_OAUTH_CLIENT_SECRET"
+        || die "error" "creds need TS_API_TOKEN, or TS_OAUTH_CLIENT_ID + TS_OAUTH_CLIENT_SECRET" >&2
 
     local resp token
     resp=$(curl -fsS "$API/oauth/token" \
                 -d "client_id=$id" \
                 -d "client_secret=$secret" \
                 -d "grant_type=client_credentials" 2>/dev/null) \
-        || die "error" "OAuth token request failed (check client is valid / not revoked)"
+        || die "error" "OAuth token request failed (check client is valid / not revoked)" >&2
 
     token=$(jq -r '.access_token // empty' <<<"$resp")
-    [[ -n $token ]] || die "error" "no access_token in OAuth response"
+    [[ -n $token ]] || die "error" "no access_token in OAuth response" >&2
     echo "$token"
 }
 
