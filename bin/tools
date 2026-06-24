@@ -125,7 +125,7 @@ cmd_status() {
     [[ -f "${AGE_KEY:-}"    ]] && key_ok=1
 
     if (( json )); then
-        printf '{"vault":{"ok":%s,"tree":"%s","remote":"%s","path":"%s"},' \
+        printf '{"ok":true,"vault":{"ok":%s,"tree":"%s","remote":"%s","path":"%s"},' \
             "$(json_bool "$vault_ok")" "$(json_escape "$tree")" \
             "$(json_escape "$remote")" "$(json_escape "${VAULT:-}")"
         printf '"inbox":{"ok":%s,"pending":%d},' "$(json_bool "$inbox_ok")" "$pending"
@@ -473,7 +473,8 @@ cmd_check() {
     fi
 
     # Contract schema + generated consumers. The validator checks every real
-    # emitter against schemas/describe-v4.schema.json — including sibling repos'
+    # emitter against schemas/cordon-v4.json (via lib/tools/describe-schema.mjs) —
+    # including sibling repos'
     # emitters via --repos, so a drifted `severino-vault-mcp describe` fails here
     # (the cross-repo drift guard). When the sibling isn't installed, --repos just
     # folds in nothing. The generator check keeps completions + README current.
