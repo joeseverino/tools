@@ -57,9 +57,9 @@ drift_read_creds() {
 drift_registry_cached() {
     local out
     out=$(SVMC_VAULT_PATH="$NOTES_HOME" "$DRIFT_REVIEW_BIN" infra "$DRIFT_DATASET_ID" 2>/dev/null) \
-        || die "error" "vault-mcp infra $DRIFT_DATASET_ID failed (is the MCP installed?)" >&2
+        || die "error" "vault-mcp infra $DRIFT_DATASET_ID failed (is the MCP installed?)"
     jq -e '.ok == true and (.data != null)' <<<"$out" >/dev/null 2>&1 \
-        || die "error" "no cache for $DRIFT_DATASET_ID: $(jq -r '.error // "withheld/empty"' <<<"$out")" >&2
+        || die "error" "no cache for $DRIFT_DATASET_ID: $(jq -r '.error // "withheld/empty"' <<<"$out")"
     jq '.data' <<<"$out" | normalize
 }
 

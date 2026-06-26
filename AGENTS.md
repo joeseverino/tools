@@ -415,9 +415,12 @@ For a fast inner loop while editing one area:
   the last statement in trap handlers under `set -e`.
 - `config/backup.sh` and `config/site.sh` are user-local; never commit or lint
   them in CI (non-reproducible).
-- **`die` (common.sh) prints to stdout** — called inside `$( )` the message is
-  captured, not shown. Redirect the call `>&2` when a function runs in command
-  substitution (see `drift_vault_block`).
+- **`die` (common.sh) writes to stderr** — so a `die` inside a `x=$(some_fn)`
+  caller is shown, not captured into the value (the silent `set -e` abort that
+  bit the drift guards). Callers never need `die … >&2`; don't re-add it. A
+  helper that must *return* a failure rather than exit (e.g. `drift_read_creds`,
+  used in `< <( )`) still routes its own `msg … >&2` by hand — only `die` is
+  centralized.
 - **`${FLAG:+x}` is wrong for 0/1 flags** — `"0"` is non-empty, so it always
   substitutes. This bypassed the decrypt Keychain cache on every call for
   weeks. Use `if (( FLAG ))`. Related: `if ! cmd; then case $? in` is dead

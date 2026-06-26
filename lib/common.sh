@@ -30,9 +30,10 @@ die() {
     else
         label="error"; body="${1:-}"; code=1
     fi
-    echo
-    msg "$RED" "$label" "$body"
-    echo
+    # To stderr, always: an error belongs there, and it means a die inside a
+    # `x=$(some_fn)` caller is shown, not captured into the value (the silent
+    # set -e abort that bit the drift guards). Callers never need `die … >&2`.
+    { echo; msg "$RED" "$label" "$body"; echo; } >&2
     exit "$code"
 }
 
