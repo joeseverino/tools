@@ -33,7 +33,7 @@ get_creds() {
             ADGUARD_PASS) pass=$v ;;
         esac
     done <<< "$creds"
-    [[ -n $user && -n $pass ]] || die "error" "creds need ADGUARD_USER + ADGUARD_PASS" >&2
+    [[ -n $user && -n $pass ]] || die "error" "creds need ADGUARD_USER + ADGUARD_PASS"
     printf '%s:%s' "$user" "$pass"
 }
 
