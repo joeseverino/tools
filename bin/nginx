@@ -27,16 +27,15 @@ describe_spec() {
 
 # Decrypt the creds env and echo "email<TAB>secret". In memory only, never on disk.
 get_creds() {
-    [[ -f ${NGINX_CREDS} ]] || die "error" "creds not found: ${NGINX_CREDS} (see -h)"
-    local email="" secret="" k v
+    local creds email="" secret="" k v
+    creds=$(drift_read_creds "${NGINX_CREDS}") || return 1
     while IFS='=' read -r k v; do
         case $k in
             NGINX_EMAIL)    email=$v ;;
             NGINX_PASSWORD) secret=$v ;;
         esac
-    done < <(decrypt -p "${NGINX_CREDS}" 2>/dev/null) \
-        || die "error" "could not decrypt ${NGINX_CREDS} (try: tools key test)"
-    [[ -n $email && -n $secret ]] || die "error" "creds need NGINX_EMAIL + NGINX_PASSWORD"
+    done <<< "$creds"
+    [[ -n $email && -n $secret ]] || die "error" "creds need NGINX_EMAIL + NGINX_PASSWORD" >&2
     printf '%s\t%s' "$email" "$secret"
 }
 

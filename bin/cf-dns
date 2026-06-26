@@ -30,17 +30,14 @@ describe_spec() {
 # Decrypt the creds env and echo CF_API_TOKEN. The secret stays in memory for
 # the life of the call — never written to disk.
 get_token() {
-    [[ -f $CF_DNS_CREDS ]] || die "error" "creds not found: $CF_DNS_CREDS (see -h)"
-
-    local token="" k v
+    local creds token="" k v
+    creds=$(drift_read_creds "$CF_DNS_CREDS") || return 1
     while IFS='=' read -r k v; do
         case $k in
             CF_API_TOKEN) token=$v ;;
         esac
-    done < <(decrypt -p "$CF_DNS_CREDS" 2>/dev/null) \
-        || die "error" "could not decrypt $CF_DNS_CREDS (try: tools key test)"
-
-    [[ -n $token ]] || die "error" "creds need CF_API_TOKEN=..."
+    done <<< "$creds"
+    [[ -n $token ]] || die "error" "creds need CF_API_TOKEN=..." >&2
     echo "$token"
 }
 

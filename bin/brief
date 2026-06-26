@@ -21,6 +21,7 @@ describe_spec() {
     desc_para "Pure aggregator: it never re-implements a fact. Repo and PR state come from 'repos' (--prs folds in 'repos --prs', the one PR/CI owner — brief runs no gh of its own), and every vault fact (recent changes, docs to review, inbox) comes from 'severino-vault-mcp brief' and 'list-writeups' — the vault's one owner. Run 'brief' to orient at the start of a session, 'brief --json' to consume the whole workspace state in a single parse, or 'brief tui' for the interactive cockpit. The 'next' block names the loop verbs from that one classification: ship (dirty), land (green PR, with --prs), resync (merged)."
     desc_example "brief --prs" -- "morning orient with open-PR/CI state and the land verbs"
     desc_example "brief tui" -- "the interactive workspace cockpit"
+    desc_env SVMC_BIN -- "Override the severino-vault-mcp binary (tests stub it)"
     desc_cmd tui -- "Open the workspace cockpit — a ranked queue of what needs you, run ship/land/resync"
     desc_effect remote_write +network +interactive
     desc_opt --days DAYS -- "Vault recent-changes window in days (default 7)"
@@ -57,8 +58,10 @@ if (( PRS )); then
 else
     repos_json="$(repos --json 2>/dev/null || echo 'null')"
 fi
-vault_json="$(severino-vault-mcp brief --days "$DAYS" 2>/dev/null || echo 'null')"
-writeups_json="$(severino-vault-mcp list-writeups --filter all 2>/dev/null || echo 'null')"
+# Vault facts via the shared svmc() (lib/common.sh): pins SVMC_VAULT_PATH to
+# $NOTES_HOME so this never reads the MCP's own configured default vault.
+vault_json="$(svmc brief --days "$DAYS" 2>/dev/null || echo 'null')"
+writeups_json="$(svmc list-writeups --filter all 2>/dev/null || echo 'null')"
 
 mode="human"; (( JSON )) && mode="json"
 printf '{"repos":%s,"vault":%s,"writeups":%s}' \

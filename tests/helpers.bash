@@ -8,6 +8,12 @@
 export TOOLS_HOME
 TOOLS_HOME="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
 
+# The CI-equivalent shell environment is defined once in lib/common.sh and
+# reused here (and by `tools check --ci`) so the two can't drift — emit once,
+# derive everywhere. Source it for ci_shell_env (and the msg/color/json helpers
+# a few tests assert against).
+source "$TOOLS_HOME/lib/common.sh"
+
 # Hermetic env: clear the layout/config vars the operator's ~/.zshrc exports, so
 # the suite behaves identically on a dev machine and in clean CI. Without this, a
 # regression that makes a tool need real env for `-h`/`--describe` would pass
@@ -21,11 +27,12 @@ unset NOTES_HOME VAULT INBOX_DIR KEYS_HOME BACKUPS_HOME AGE_PUBKEY AGE_KEY \
       CF_DNS_VAULT_HEADING TS_ACL_VAULT_DOC TS_ACL_VAULT_HEADING \
       NGINX_VAULT_DOC NGINX_VAULT_HEADING 2>/dev/null || true
 
-# Repo bin FIRST on PATH, so any tool that shells out to a sibling by bare name
-# (and the cross-repo `describe` federation) resolves to THIS checkout, never a
-# stale installed copy in ~/.local/bin. This is the PATH-vs-repo trap that gave
-# false greens locally and red on CI: local must exercise repo code, like CI.
-export PATH="$TOOLS_HOME/bin:$PATH"
+# Repo bin first on $PATH (install dir stripped) and a clean git config — the
+# PATH-vs-repo trap that gave false greens locally and red on CI (a tool shelled
+# out by bare name, or the cross-repo `describe` federation, resolving to a stale
+# installed copy), plus the leaking-global-git-config trap. One definition, in
+# lib/common.sh.
+ci_shell_env
 
 # setup_crypt — generate a throwaway key pair laid out the way
 # config/crypt.sh expects ($KEYS_HOME/file_key/file_key{,.pub}).

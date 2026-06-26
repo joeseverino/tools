@@ -18,3 +18,40 @@ load helpers
     [[ "$output" == *"usage"* ]]
     [[ "$output" == *"bad args"* ]]
 }
+
+@test "path_without removes every instance of a directory from a PATH string" {
+    run bash -uc 'source "$TOOLS_HOME/lib/common.sh"; path_without /a "/a:/b:/a:/c"'
+    [ "$status" -eq 0 ]
+    [ "$output" = "/b:/c" ]
+}
+
+@test "path_without defaults to \$PATH and drops empty segments" {
+    run bash -uc 'source "$TOOLS_HOME/lib/common.sh"; PATH="/x::/y"; path_without /nope'
+    [ "$status" -eq 0 ]
+    [ "$output" = "/x:/y" ]
+}
+
+@test "ci_shell_env puts the repo bin first, strips the install dir, idempotently" {
+    run bash -uc '
+        source "$TOOLS_HOME/lib/common.sh"
+        export TOOLS_HOME=/repo TOOLS_INSTALL_DIR=/inst
+        PATH="/inst:/usr/bin:/repo/bin"
+        ci_shell_env; first="$PATH"
+        ci_shell_env; second="$PATH"
+        printf "%s\n%s\n" "$first" "$second"
+    '
+    [ "$status" -eq 0 ]
+    [ "${lines[0]}" = "/repo/bin:/usr/bin" ]
+    [ "${lines[1]}" = "/repo/bin:/usr/bin" ]
+}
+
+@test "ci_shell_env isolates git from the operator's global and system config" {
+    run bash -uc '
+        source "$TOOLS_HOME/lib/common.sh"
+        export TOOLS_HOME=/repo
+        ci_shell_env
+        printf "%s|%s|%s\n" "$GIT_CONFIG_GLOBAL" "$GIT_CONFIG_SYSTEM" "$GIT_CONFIG_NOSYSTEM"
+    '
+    [ "$status" -eq 0 ]
+    [ "$output" = "/dev/null|/dev/null|1" ]
+}

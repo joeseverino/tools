@@ -180,7 +180,7 @@ Umbrella command for the personal CLI toolchain.
 |---|---|---|---|
 | `tools status` | `--json` | `read + network` | One-screen health check across vault, inbox, backup, keys |
 | `tools doctor` | `--all`<br>`--live`<br>`--json` | `read + network` | Verify environment, deps, and installed symlinks |
-| `tools check` | `--no-bench` | `local_write` | Run the full CI suite locally: lint, tests, bench |
+| `tools check` | `--no-bench`<br>`--ci` | `local_write` | Run the full CI suite locally: lint, tests, bench |
 | `tools new <name>` | `<name>`<br>`--drift`<br>`--verify` | `local_write` | Scaffold a new tool in bin/ with the house conventions |
 | `tools install` | — | `local_write` | Create symlinks in $INSTALL_DIR for every tool |
 | `tools key [cache|forget|status|test]` | `[cache\|forget\|status\|test]` | `local_write + interactive` | Cache / forget / test the age key passphrase in Keychain |
@@ -726,7 +726,7 @@ Usage: `ship <name>`
 | `-m, --message <MSG>` | PR title + commit message (default: derived from changed paths) |
 | `--body <BODY>` | PR body (default: a generated new/modified/removed file summary) |
 | `--no-pr` | Commit and push only; do not open a PR |
-| `--check` | Run the repo's own local gate (tools check / scripts/check.sh / npm test) before pushing; skip the repo if it fails |
+| `--check` | Run the repo's own local gate (tools check --ci / scripts/check.sh / npm test) before pushing; skip the repo if it fails |
 | `--watch` | After opening/updating the PR, poll 'gh pr checks' until CI is green or red |
 | `--rebranch` | Recover a stale branch: replay its commits onto a fresh branch off origin/<base>, dropping any already merged (leaves the old branch untouched) |
 | `<name>` | Only repos whose name contains NAME |

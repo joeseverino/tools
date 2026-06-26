@@ -7,18 +7,13 @@
 
 load helpers
 
-# Neutralize any global git hooks (e.g. a commit-identity guard) so the suite is
-# hermetic on a dev machine and identical to clean CI.
-nohooks() {
-    mkdir -p "$BATS_TEST_TMPDIR/nohooks"
-    git -C "$1" config core.hooksPath "$BATS_TEST_TMPDIR/nohooks"
-}
-
 # A repo wired to a bare origin, sitting on main with one pushed commit. The
 # default branch is forced to `main` everywhere (`-b main`), never inherited from
 # the host's init.defaultBranch — that leaks: a dev box set to `main` and a CI
 # Linux runner defaulting to `master` would otherwise behave differently (the
-# clone checks out an unborn branch and the push isn't a fast-forward).
+# clone checks out an unborn branch and the push isn't a fast-forward). Global
+# git config (hooks, aliases, defaultBranch) is already isolated by ci_shell_env
+# via the helpers, so no per-repo hooks override is needed.
 setup_flow() {
     export GH_BIN="$BATS_TEST_DIRNAME/fixtures/gh"
     origin="$BATS_TEST_TMPDIR/origin.git"
@@ -26,7 +21,6 @@ setup_flow() {
     git init -q --bare -b main "$origin"
     git init -q -b main "$work"
     cd "$work"
-    nohooks "$work"
     git config user.email t@t.io
     git config user.name tester
     git remote add origin "$origin"
@@ -44,7 +38,6 @@ setup_flow() {
 advance_origin() {
     local c="$BATS_TEST_TMPDIR/other"
     git clone -q "$origin" "$c" 2>/dev/null
-    nohooks "$c"
     git -C "$c" config user.email o@o.io
     git -C "$c" config user.name other
     git -C "$c" checkout -q -B main origin/main
@@ -214,4 +207,39 @@ advance_origin() {
     run "$TOOLS_HOME/bin/start"
     [ "$status" -eq 0 ]
     [[ "$(git symbolic-ref --short HEAD)" == work/* ]]
+}
+
+@test "git_staged_icloud_conflicts matches '<stem> <n>[.ext]' duplicates only" {
+    setup_flow
+    : > "a 2.mjs"; : > "b.mjs"; : > "c2.mjs"; : > "d 3"
+    git add -A
+    run git_staged_icloud_conflicts
+    # one chained assertion so each clause gates under bats' last-command errexit
+    grep -qx 'a 2.mjs' <<<"$output" \
+        && grep -qx 'd 3' <<<"$output" \
+        && ! grep -q 'b.mjs' <<<"$output" \
+        && ! grep -q 'c2.mjs' <<<"$output"
+}
+
+@test "git_commit drops iCloud-conflict duplicates but keeps real files" {
+    setup_flow
+    printf 'real\n' > real.mjs
+    printf 'dupe\n' > "real 2.mjs"
+    printf 'dupe\n' > "notes 3.bats"
+    git_commit "feat: add real.mjs"
+    tree="$(git ls-tree -r --name-only HEAD)"
+    # committed real file present; both conflicts excluded yet left on disk
+    grep -qx 'real.mjs' <<<"$tree" \
+        && ! grep -q ' 2\.mjs' <<<"$tree" \
+        && ! grep -q ' 3\.bats' <<<"$tree" \
+        && [ -f 'real 2.mjs' ] && [ -f 'notes 3.bats' ]
+}
+
+@test "git_print_failing_checks surfaces only the failing checks and the log tail" {
+    setup_flow
+    run git_print_failing_checks
+    # only the failing row (not the passing 'lint'), plus the failed-step log tail
+    grep -q 'cordon / gate' <<<"$output" \
+        && grep -q 'not ok 5 cordon gate' <<<"$output" \
+        && ! grep -q 'lint' <<<"$output"
 }

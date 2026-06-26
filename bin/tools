@@ -47,6 +47,7 @@ describe_spec() {
     desc_cmd check    -- "Run the full CI suite locally: lint, tests, bench"
     desc_effect local_write
     desc_opt --no-bench -- "Skip the bench scripts (the slowest step)"
+    desc_opt --ci     -- "Run hermetically, as CI does: this checkout's bin first with the install dir off \$PATH (no stale shadow), an empty global/system git config (no leaked defaultBranch, aliases, or hooks), and the bats version surfaced. ship --check uses this mode; set TOOLS_CI_BATS_VERSION to fail on a bats version other than CI's."
 
     desc_cmd new      -- "Scaffold a new tool in bin/ with the house conventions"
     desc_effect local_write
@@ -124,7 +125,7 @@ cmd_status() {
     [[ -f "${AGE_KEY:-}"    ]] && key_ok=1
 
     if (( json )); then
-        printf '{"vault":{"ok":%s,"tree":"%s","remote":"%s","path":"%s"},' \
+        printf '{"ok":true,"vault":{"ok":%s,"tree":"%s","remote":"%s","path":"%s"},' \
             "$(json_bool "$vault_ok")" "$(json_escape "$tree")" \
             "$(json_escape "$remote")" "$(json_escape "${VAULT:-}")"
         printf '"inbox":{"ok":%s,"pending":%d},' "$(json_bool "$inbox_ok")" "$pending"
@@ -377,18 +378,46 @@ cmd_generate() {
 # one place. Tools are discovered by shebang — adding a file to bin/ adds
 # it to every check automatically.
 
+# Surface the bats version under --ci — a recurring local↔CI divergence (1.13's
+# last-command-only errexit masked stale assertions) — and, when
+# TOOLS_CI_BATS_VERSION is set (the pin CI exports), fail on any other version.
+ci_bats_check() {
+    local want="${TOOLS_CI_BATS_VERSION:-}" have
+    if ! command -v bats >/dev/null; then
+        check "bats version" 0 "bats not installed (brew install bats-core)"
+        return 1
+    fi
+    have="$(bats --version 2>/dev/null | awk '{print $NF}')"
+    if [[ -n "$want" && "$have" != "$want" ]]; then
+        check "bats version" 0 "have $have, CI pins $want (TOOLS_CI_BATS_VERSION)"
+        return 1
+    fi
+    check "bats version" 1 "$have${want:+ · pinned}"
+}
+
 cmd_check() {
-    local run_bench=1 fail=0
+    local run_bench=1 fail=0 ci=0
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --no-bench) run_bench=0; shift ;;
+            --ci)       ci=1; shift ;;
             *) die_unknown option "$1" check ;;
         esac
     done
 
+    # --ci: make the local gate byte-for-byte CI. The CI-equivalent environment
+    # is defined once in lib/common.sh (shared with the bats harness) and applied
+    # here in-process, so every step below and every child it spawns (shellcheck,
+    # bats, bench, generate, sibling tools) inherits it. local must equal CI.
+    (( ci )) && ci_shell_env
+
     cd "$TOOLS_HOME"
     echo
     local f n err step_ok
+    if (( ci )); then
+        msg "$DIM" "ci" "hermetic gate · repo bin first, install dir off \$PATH · clean git config"
+        ci_bats_check || fail=1
+    fi
 
     # bash -n
     step_ok=1; n=0
@@ -444,7 +473,8 @@ cmd_check() {
     fi
 
     # Contract schema + generated consumers. The validator checks every real
-    # emitter against schemas/describe-v4.schema.json — including sibling repos'
+    # emitter against schemas/cordon-v4.json (via lib/tools/describe-schema.mjs) —
+    # including sibling repos'
     # emitters via --repos, so a drifted `severino-vault-mcp describe` fails here
     # (the cross-repo drift guard). When the sibling isn't installed, --repos just
     # folds in nothing. The generator check keeps completions + README current.
@@ -659,18 +689,19 @@ describe_spec() {
     desc_env __PREFIX___DATASET_ID -- "infra-dataset id for the cache (default __NAME__)"
 }
 
-# Decrypt the creds env and echo the secret. Stays in memory only.
+# Decrypt the creds env and echo the secret. Stays in memory only. Credential
+# decryption is shared (drift_read_creds in lib/drift.sh) — declare only your
+# file + the keys you pull; never re-copy the file-check and decrypt.
 # TODO: read whatever key(s) your API needs (Bearer token, user/pass, ...).
 get_token() {
-    [[ -f ${__PREFIX___CREDS} ]] || die "error" "creds not found: ${__PREFIX___CREDS} (see -h)"
-    local token="" k v
+    local creds token="" k v
+    creds=$(drift_read_creds "${__PREFIX___CREDS}") || return 1
     while IFS='=' read -r k v; do
         case $k in
             __PREFIX___TOKEN) token=$v ;;
         esac
-    done < <(decrypt -p "${__PREFIX___CREDS}" 2>/dev/null) \
-        || die "error" "could not decrypt ${__PREFIX___CREDS} (try: tools key test)"
-    [[ -n $token ]] || die "error" "creds need __PREFIX___TOKEN=..."
+    done <<< "$creds"
+    [[ -n $token ]] || die "error" "creds need __PREFIX___TOKEN=..." >&2
     echo "$token"
 }
 
