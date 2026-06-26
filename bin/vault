@@ -17,6 +17,9 @@ describe_spec() {
     desc_effect read +network
     desc_cmd inbox  -- "List notes currently in the inbox"
     desc_effect read
+    desc_cmd daily  -- "Populate the daily note's generated brief region from brief --json (work to ship, review-due docs, stale backlog, drafts) as Obsidian callouts — idempotent; never touches your free-capture area below the region"
+    desc_effect vault_write
+    desc_opt --date DATE -- "Daily note date (YYYY-MM-DD; default today)"
     desc_env NOTES_HOME -- "Read from ~/.zshrc; resolves VAULT"
     desc_env VAULT      -- "Per-invocation override for the vault path"
     desc_env INBOX_DIR  -- "Per-invocation override for the inbox folder"
@@ -106,6 +109,48 @@ vault_inbox() {
     echo
 }
 
+# Populate the daily note's brief region. The chain is three one-owner steps:
+# brief --json (the one aggregator) → lib/brief/daily.mjs (the one renderer,
+# shared with the plugin) → svmc daily-write (the MCP, the one atomic vault
+# writer that owns the marked region). vault holds no rendering or write logic.
+vault_daily() {
+    local date=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --date) date="${2:-}"; shift 2 ;;
+            -*)     die_unknown flag "$1" daily ;;
+            *)      die_unknown argument "$1" daily ;;
+        esac
+    done
+    echo
+
+    local digest block result
+    digest="$(brief --json 2>/dev/null)" || die "error" "brief --json failed"
+    block="$(printf '%s' "$digest" | node "$TOOLS_HOME/lib/brief/daily.mjs" "${date:-$(date +%F)}")" \
+        || die "error" "rendering the daily block failed"
+
+    local write_args=()
+    [[ -n "$date" ]] && write_args=(--date "$date")
+    result="$(printf '%s' "$block" | svmc daily-write ${write_args[@]+"${write_args[@]}"})" \
+        || die "error" "daily-write failed (is the MCP installed? site reinstall-mcp)"
+
+    # Parse the MCP's {ok,...} envelope — node is the JSON tool (repo convention).
+    local line kind detail state
+    # shellcheck disable=SC2016  # the node script is literal — no shell expansion
+    line="$(printf '%s' "$result" | node -e '
+let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{
+  let j={};try{j=JSON.parse(s)}catch{};
+  if(j.ok){process.stdout.write(`ok\t${j.wrote||""}\t${j.created?"created":"updated"}`)}
+  else{process.stdout.write(`err\t${j.error||"failed"}`)}});')"
+    IFS=$'\t' read -r kind detail state <<<"$line"
+    if [[ "$kind" == "ok" ]]; then
+        msg "$GREEN" "daily" "$state brief region → $detail"
+    else
+        die "error" "daily-write: $detail"
+    fi
+    echo
+}
+
 # All help + the machine surface render from the one spec via the shared
 # intercept (main `-h`, `--describe`, focused `<cmd> -h`).
 desc_help_intercept "$@"
@@ -113,5 +158,6 @@ case "${1:-}" in
     sync)              shift; vault_sync   "$@" ;;
     status)            shift; vault_status "$@" ;;
     inbox)             shift; vault_inbox  "$@" ;;
+    daily)             shift; vault_daily  "$@" ;;
     *)                 die_unknown command "$1" ;;
 esac
