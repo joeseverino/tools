@@ -701,7 +701,7 @@ get_token() {
             __PREFIX___TOKEN) token=$v ;;
         esac
     done <<< "$creds"
-    [[ -n $token ]] || die "error" "creds need __PREFIX___TOKEN=..." >&2
+    [[ -n $token ]] || die "error" "creds need __PREFIX___TOKEN=..."
     echo "$token"
 }
 

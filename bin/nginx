@@ -35,7 +35,7 @@ get_creds() {
             NGINX_PASSWORD) secret=$v ;;
         esac
     done <<< "$creds"
-    [[ -n $email && -n $secret ]] || die "error" "creds need NGINX_EMAIL + NGINX_PASSWORD" >&2
+    [[ -n $email && -n $secret ]] || die "error" "creds need NGINX_EMAIL + NGINX_PASSWORD"
     printf '%s\t%s' "$email" "$secret"
 }
 
