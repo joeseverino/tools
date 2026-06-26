@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/joeseverino/tools/schemas/repos.schema.json",
+  "title": "repos --json fleet contract",
+  "description": "The fleet snapshot emitted by `repos --json`, consumed by ship/land/resync, brief, the repos TUI, and the Obsidian cockpit. This schema is the guaranteed shape: the listed fields are always present with these types. Extra fields are allowed (forward-compatible: --prs adds `pr`, --icloud adds `icloud_dups`, future flags may add more), so a consumer can rely on the core without breaking when the surface grows.",
+  "type": "object",
+  "required": ["ok", "roots", "count", "repos"],
+  "properties": {
+    "ok": { "const": true },
+    "roots": { "type": "array", "items": { "type": "string" } },
+    "count": { "type": "integer", "minimum": 0 },
+    "repos": { "type": "array", "items": { "$ref": "#/$defs/repo" } }
+  },
+  "$defs": {
+    "repo": {
+      "type": "object",
+      "required": [
+        "name", "path", "root", "git", "branch", "remote", "has_remote",
+        "dirty", "untracked", "ahead", "behind", "upstream", "upstream_name",
+        "upstream_track", "upstream_gone", "local_ok", "needs_ship",
+        "needs_resync", "needs_attention", "stash", "last_commit", "lang",
+        "pm", "package_manager", "nvmrc", "node_modules", "node_modules_size",
+        "ci", "branch_state"
+      ],
+      "properties": {
+        "name": { "type": "string" },
+        "path": { "type": "string" },
+        "root": { "type": "string" },
+        "git": { "type": "boolean" },
+        "branch": { "type": "string" },
+        "remote": { "type": "string" },
+        "has_remote": { "type": "boolean" },
+        "dirty": { "type": "integer", "minimum": 0 },
+        "untracked": { "type": "integer", "minimum": 0 },
+        "ahead": { "type": "integer", "minimum": 0 },
+        "behind": { "type": "integer", "minimum": 0 },
+        "upstream": { "type": "boolean" },
+        "upstream_name": { "type": "string" },
+        "upstream_track": { "type": "string" },
+        "upstream_gone": { "type": "boolean" },
+        "local_ok": { "type": "boolean" },
+        "needs_ship": { "type": "boolean" },
+        "needs_resync": { "type": "boolean" },
+        "needs_attention": { "type": "boolean" },
+        "stash": { "type": "integer", "minimum": 0 },
+        "last_commit": {
+          "type": "object",
+          "required": ["sha", "date", "subject"],
+          "properties": {
+            "sha": { "type": "string" },
+            "date": { "type": "string" },
+            "subject": { "type": "string" }
+          }
+        },
+        "lang": { "type": "string" },
+        "pm": { "type": "string" },
+        "package_manager": { "type": "string" },
+        "nvmrc": { "type": "string" },
+        "node_modules": { "type": "boolean" },
+        "node_modules_size": { "type": ["string", "null"] },
+        "ci": { "type": "integer", "minimum": 0 },
+        "branch_state": {
+          "type": "string",
+          "description": "The branch-safety verdict from git_branch_state, or '-' when not applicable (no remote / not a git work tree).",
+          "enum": ["trunk", "zombie", "pr", "current", "stale", "-"]
+        },
+        "icloud_dups": { "type": "integer", "minimum": 0 },
+        "pr": {
+          "type": "object",
+          "required": ["number", "state", "ci", "review", "url"],
+          "properties": {
+            "number": { "type": "integer" },
+            "state": { "type": "string" },
+            "ci": { "type": "string" },
+            "review": { "type": "string" },
+            "url": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

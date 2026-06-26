@@ -174,15 +174,60 @@ git_conventional_subject() {
     [[ "$1" =~ $re ]]
 }
 
+# iCloud Drive duplicates an unreconciled file as "<stem> <n>.<ext>" (a space +
+# number before the extension, or trailing on an extensionless name). Under
+# ~/Documents/Code these land in the working tree and `git add -A` sweeps them
+# into a commit — three times in one session before this guard. List the ones in
+# the staged set; -z handles the spaces these names always carry.
+git_staged_icloud_conflicts() {
+    local re='^.+ [0-9]+(\..+)?$' f
+    while IFS= read -r -d '' f; do
+        [[ "${f##*/}" =~ $re ]] && printf '%s\n' "$f"
+    done < <(git diff --cached --name-only -z 2>/dev/null)
+}
+
+# Unstage any iCloud-conflict duplicates and warn (to stderr, since git_commit
+# may run where stdout is captured). They are virtually always sync junk, so we
+# exclude + warn — re-add a real one by hand — rather than hard-fail a ship over
+# a sync artifact. The one guard for every committer (ship, start, …).
+git_drop_icloud_conflicts() {
+    local files=() f
+    while IFS= read -r f; do files+=("$f"); done < <(git_staged_icloud_conflicts)
+    (( ${#files[@]} )) || return 0
+    git restore --staged -- "${files[@]}" 2>/dev/null \
+        || git reset -q HEAD -- "${files[@]}" 2>/dev/null || true
+    msg "$YELLOW" "icloud" "excluded ${#files[@]} conflict file(s) — re-add a real one with: git add <file>" >&2
+    for f in "${files[@]}"; do msg "$DIM" "" "$f" >&2; done
+}
+
 # Stage and commit. With trailing paths, stages only those; else everything.
 # Empty message -> derived from the staged paths. Returns 1 (no error) when
 # there is nothing to commit, so callers can `git_commit "$m" || true`.
 git_commit() {
     local msg="$1"; shift
     if (( $# )); then git add -- "$@"; else git add -A; fi
+    git_drop_icloud_conflicts
     git diff --cached --quiet && return 1
     [[ -n "$msg" ]] || msg="$(git_commit_message)"
     git commit -q -m "$msg"
+}
+
+# Print the current branch's PR's failing CI checks inline, so a red `ship
+# --watch` lands the failure in the terminal instead of behind three `gh run
+# view` commands. Read-only, best-effort: the failing check rows (name + URL)
+# always, then the failing run's failed-step log tail when gh allows it. All
+# GitHub access goes through $GH_BIN (the hermetic-stub seam).
+git_print_failing_checks() {
+    local gh="${GH_BIN:-gh}" rows log cname curl
+    rows="$("$gh" pr checks 2>/dev/null | awk -F'\t' '$2=="fail"')" || true
+    if [[ -n "$rows" ]]; then
+        while IFS=$'\t' read -r cname _ _ curl _; do
+            [[ -n "$cname" ]] && printf '  %s%-10s%s %s\n' "$RED" "fail" "$RESET" "$cname  ${DIM}${curl}${RESET}"
+        done <<< "$rows"
+    fi
+    log="$("$gh" run view --log-failed 2>/dev/null | tail -20)" || true
+    [[ -n "$log" ]] && printf '%s\n' "$log" | sed 's/^/    /'
+    return 0
 }
 
 # Push the current branch, setting upstream.

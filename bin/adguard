@@ -25,16 +25,15 @@ describe_spec() {
 
 # Decrypt the creds env and echo "user:pass" for curl basic auth. In memory only.
 get_creds() {
-    [[ -f ${ADGUARD_CREDS} ]] || die "error" "creds not found: ${ADGUARD_CREDS} (see -h)"
-    local user="" pass="" k v
+    local creds user="" pass="" k v
+    creds=$(drift_read_creds "${ADGUARD_CREDS}") || return 1
     while IFS='=' read -r k v; do
         case $k in
             ADGUARD_USER) user=$v ;;
             ADGUARD_PASS) pass=$v ;;
         esac
-    done < <(decrypt -p "${ADGUARD_CREDS}" 2>/dev/null) \
-        || die "error" "could not decrypt ${ADGUARD_CREDS} (try: tools key test)"
-    [[ -n $user && -n $pass ]] || die "error" "creds need ADGUARD_USER + ADGUARD_PASS"
+    done <<< "$creds"
+    [[ -n $user && -n $pass ]] || die "error" "creds need ADGUARD_USER + ADGUARD_PASS" >&2
     printf '%s:%s' "$user" "$pass"
 }
 

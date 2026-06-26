@@ -297,13 +297,10 @@ mcp_source_fingerprint() {
     '
 }
 
-# Invoke the installed vault MCP against the notes vault. Centralizes the
-# SVMC_VAULT_PATH export and the binary name so a new call site can't silently
-# fall back to the MCP's own configured default vault. `require_mcp` gates
-# version drift separately; this just runs the command and passes argv through.
-svmc() {
-    SVMC_VAULT_PATH="$NOTES_HOME" severino-vault-mcp "$@"
-}
+# The vault MCP call goes through the shared svmc() (lib/common.sh): it pins
+# SVMC_VAULT_PATH=$NOTES_HOME and names the binary in one place, so a new call
+# site can't silently fall back to the MCP's own configured default vault.
+# `require_mcp` gates version drift separately.
 
 mcp_reinstall_prompt() {
     local reason="$1" answer=""

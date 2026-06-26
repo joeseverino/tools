@@ -9,8 +9,9 @@ set -euo pipefail
 
 source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 
-# Routed through a var so the test suite can shadow the MCP with a hermetic stub.
-SVMC="${SVMC_BIN:-severino-vault-mcp}"
+# Every MCP call goes through the shared svmc() (lib/common.sh): it pins the
+# vault to $NOTES_HOME and names the binary via $SVMC_BIN, which the test suite
+# shadows with a hermetic stub.
 
 describe_spec() {
     desc_tool "backlog" "The fleet backlog — a thin client over the vault MCP's task brain."
@@ -110,14 +111,14 @@ if [[ "$CMD" == "add" || "$CMD" == "move" || "$CMD" == "close" ]]; then
         (( $# )) && TITLE+=("$@")
         (( ${#TITLE[@]} )) || die "usage" "add needs a title (try -h)" 2
         set +e
-        out="$("$SVMC" task-add "${TITLE[*]}" ${ADD_FLAGS[@]+"${ADD_FLAGS[@]}"} | fmt_result)"; rc=$?
+        out="$(svmc task-add "${TITLE[*]}" ${ADD_FLAGS[@]+"${ADD_FLAGS[@]}"} | fmt_result)"; rc=$?
         set -e
     else
         ID="${1:-}"; [[ -n "$ID" ]] || die "usage" "$CMD needs a task id (try -h)" 2
         STATUS="${2:-}"; [[ "$CMD" == "close" ]] && STATUS="done"
         [[ -n "$STATUS" ]] || die "usage" "move needs a target status (try -h)" 2
         set +e
-        out="$("$SVMC" task-move "$ID" "$STATUS" | fmt_result)"; rc=$?
+        out="$(svmc task-move "$ID" "$STATUS" | fmt_result)"; rc=$?
         set -e
     fi
 
@@ -153,7 +154,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-board_json="$("$SVMC" task-list ${MCP_FLAGS[@]+"${MCP_FLAGS[@]}"})"
+board_json="$(svmc task-list ${MCP_FLAGS[@]+"${MCP_FLAGS[@]}"})"
 if (( JSON )); then
     printf '%s\n' "$board_json"
 else

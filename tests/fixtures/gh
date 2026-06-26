@@ -38,6 +38,22 @@ if [[ "${1:-}" == "pr" && "${2:-}" == "merge" ]]; then
     exit 0
 fi
 
+# `gh pr checks` — a canned tab-separated table (one passing, one failing check)
+# like real gh, so git_print_failing_checks can filter the fail rows. Real gh's
+# `--watch` blocks until terminal; here it just returns (red = nonzero).
+if [[ "${1:-}" == "pr" && "${2:-}" == "checks" ]]; then
+    printf 'lint\tpass\t30s\thttps://github.com/demo/x/runs/1\n'
+    printf 'cordon / gate\tfail\t1m2s\thttps://github.com/demo/x/runs/2\n'
+    [[ "$*" == *--watch* ]] && exit 1
+    exit 0
+fi
+
+# `gh run view --log-failed` — the failing-step log tail surfaced on red.
+if [[ "${1:-}" == "run" && "${2:-}" == "view" ]]; then
+    printf 'not ok 5 cordon gate\n# (in test file tests/x.bats, line 9)\n'
+    exit 0
+fi
+
 # `gh pr list --head <b> [--state open|merged] --json <f> -q '.[0].<f>'` — used by
 # git_branch_has_open_pr / git_branch_pr_merged / git_open_or_update_pr. These
 # callers extract a bare scalar via -q, so the stub emits the bare value (like
