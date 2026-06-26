@@ -74,6 +74,7 @@ _tools_suite_contract() {
         'sync:Pull and push the vault repo'
         'status:Working tree, inbox count, remote sync state, and whether doc metadata changed since the last hq sync'
         'inbox:List notes currently in the inbox'
+        'daily:Populate the daily note'\''s generated brief region from brief --json (work to ship, review-due docs, stale backlog, drafts) as Obsidian callouts — idempotent; never touches your free-capture area below the region'
       )
       _arguments -C \
         '(-h --help)'{-h,--help}'[show help]' \
@@ -82,6 +83,7 @@ _tools_suite_contract() {
         command) _describe 'command' commands ;;
         args)
           case "${words[2]}" in
+            daily) _arguments '--date[Daily note date (YYYY-MM-DD; default today)]:date:' ;;
           esac
           ;;
       esac
