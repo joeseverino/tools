@@ -124,9 +124,13 @@ vault_daily() {
     done
     echo
 
-    local digest block result
-    digest="$(brief --json 2>/dev/null)" || die "error" "brief --json failed"
-    block="$(printf '%s' "$digest" | node "$TOOLS_HOME/lib/brief/daily.mjs" "${date:-$(date +%F)}")" \
+    # Two owned sources: brief --json (repos work + vault counts) and the actual
+    # open tasks from backlog --json (the board). The renderer composes them.
+    local digest board block result
+    digest="$(brief --json 2>/dev/null)"   || die "error" "brief --json failed"
+    board="$(backlog --json 2>/dev/null)"  || board='{"tasks":[]}'
+    block="$(printf '{"brief":%s,"board":%s}' "$digest" "$board" \
+        | node "$TOOLS_HOME/lib/brief/daily.mjs" "${date:-$(date +%F)}")" \
         || die "error" "rendering the daily block failed"
 
     local write_args=()
