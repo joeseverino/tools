@@ -109,10 +109,12 @@ vault_inbox() {
     echo
 }
 
-# Populate the daily note's brief region. The chain is three one-owner steps:
-# brief --json (the one aggregator) → lib/brief/daily.mjs (the one renderer,
-# shared with the plugin) → svmc daily-write (the MCP, the one atomic vault
-# writer that owns the marked region). vault holds no rendering or write logic.
+# Populate the daily note's region with a log of what you DID that day — commits
+# across the fleet + work shipped. A daily note is retrospective (the cockpit
+# shows pending work; this shows the record). The chain keeps owners intact:
+# repos --json owns the repo list, backlog --json --all owns the task ledger →
+# daily-gather.mjs folds each repo's commit log for the date + the day's closures
+# → daily.mjs renders → svmc daily-write writes the marked region atomically.
 vault_daily() {
     local date=""
     while [[ $# -gt 0 ]]; do
@@ -124,13 +126,14 @@ vault_daily() {
     done
     echo
 
-    # Two owned sources: brief --json (repos work + vault counts) and the actual
-    # open tasks from backlog --json (the board). The renderer composes them.
-    local digest board block result
-    digest="$(brief --json 2>/dev/null)"   || die "error" "brief --json failed"
-    board="$(backlog --json 2>/dev/null)"  || board='{"tasks":[]}'
-    block="$(printf '{"brief":%s,"board":%s}' "$digest" "$board" \
-        | node "$TOOLS_HOME/lib/brief/daily.mjs" "${date:-$(date +%F)}")" \
+    local day repos_json board activity block result
+    day="${date:-$(date +%F)}"
+    repos_json="$(repos --json 2>/dev/null)"      || die "error" "repos --json failed"
+    board="$(backlog --json --all 2>/dev/null)"   || board='{"tasks":[]}'
+    activity="$(printf '{"date":"%s","repos":%s,"board":%s}' "$day" "$repos_json" "$board" \
+        | node "$TOOLS_HOME/lib/brief/daily-gather.mjs" "$day")" \
+        || die "error" "gathering the day's activity failed"
+    block="$(printf '%s' "$activity" | node "$TOOLS_HOME/lib/brief/daily.mjs" "$day")" \
         || die "error" "rendering the daily block failed"
 
     local write_args=()
