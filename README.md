@@ -310,6 +310,7 @@ Operations on the vault git repo.
 | `vault sync` | — | `remote_write + network` | Pull and push the vault repo |
 | `vault status` | — | `read + network` | Working tree, inbox count, remote sync state, and whether doc metadata changed since the last hq sync |
 | `vault inbox` | — | `read` | List notes currently in the inbox |
+| `vault daily` | `--date <DATE>` | `vault_write` | Populate the daily note's generated brief region from brief --json (work to ship, review-due docs, stale backlog, drafts) as Obsidian callouts — idempotent; never touches your free-capture area below the region |
 
 #### `backup`
 

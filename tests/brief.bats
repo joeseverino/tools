@@ -102,3 +102,15 @@ assert pr["green-app"]["review"]=="approved", pr
     [ "$status" -eq 0 ]
     ! grep -qF "open PRs" <<<"$output" && ! grep -qF "land " <<<"$output"
 }
+
+@test "daily render: callouts from a brief digest, empty sections dropped" {
+    digest='{"repos":{"ship":["tools"],"resync":[],"stale":[],"dirty":["tools"]},"vault":{"docs_to_review":2,"docs_to_review_top":["doc-a","doc-b"],"inbox":1,"recent_changes":3},"backlog":{"open":5,"stale":0,"stale_slugs":[]},"writeups":{"drafts":["wp-x"]}}'
+    run bash -c 'printf "%s" "$1" | node "$TOOLS_HOME/lib/brief/daily.mjs" 2026-06-25' _ "$digest"
+    [ "$status" -eq 0 ]
+    # one chained assertion (bats 1.13 gates only the last command)
+    grep -qF '> [!note] 2026-06-25' <<<"$output" \
+        && grep -qF 'ship tools --check --watch --go' <<<"$output" \
+        && grep -qF '[[doc-a]]' <<<"$output" \
+        && grep -qF '[!info]+ Docs to review (2)' <<<"$output" \
+        && ! grep -q 'Stale backlog' <<<"$output"
+}
