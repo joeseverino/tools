@@ -103,14 +103,19 @@ assert pr["green-app"]["review"]=="approved", pr
     ! grep -qF "open PRs" <<<"$output" && ! grep -qF "land " <<<"$output"
 }
 
-@test "daily render: callouts from a brief digest, empty sections dropped" {
-    digest='{"repos":{"ship":["tools"],"resync":[],"stale":[],"dirty":["tools"]},"vault":{"docs_to_review":2,"docs_to_review_top":["doc-a","doc-b"],"inbox":1,"recent_changes":3},"backlog":{"open":5,"stale":0,"stale_slugs":[]},"writeups":{"drafts":["wp-x"]}}'
-    run bash -c 'printf "%s" "$1" | node "$TOOLS_HOME/lib/brief/daily.mjs" 2026-06-25' _ "$digest"
+@test "daily render: composes brief + board, lists open work, drops empty sections" {
+    brief='{"repos":{"ship":["tools"],"resync":[],"stale":[],"dirty":["tools"]},"vault":{"docs_to_review":2,"docs_to_review_top":["doc-a","doc-b"],"inbox":1,"recent_changes":3},"backlog":{"open":2,"stale":0},"writeups":{"drafts":[]}}'
+    board='{"tasks":[{"doc_id":"task-foo","title":"Fix the foo","project":"tools","priority":"high","effort":"M","stale":false},{"doc_id":"task-bar","title":"Bar it","project":"cordon","priority":"low","effort":"S","stale":true}]}'
+    run bash -c 'printf "{\"brief\":%s,\"board\":%s}" "$1" "$2" | node "$TOOLS_HOME/lib/brief/daily.mjs" 2026-06-25' _ "$brief" "$board"
     [ "$status" -eq 0 ]
-    # one chained assertion (bats 1.13 gates only the last command)
+    # one chained assertion (bats 1.13 gates only the last command): header, the
+    # ship action, the open-work list (stale 'bar' sorts ABOVE high 'foo'), the
+    # linked title + tags, review section, and the empty drafts section dropped.
     grep -qF '> [!note] 2026-06-25' <<<"$output" \
         && grep -qF 'ship tools --check --watch --go' <<<"$output" \
+        && grep -qF '[!abstract]+ Backlog — open work (2)' <<<"$output" \
+        && grep -qF '[[task-foo|Fix the foo]]  — tools · high · M' <<<"$output" \
         && grep -qF '[[doc-a]]' <<<"$output" \
-        && grep -qF '[!info]+ Docs to review (2)' <<<"$output" \
-        && ! grep -q 'Stale backlog' <<<"$output"
+        && [ "$(grep -n 'task-bar' <<<"$output" | cut -d: -f1)" -lt "$(grep -n 'task-foo' <<<"$output" | cut -d: -f1)" ] \
+        && ! grep -q 'Writeup drafts' <<<"$output"
 }
