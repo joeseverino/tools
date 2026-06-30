@@ -87,3 +87,25 @@ assert s==["cordon","cordon-starter"], s
     printf '%s' '{"ok":true,"roots":[],"count":0,"repos":[]}' | node "$v" "$s" \
         && ! printf '%s' '{"ok":true,"roots":[],"count":0}' | node "$v" "$s"
 }
+
+@test "record manifest and published schema stay in lockstep (one source, no drift)" {
+    # buildRepo's projected shape (the emitter, derived once from RECORD_FIELDS)
+    # must match the published schema's repo properties exactly — so adding or
+    # renaming a field in the manifest without the schema (or vice versa) fails
+    # here instead of silently shipping a contract the consumers don't expect.
+    run node -e '
+      const TH = process.env.TOOLS_HOME;
+      const { readFileSync } = require("node:fs");
+      import(TH + "/lib/repos/record.mjs").then((m) => {
+        const schema = JSON.parse(readFileSync(TH + "/schemas/repos.schema.json", "utf8"));
+        const want = Object.keys(schema.$defs.repo.properties).sort();
+        const rec  = m.parseRecord(m.RECORD_FIELDS.map(() => "x").join(""));
+        const got  = Object.keys(m.buildRepo(rec, { icloud: true, pr: { number: 1, state: "open", ci: "none", review: "none", url: "" } })).sort();
+        if (JSON.stringify(want) !== JSON.stringify(got)) {
+          console.error("DRIFT\n  schema=" + want.join(",") + "\n  built =" + got.join(","));
+          process.exit(1);
+        }
+      }).catch((e) => { console.error(e); process.exit(1); });
+    '
+    [ "$status" -eq 0 ]
+}

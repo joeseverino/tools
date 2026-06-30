@@ -228,8 +228,10 @@ collect() {
     # Emit ONE \x1f-delimited record (no field holds \x1f or a newline — the
     # commit subject is %s, a single line). The collect runs in parallel, one
     # subshell per repo writing its record to a temp file; merge_record reads them
-    # back in order and appends to the arrays. Order: kept in lockstep with
-    # merge_record below — the single contract between the two halves.
+    # back in order and appends to the arrays, and lib/repos/json.mjs parses the
+    # same files for --json. Field ORDER is the contract, defined once in
+    # lib/repos/record.mjs (RECORD_FIELDS) — this printf and merge_record below
+    # both follow it, and the schema-parity test locks the JSON shape.
     printf '%s\x1f' \
         "$name" "$root_label" "$d" "$is_git" "$branch" "$remote" "$has_remote" \
         "$dirty" "$untracked" "$ahead" "$behind" "$upstream" \
@@ -264,7 +266,8 @@ merge_record() {
 # independent, so fanning it out turns a sequential ~Nx130ms walk into one bounded
 # by the slowest single repo. Same temp-dir + wait pattern the --prs pass uses.
 SCAN_TMP="$(mktemp -d)"
-trap 'rm -rf "$SCAN_TMP"' EXIT
+PR_TMP=""   # set by the --prs pass; json.mjs reads it, so it's cleaned at exit
+trap 'rm -rf "$SCAN_TMP" "$PR_TMP"' EXIT
 scan_idx=0
 for root in "${ROOTS[@]}"; do
     [[ -d "$root" ]] || continue
@@ -292,59 +295,41 @@ N=${#R_NAME[@]}
 # back in one node pass and splice into the parallel arrays by index. A repo with
 # no gh, no auth, or no PR stays at the "none" default emitted above.
 if (( PRS )) && (( N > 0 )); then
-    pr_tmp="$(mktemp -d)"
+    PR_TMP="$(mktemp -d)"
     i=0
     while (( i < N )); do
         if [[ "${R_GIT[$i]}" == "1" && "${R_HASREMOTE[$i]}" == "1" && "${R_BRANCH[$i]}" != "-" ]]; then
             ( cd "${R_PATH[$i]}" && "$GH_BIN" pr view "${R_BRANCH[$i]}" \
                 --json number,url,state,isDraft,reviewDecision,statusCheckRollup \
-                > "$pr_tmp/$i.json" 2>/dev/null || true ) &
+                > "$PR_TMP/$i.json" 2>/dev/null || true ) &
         fi
         i=$(( i + 1 ))
     done
     wait
-    while IFS=$'\t' read -r idx num state prci review url; do
-        [[ -n "$idx" ]] || continue
-        R_PR_NUM[idx]="$num"; R_PR_STATE[idx]="$state"; R_PR_CI[idx]="$prci"
-        R_PR_REVIEW[idx]="$review"; R_PR_URL[idx]="$url"
-        # Correct the network-free hint: an open PR means the branch is its PR's
-        # home (iterate), not stale — the want_pr=1 arm of git_branch_state.
-        [[ "$state" == "open" ]] && R_STATE[idx]="pr"
-    done < <(node "$TOOLS_HOME/lib/repos/pr.mjs" "$pr_tmp")
-    rm -rf "$pr_tmp"
+    # The --json surface reads $PR_TMP directly (json.mjs projects each blob), so
+    # the array splice + state correction below is only for the human render.
+    if (( ! JSON )); then
+        while IFS=$'\t' read -r idx num state prci review url; do
+            [[ -n "$idx" ]] || continue
+            R_PR_NUM[idx]="$num"; R_PR_STATE[idx]="$state"; R_PR_CI[idx]="$prci"
+            R_PR_REVIEW[idx]="$review"; R_PR_URL[idx]="$url"
+            # Correct the network-free hint: an open PR means the branch is its PR's
+            # home (iterate), not stale — the want_pr=1 arm of git_branch_state.
+            [[ "$state" == "open" ]] && R_STATE[idx]="pr"
+        done < <(node "$TOOLS_HOME/lib/repos/pr.mjs" "$PR_TMP")
+    fi
 fi
 
 # ---------- JSON surface ----------
+# Built once from the field manifest by a real serializer (lib/repos/record.mjs +
+# json.mjs), reading collect()'s records straight from the scan temp dir — no
+# hand-concatenated, escape-prone printf for the fleet's most-consumed contract.
 if (( JSON )); then
-    printf '{"ok":true,"roots":['
-    for i in "${!ROOTS[@]}"; do
-        (( i )) && printf ','
-        printf '"%s"' "$(json_escape "${ROOTS[$i]}")"
-    done
-    printf '],"count":%d,"repos":[' "$N"
-    i=0
-    while (( i < N )); do
-        (( i )) && printf ','
-        printf '{"name":"%s","path":"%s","root":"%s","git":%s,"branch":"%s","remote":"%s","has_remote":%s,"dirty":%d,"untracked":%d,"ahead":%d,"behind":%d,"upstream":%s,"upstream_name":"%s","upstream_track":"%s","upstream_gone":%s,"local_ok":%s,"needs_ship":%s,"needs_resync":%s,"needs_attention":%s,"stash":%d,"last_commit":{"sha":"%s","date":"%s","subject":"%s"},"lang":"%s","pm":"%s","package_manager":"%s","nvmrc":"%s","node_modules":%s,"node_modules_size":%s,"ci":%d,"branch_state":"%s"' \
-            "$(json_escape "${R_NAME[$i]}")" "$(json_escape "${R_PATH[$i]}")" "$(json_escape "${R_ROOT[$i]}")" \
-            "$(json_bool "${R_GIT[$i]}")" "$(json_escape "${R_BRANCH[$i]}")" "$(json_escape "${R_REMOTE[$i]}")" "$(json_bool "${R_HASREMOTE[$i]}")" \
-            "${R_DIRTY[$i]}" "${R_UNTRACKED[$i]}" "${R_AHEAD[$i]}" "${R_BEHIND[$i]}" "$(json_bool "${R_UPSTREAM[$i]}")" \
-            "$(json_escape "${R_UPSTREAM_NAME[$i]}")" "$(json_escape "${R_UPSTREAM_TRACK[$i]}")" "$(json_bool "${R_UPSTREAM_GONE[$i]}")" \
-            "$(json_bool "${R_LOCAL_OK[$i]}")" "$(json_bool "${R_NEEDS_SHIP[$i]}")" "$(json_bool "${R_NEEDS_RESYNC[$i]}")" "$(json_bool "${R_NEEDS_ATTENTION[$i]}")" \
-            "${R_STASH[$i]}" \
-            "$(json_escape "${R_SHA[$i]}")" "$(json_escape "${R_DATE[$i]}")" "$(json_escape "${R_SUBJ[$i]}")" \
-            "$(json_escape "${R_LANG[$i]}")" "$(json_escape "${R_PM[$i]}")" "$(json_escape "${R_PMFIELD[$i]}")" "$(json_escape "${R_NVMRC[$i]}")" \
-            "$(json_bool "${R_NM[$i]}")" "${R_NMSIZE[$i]}" "${R_CI[$i]}" "$(json_escape "${R_STATE[$i]}")"
-        (( ICLOUD )) && printf ',"icloud_dups":%d' "${R_IDUPS[$i]}"
-        if (( PRS )); then
-            printf ',"pr":{"number":%d,"state":"%s","ci":"%s","review":"%s","url":"%s"}' \
-                "${R_PR_NUM[$i]}" "$(json_escape "${R_PR_STATE[$i]}")" "$(json_escape "${R_PR_CI[$i]}")" \
-                "$(json_escape "${R_PR_REVIEW[$i]}")" "$(json_escape "${R_PR_URL[$i]}")"
-        fi
-        printf '}'
-        i=$(( i + 1 ))
-    done
-    printf ']}\n'
+    json_args=(--record-dir "$SCAN_TMP" --scan-count "$scan_idx")
+    for root in "${ROOTS[@]}"; do json_args+=(--root "$root"); done
+    (( ICLOUD )) && json_args+=(--icloud)
+    (( PRS )) && json_args+=(--pr-dir "$PR_TMP")
+    node "$TOOLS_HOME/lib/repos/json.mjs" "${json_args[@]}"
     exit 0
 fi
 
