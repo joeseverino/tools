@@ -1,5 +1,37 @@
 # Changelog
 
+## [1.3.0](https://github.com/joeseverino/tools/compare/v1.2.0...v1.3.0) (2026-06-30)
+
+
+### Features
+
+* branch-safety engine — start verb, stale recovery, one branch-state ladder ([#37](https://github.com/joeseverino/tools/issues/37)) ([f5b1351](https://github.com/joeseverino/tools/commit/f5b13510394ffe2f91b25f1af2b891022f56d200))
+* brief surfaces the backlog (open + stale debt) from the vault brief ([#40](https://github.com/joeseverino/tools/issues/40)) ([4bfe8ba](https://github.com/joeseverino/tools/commit/4bfe8ba09a17cacb860b1ad895d793699e2888f3))
+* **drift:** json-cache data-store model via the MCP; retire legacy block path ([a09e307](https://github.com/joeseverino/tools/commit/a09e307b18408139f295eb9464840b230745197d))
+* **drift:** json-file data-store model alongside legacy blocks ([516b7e9](https://github.com/joeseverino/tools/commit/516b7e9ea067317ff4ca9fab8b4a0004229eb44d))
+* **drift:** migrate nginx, ts-acl, cf-dns to the json-file data store ([876d5c1](https://github.com/joeseverino/tools/commit/876d5c1164da3608e989408d7ccee4d9f5704488))
+* ship-flow gate, fleet contracts, and shared drift/mcp seams ([#43](https://github.com/joeseverino/tools/issues/43)) ([cfd7137](https://github.com/joeseverino/tools/commit/cfd713749aa6c056861d5c95861d104f82e7e7fb))
+* site CLI + describe cohesion (validate-writeup, reinstall-mcp --yes, federate obsidian contract) ([367f798](https://github.com/joeseverino/tools/commit/367f7983969709fc65f5e78d8b43b06369c369b8))
+* site CLI + describe cohesion (validate-writeup, reinstall-mcp --yes, federate obsidian contract) ([e4a8339](https://github.com/joeseverino/tools/commit/e4a8339f887c83ed538b7d256db743ca9c3cea4b))
+* site CLI + describe cohesion (validate-writeup, reinstall-mcp --yes, federate obsidian contract) ([899997f](https://github.com/joeseverino/tools/commit/899997f79a368b9062e91b35ac8af035604d0d7b))
+* site CLI + describe cohesion (validate-writeup, reinstall-mcp --yes, federate obsidian contract) ([57e9d09](https://github.com/joeseverino/tools/commit/57e9d09d255fa98249ee69d090b10f6fa243df48))
+* **vault:** add 'vault daily' — populate the daily note's brief region ([#44](https://github.com/joeseverino/tools/issues/44)) ([cf463b2](https://github.com/joeseverino/tools/commit/cf463b276d8ab809f46855d99e7fe2df9c7b7b6b))
+* **vault:** daily note lists the actual open work, not just counts ([#46](https://github.com/joeseverino/tools/issues/46)) ([a178f52](https://github.com/joeseverino/tools/commit/a178f52451421f36f3a739673b2b7a8606171ac7))
+* **vault:** daily note logs what you DID, not pending work ([#47](https://github.com/joeseverino/tools/issues/47)) ([0058077](https://github.com/joeseverino/tools/commit/00580772d0de1922cf92734c5bc296e7365c995f))
+* workspace loop — land verb, brief/repos cockpits, one PR-state owner ([dc761ee](https://github.com/joeseverino/tools/commit/dc761ee6d40e6559929a6102553cba5de98a1fe9))
+* workspace loop (land + brief/repos cockpits) + brand Cordon delegate ([276d5da](https://github.com/joeseverino/tools/commit/276d5da4b658bc5dd7625c590275ab12d0ea461d))
+
+
+### Bug Fixes
+
+* **common:** route die() to stderr; drop the per-call &gt;&2 workarounds ([#45](https://github.com/joeseverino/tools/issues/45)) ([0a6cd9d](https://github.com/joeseverino/tools/commit/0a6cd9d767438fbf45c42f67353b193cadc739d7))
+* **workspace:** resync clears squash-merged current branch; exact-name scope; reaper ([#39](https://github.com/joeseverino/tools/issues/39)) ([c706dfc](https://github.com/joeseverino/tools/commit/c706dfc205d0c4c318ae47bd22c08b4eca155e63))
+
+
+### Performance Improvements
+
+* **repos:** parallel scan + scoped filter; in-TUI diff overlay; raw-mode fix ([#42](https://github.com/joeseverino/tools/issues/42)) ([2c3248b](https://github.com/joeseverino/tools/commit/2c3248b9fabed035bd95991a1f890156517cf03b))
+
 ## [1.2.0](https://github.com/joeseverino/tools/compare/v1.1.0...v1.2.0) (2026-06-20)
 
 
