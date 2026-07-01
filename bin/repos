@@ -149,23 +149,14 @@ collect() {
         # --fetch refreshes remote-tracking refs first, so the ahead/behind/gone
         # computed below is true now, not as of the repo's last manual fetch.
         if (( FETCH )); then git -C "$d" fetch -q origin --prune 2>/dev/null || true; fi
-        branch="$(git -C "$d" symbolic-ref --quiet --short HEAD 2>/dev/null || git -C "$d" rev-parse --short HEAD 2>/dev/null || echo '-')"
         remote="$(git -C "$d" remote get-url origin 2>/dev/null || true)"
         [[ -n "$remote" ]] && has_remote=1
-        local porc; porc="$(git -C "$d" status --porcelain 2>/dev/null || true)"
-        if [[ -n "$porc" ]]; then
-            untracked="$(printf '%s\n' "$porc" | grep -c '^??' || true)"
-            dirty="$(printf '%s\n' "$porc" | grep -cv '^??' || true)"
-        fi
-        local head_ref; head_ref="$(git -C "$d" symbolic-ref --quiet HEAD 2>/dev/null || true)"
-        if [[ -n "$head_ref" ]]; then
-            upstream_name="$(git -C "$d" for-each-ref --format='%(upstream:short)' "$head_ref" 2>/dev/null || true)"
-            upstream_track="$(git -C "$d" for-each-ref --format='%(upstream:track)' "$head_ref" 2>/dev/null || true)"
-            [[ "$upstream_track" == "[gone]" ]] && upstream_gone=1
-        fi
-        local lr; lr="$(git -C "$d" rev-list --left-right --count '@{u}...HEAD' 2>/dev/null || true)"
-        if [[ -n "$lr" ]]; then upstream=1; behind="${lr%%[[:space:]]*}"; ahead="${lr##*[[:space:]]}"; fi
-        [[ -n "$upstream_name" ]] && upstream=1
+        # One `git status --porcelain=v2 --branch` (git_repo_snapshot) yields
+        # branch, upstream, ahead/behind, gone, and dirty/untracked — replacing
+        # six separate per-repo plumbing calls. Same cd-subshell pattern as the
+        # git_branch_state call below.
+        local snap; snap="$( cd "$d" && git_repo_snapshot )"
+        IFS=$'\x1f' read -r branch upstream_name upstream ahead behind upstream_gone upstream_track dirty untracked <<<"$snap"
         local lc; lc="$(git -C "$d" log -1 --format='%h%x1f%cs%x1f%s' 2>/dev/null || true)"
         [[ -n "$lc" ]] && { IFS=$'\x1f' read -r sha cdate subj <<<"$lc" || true; }
         stash="$(git -C "$d" stash list 2>/dev/null | grep -c . || true)"; [[ -n "$stash" ]] || stash=0

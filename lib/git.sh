@@ -41,6 +41,39 @@ git_worktree_dirty() {
         || [[ -n "$(git ls-files --others --exclude-standard)" ]]
 }
 
+# A repo's whole git state in ONE `git status` call. Replaces the six separate
+# plumbing calls a fleet scan used to make per repo (symbolic-ref ×2, status,
+# for-each-ref ×2, rev-list). Operates on the cwd like the rest of git.sh.
+# Echoes a \x1f-delimited record, in order:
+#   branch  upstream_name  upstream(0/1)  ahead  behind  gone(0/1)  track  dirty  untracked
+# track is reconstructed to match git's %(upstream:track): "[gone]",
+# "[ahead N]", "[behind N]", "[ahead N, behind N]", or "" in sync.
+git_repo_snapshot() {
+    local line oid='' branch='-' upstream_name='' upstream=0 ahead=0 behind=0 gone=0 track='' dirty=0 untracked=0 ab_seen=0 ab
+    while IFS= read -r line; do
+        case "$line" in
+            '# branch.oid '*)      oid="${line#'# branch.oid '}" ;;
+            '# branch.head '*)     branch="${line#'# branch.head '}" ;;
+            '# branch.upstream '*) upstream_name="${line#'# branch.upstream '}"; upstream=1 ;;
+            '# branch.ab '*)       ab_seen=1; upstream=1
+                                   ab="${line#'# branch.ab '}"      # "+A -B"
+                                   ahead="${ab%% *}"; ahead="${ahead#+}"
+                                   behind="${ab##* }"; behind="${behind#-}" ;;
+            '1 '*|'2 '*|'u '*)     dirty=$(( dirty + 1 )) ;;        # tracked/renamed/unmerged
+            '? '*)                 untracked=$(( untracked + 1 )) ;;
+        esac
+    done < <(git status --porcelain=v2 --branch 2>/dev/null)
+    [[ "$oid" == '(initial)' ]] && branch='-'                       # unborn: match the old '-'
+    [[ "$branch" == '(detached)' ]] && branch="${oid:0:7}"
+    if   (( upstream )) && (( ! ab_seen ));  then gone=1; track='[gone]'
+    elif (( ahead > 0 && behind > 0 ));      then track="[ahead $ahead, behind $behind]"
+    elif (( ahead > 0 ));                    then track="[ahead $ahead]"
+    elif (( behind > 0 ));                   then track="[behind $behind]"
+    fi
+    printf '%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s' \
+        "$branch" "$upstream_name" "$upstream" "$ahead" "$behind" "$gone" "$track" "$dirty" "$untracked"
+}
+
 # True when an OPEN PR exists for branch <1> against base <2>. The "am I already
 # iterating on a published PR" signal — such a branch is always kept.
 git_branch_has_open_pr() {
