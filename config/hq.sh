@@ -14,8 +14,11 @@
 : "${HQ_LOCAL_PATH:=$CODE_HOME/Projects/severino-hq}"
 
 # Folders under $VAULT we recurse into for doc indexing. Anything outside is
-# ignored — we don't want to vacuum personal notes into HQ.
-: "${HQ_VAULT_DIRS:=01 Projects:02 Infrastructure:03 Runbooks:05 Writeups:06 Pages}"
+# ignored — we don't want to vacuum personal notes into HQ. Must include
+# "07 Backlog" so cross-cutting tasks (the ones the MCP task board shows but no
+# single project owns) reach HQ too — without it they were indexed by the MCP
+# but invisible to `hq sync`.
+: "${HQ_VAULT_DIRS:=01 Projects:02 Infrastructure:03 Runbooks:05 Writeups:06 Pages:07 Backlog}"
 
 # Human-readable frontmatter contract doc in the vault. `hq schema` checks its
 # enum lists against the canonical MCP schema so it can't silently drift.
