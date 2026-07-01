@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.3.1](https://github.com/joeseverino/tools/compare/v1.3.0...v1.3.1) (2026-07-01)
+
+
+### Bug Fixes
+
+* **hq:** include 07 Backlog so cross-cutting tasks reach HQ ([#52](https://github.com/joeseverino/tools/issues/52)) ([5050ddf](https://github.com/joeseverino/tools/commit/5050ddf78cae36c5a4af914ac8f18ec891929d1a))
+
+
+### Performance Improvements
+
+* **repos:** one git_repo_snapshot call replaces 6 plumbing calls/repo ([#50](https://github.com/joeseverino/tools/issues/50)) ([fd9ce9b](https://github.com/joeseverino/tools/commit/fd9ce9be06b2232ed017192223b616fc5928e24b))
+
 ## [1.3.0](https://github.com/joeseverino/tools/compare/v1.2.0...v1.3.0) (2026-06-30)
 
 
