@@ -537,18 +537,18 @@ Both panes share a route and a draggable divider; the viewer documents its own k
 
 Render Joe's brand kits via the branding-engine.
 
-Kits land in $BRAND_HOME/kits. The engine lives in $ENGINE_HOME and comes in as a dependency of the brand repo; see its README for all flags.
+Kits land in $BRAND_HOME/kits. The engine (branding-engine) comes in as a pinned dependency of the brand repo; see its README for all flags.
 
 | Invocation | Arguments / options | Effect | Summary |
 |---|---|---|---|
 | `brand build` | Delegated: severino-brand — surface owned by its cordon emitter (contract/brand.json); flags by branding-engine | `local_write` | Rebuild every kit from brand/ + the social cards |
 | `brand kit` | Delegated: severino-brand — positionals slug/hex/initials/wordmark and flags live in its cordon emitter (contract/brand.json) + branding-engine | `local_write` | Render a one-off kit into severino-brand/kits/<slug> |
-| `brand figure <spec>` | `<spec>`<br>`--out <PNG>`<br>`--tokens <CSS>`<br>`--scale <N>` | `local_write` | Render a brand-themed graphic (cover, banner, diagram) from a JSON spec |
-| `brand status` | — | `read` | Show engine + brand locations and git state |
+| `brand figure` | Delegated: severino-brand — spec positional and flags (--out/--tokens/--scale) live in its cordon emitter (contract/brand.json) + branding-engine | `local_write` | Render a brand-themed graphic (cover, banner, diagram) from a JSON spec |
+| `brand status` | — | `read` | Show brand location, engine version, and git state |
 
 **`brand figure` details**
 
-Spec format and template fields live in the engine README. Use this for designed graphics; use `diagram` for Mermaid flowcharts and sequence diagrams.
+Spec format and template fields live in the engine README. --tokens defaults to the primary kit's. Use this for designed graphics; use `diagram` for Mermaid flowcharts and sequence diagrams.
 
 #### `remember`
 
