@@ -133,7 +133,17 @@ git_branch_state() {
     local base="$1" want_pr="${2:-1}" cur
     cur="$(git symbolic-ref --short -q HEAD 2>/dev/null || echo HEAD)"
     [[ "$cur" == "main" || "$cur" == "master" || "$cur" == "HEAD" ]] && { printf 'trunk';  return; }
-    [[ "$(git_unique_commits "$base")" == "0" ]]                      && { printf 'zombie'; return; }
+    if [[ "$(git_unique_commits "$base")" == "0" ]]; then
+        # No unique commits is not always a zombie: a start-cut branch carries
+        # its work uncommitted, so it sits at base tip with a dirty tree. A true
+        # merged leftover is BEHIND base (the merge advanced it). Classify the
+        # fresh home `current` so ship commits HERE instead of recutting ship/*
+        # and stranding the named branch (the 2026-07-03 zombie-branch pile-up).
+        if git_worktree_dirty && [[ "$(git_behind_commits "$base")" == "0" ]]; then
+            printf 'current'; return
+        fi
+        printf 'zombie'; return
+    fi
     (( want_pr )) && git_branch_has_open_pr "$cur" "$base"            && { printf 'pr';     return; }
     [[ "$(git_behind_commits "$base")" == "0" ]]                      && { printf 'current'; return; }
     printf 'stale'
