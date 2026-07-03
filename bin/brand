@@ -6,14 +6,13 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 
 CODE_HOME="${CODE_HOME:-$HOME/Documents/Code}"
 BRAND_HOME="${BRAND_HOME:-$CODE_HOME/Assets/severino-brand}"
-ENGINE_HOME="${ENGINE_HOME:-$CODE_HOME/Projects/branding-engine}"
 
 describe_spec() {
     desc_tool "brand" "Render Joe's brand kits via the branding-engine."
     desc_inventory "Integrations" 150
     desc_synopsis "brand <command>"
     desc_effect read
-    desc_para "Kits land in \$BRAND_HOME/kits. The engine lives in \$ENGINE_HOME and comes in as a dependency of the brand repo; see its README for all flags."
+    desc_para "Kits land in \$BRAND_HOME/kits. The engine (branding-engine) comes in as a pinned dependency of the brand repo; see its README for all flags."
     desc_cmd build  -- "Rebuild every kit from brand/ + the social cards"
     desc_effect local_write
     desc_delegate "severino-brand — surface owned by its cordon emitter (contract/brand.json); flags by branding-engine"
@@ -22,16 +21,12 @@ describe_spec() {
     desc_delegate "severino-brand — positionals slug/hex/initials/wordmark and flags live in its cordon emitter (contract/brand.json) + branding-engine"
     desc_cmd figure -- "Render a brand-themed graphic (cover, banner, diagram) from a JSON spec"
     desc_effect local_write
-    desc_pos spec              -- "Path to a .figure.json spec (templates: title, flow, diamond, nodes)"
-    desc_opt --out PNG         -- "Output path (defaults to <spec>.png)"
-    desc_opt --tokens CSS      -- "Brand tokens.css (defaults to the primary kit's)"
-    desc_opt --scale N         -- "Render scale multiplier (default 2)"
-    desc_para "Spec format and template fields live in the engine README. Use this for designed graphics; use \`diagram\` for Mermaid flowcharts and sequence diagrams."
-    desc_cmd status -- "Show engine + brand locations and git state"
+    desc_delegate "severino-brand — spec positional and flags (--out/--tokens/--scale) live in its cordon emitter (contract/brand.json) + branding-engine"
+    desc_para "Spec format and template fields live in the engine README. --tokens defaults to the primary kit's. Use this for designed graphics; use \`diagram\` for Mermaid flowcharts and sequence diagrams."
+    desc_cmd status -- "Show brand location, engine version, and git state"
     desc_effect read
     desc_env CODE_HOME   -- "Defaults to ~/Documents/Code"
     desc_env BRAND_HOME  -- "Defaults to \$CODE_HOME/Assets/severino-brand"
-    desc_env ENGINE_HOME -- "Defaults to \$CODE_HOME/Projects/branding-engine"
 }
 
 require_brand() {
@@ -62,10 +57,14 @@ cmd_figure() {
         usage_command figure
         return 0
     fi
+    require_brand
     local spec="$1"; shift
     [[ -f "$spec" ]] || die "error" "spec not found: $spec"
-    local engine="$ENGINE_HOME/bin/cli.mjs"
-    [[ -f "$engine" ]] || die "error" "branding-engine not found at $engine (set \$ENGINE_HOME)"
+    # Run the engine from the brand repo's pinned dependency (single provenance with
+    # build/kit), but without cd-ing — figure takes file paths, so the caller's CWD
+    # must stay current for relative spec/--out/--tokens to resolve.
+    local engine="$BRAND_HOME/node_modules/branding-engine/bin/cli.mjs"
+    [[ -f "$engine" ]] || die "error" "engine not installed; run \`npm install\` in $BRAND_HOME"
 
     # Default brand color to the primary kit's tokens unless the caller passes --tokens.
     # Prefer the joe-severino kit; fall back to the first kit that ships tokens.css.
@@ -76,7 +75,7 @@ cmd_figure() {
         default_tokens=$(find "$BRAND_HOME/kits" -mindepth 2 -maxdepth 3 -name tokens.css 2>/dev/null | sort | head -1)
     fi
 
-    msg "$DIM" "engine" "$ENGINE_HOME"
+    msg "$DIM" "engine" "$BRAND_HOME/node_modules/branding-engine"
     if (( ! has_tokens )) && [[ -n "$default_tokens" && -f "$default_tokens" ]]; then
         node "$engine" figure "$spec" --tokens "$default_tokens" "$@"
     else
@@ -87,8 +86,10 @@ cmd_figure() {
 cmd_status() {
     require_brand
     echo
-    msg "$RESET" "engine" "$ENGINE_HOME"
     msg "$RESET" "brand" "$BRAND_HOME"
+    local ver
+    ver=$(node -p "require('$BRAND_HOME/node_modules/branding-engine/package.json').version" 2>/dev/null || true)
+    msg "$RESET" "engine" "branding-engine ${ver:-unknown}"
     if [[ -d "$BRAND_HOME/.git" ]]; then
         local tree; tree=$(vault_tree "$BRAND_HOME")
         local color="$GREEN"; [[ "$tree" != "clean" ]] && color="$YELLOW"
