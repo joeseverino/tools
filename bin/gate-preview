@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# gate-preview — run a (possibly branched) cordon engine across every gated repo
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
+
+CODE_HOME="${CODE_HOME:-$HOME/Documents/Code}"
+
+# The single source of truth for gate-preview's surface: lib/describe.sh renders
+# both this tool's -h text and its --describe JSON from this one declaration.
+describe_spec() {
+    desc_tool "gate-preview" "See a cordon change's blast radius: run the engine across every gated repo before merging it."
+    desc_inventory "Other" 240
+    desc_synopsis "gate-preview [options]"
+    desc_effect read
+    desc_opt --cordon DIR -- "Cordon checkout whose engine to run (default: \$CORDON_HOME, else the sibling Assets/cordon) — point it at a branch worktree to preview a proposed check change"
+    desc_opt --json -- "Machine-readable output: one object with a per-repo verdicts array"
+    desc_para "Answers 'what turns red if this cordon change ships?' before it ships. Every fleet repo carrying a gate (a cordon.checks.json or scripts/check.sh) gets the named engine run over it with --json, and the verdicts land in one table: repo, ok, and the failed check ids. Repos are discovered from repos --json (the one read surface), so the preview and the cockpit can't disagree about what the fleet is. The engine runs read-only (never --fix); a red row here is a red gate after merge."
+    desc_example "gate-preview --cordon ~/wt/cordon-stricter-bats" -- "preview a branch's checks against the whole fleet"
+}
+
+desc_help_intercept "$@"
+
+CORDON_DIR="${CORDON_HOME:-$CODE_HOME/Assets/cordon}"
+JSON_MODE=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --cordon) CORDON_DIR="${2:?--cordon needs a path}"; shift 2 ;;
+        --json)   JSON_MODE=1; shift ;;
+        *)        die_unknown flag "$1" ;;
+    esac
+done
+ENGINE="$CORDON_DIR/checks/run.mjs"
+[[ -f "$ENGINE" ]] || die "error" "no checks engine at $ENGINE (pass --cordon <checkout>)"
+
+# Gated = carries a cordon.checks.json or the canonical scripts/check.sh. The
+# fleet list comes from repos --json — the one read surface, never a re-scan.
+repos_json="$("$TOOLS_HOME/bin/repos" --json)"
+gated=()
+while IFS= read -r p; do
+    [[ -f "$p/cordon.checks.json" || -f "$p/scripts/check.sh" ]] && gated+=("$p")
+done < <(node -e '
+    const d = JSON.parse(require("fs").readFileSync(0, "utf8"));
+    for (const r of d.repos ?? d) console.log(r.path);
+' <<<"$repos_json")
+
+(( ${#gated[@]} )) || die "error" "no gated repos found"
+
+rows=()
+fail_total=0
+for repo in "${gated[@]}"; do
+    name="$(basename "$repo")"
+    verdict="$(node "$ENGINE" --root "$repo" --json 2>/dev/null || true)"
+    ok="$(node -e 'try{const v=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(v.ok?"ok":"RED "+v.failed.join(","))}catch{console.log("ERROR no verdict")}' <<<"$verdict")"
+    [[ "$ok" == ok ]] || fail_total=$((fail_total + 1))
+    rows+=("$name|$ok")
+    if (( ! JSON_MODE )); then
+        if [[ "$ok" == ok ]]; then
+            msg "$GREEN" "ok" "$name"
+        else
+            msg "$RED" "red" "$name ${DIM}(${ok#RED })${RESET}"
+        fi
+    fi
+done
+
+if (( JSON_MODE )); then
+    node -e '
+        const rows = process.argv.slice(1).map((r) => {
+            const [repo, verdict] = r.split("|");
+            return { repo, ok: verdict === "ok", ...(verdict.startsWith("RED") ? { failed: verdict.slice(4).split(",") } : {}) };
+        });
+        console.log(JSON.stringify({ ok: rows.every((r) => r.ok), repos: rows }));
+    ' "${rows[@]}"
+else
+    echo
+    if (( fail_total )); then
+        die "blast" "$fail_total of ${#gated[@]} gated repos turn red under $CORDON_DIR" 1
+    fi
+    msg "$GREEN" "clear" "all ${#gated[@]} gated repos stay green under $CORDON_DIR"
+fi
