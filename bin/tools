@@ -19,6 +19,8 @@ source "$TOOLS_HOME/lib/key.sh"
 source "$TOOLS_HOME/lib/doctor.sh"
 # shellcheck source=lib/tools/describe.sh
 source "$TOOLS_HOME/lib/tools/describe.sh"
+# shellcheck source=lib/tools/engine.sh
+source "$TOOLS_HOME/lib/tools/engine.sh"
 
 TOOL_NAMES=()
 for file in "$TOOLS_HOME/bin"/*; do
@@ -85,6 +87,12 @@ describe_spec() {
     desc_effect local_write
     desc_pos target +optional "{all,completions,readme}" -- "Generated surface (default: all)"
     desc_opt --check -- "Fail when generated files are stale; do not write"
+
+    desc_cmd bump-engine -- "Re-lock severino-vault-engine in both MCP consumers and reinstall their uv tools"
+    desc_effect local_write +network
+    desc_opt --lock-only -- "Update the uv.lock files but skip the uv tool reinstalls"
+    desc_para "The one flow for moving the MCP fleet to a newer vault-engine: each consumer (severino-vault-mcp, severino-edu-mcp) gets 'uv lock --upgrade-package severino-vault-engine', then its uv tool reinstalled so the running servers match the new pin. The lock edits are left uncommitted — ship each consumer repo's bump through its own PR flow. 'tools doctor' gates the invariant this maintains: both consumers pin the same engine commit (engine lock parity)."
+    desc_example "tools bump-engine" -- "move both MCPs to the engine's current main and reinstall"
 
     desc_env TOOLS_HOME        -- "Read from ~/.zshrc; root of this repo"
     desc_env TOOLS_INSTALL_DIR -- "Override install target (default: ~/.local/bin)"
@@ -281,6 +289,25 @@ cmd_doctor() {
         drifted) check "cordon schema" 0 "drifted from $CORDON_CANONICAL — re-vendor it" || fail=1 ;;
         absent)  check_warn "cordon schema" "cordon repo not found (set CORDON_HOME) — can't verify vendored copy" ;;
     esac
+
+    # Both vault-engine consumers must pin the SAME engine commit — skew means
+    # a schema/core change reached one MCP and not the other silently. The
+    # consumer list and lock parse live in lib/tools/engine.sh, shared with
+    # `tools bump-engine` (the fix this check points at).
+    local -a engine_repos=()
+    local engine_repo engine_pin_a engine_pin_b
+    while IFS= read -r engine_repo; do engine_repos+=("$engine_repo"); done < <(engine_consumers)
+    if [[ ! -f "${engine_repos[0]}/uv.lock" || ! -f "${engine_repos[1]}/uv.lock" ]]; then
+        check_warn "engine lock parity" "uv.lock not found for both MCP consumers — parity not checked"
+    else
+        engine_pin_a="$(engine_lock_pin "${engine_repos[0]}")"
+        engine_pin_b="$(engine_lock_pin "${engine_repos[1]}")"
+        if [[ -n "$engine_pin_a" && "$engine_pin_a" == "$engine_pin_b" ]]; then
+            check "engine lock parity" 1 "both MCPs pin severino-vault-engine $engine_pin_a"
+        else
+            check "engine lock parity" 0 "$(basename "${engine_repos[0]}") pins ${engine_pin_a:-nothing}, $(basename "${engine_repos[1]}") pins ${engine_pin_b:-nothing} — run: tools bump-engine" || fail=1
+        fi
+    fi
 
     # Symlinks in install dir (top-level tools + lib helpers)
     for name in "${TOOL_NAMES[@]}"; do
@@ -934,6 +961,53 @@ cmd_key() {
     esac
 }
 
+# ---------- bump-engine (move the vault-engine consumer fleet together) ----------
+# Consumer list + lock parse live in lib/tools/engine.sh, shared with the
+# doctor's "engine lock parity" check — one definition, two faces.
+
+cmd_bump_engine() {
+    local lock_only=0 uv="${UV_BIN:-uv}"
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --lock-only) lock_only=1 ;;
+            *) die_unknown option "$1" bump-engine ;;
+        esac
+        shift
+    done
+    command -v "$uv" >/dev/null || die "error" "uv not installed"
+    local -a repos=()
+    local repo name before after changed=0
+    while IFS= read -r repo; do repos+=("$repo"); done < <(engine_consumers)
+    for repo in "${repos[@]}"; do
+        name="$(basename "$repo")"
+        [[ -f "$repo/uv.lock" ]] || die "error" "no uv.lock at $repo (set MCP_HOME / EDU_MCP_HOME)"
+        before="$(engine_lock_pin "$repo")"
+        msg "$DIM" "step" "$name: uv lock --upgrade-package severino-vault-engine"
+        (cd "$repo" && "$uv" lock --upgrade-package severino-vault-engine)
+        after="$(engine_lock_pin "$repo")"
+        if [[ "$after" == "$before" ]]; then
+            msg "$GREEN" "ok" "$name already pins ${after:-nothing}"
+        else
+            msg "$GREEN" "bumped" "$name: ${before:-nothing} -> $after"
+            changed=1
+        fi
+        if (( ! lock_only )); then
+            msg "$DIM" "step" "$name: uv tool install --reinstall ."
+            (cd "$repo" && "$uv" tool install --reinstall .)
+        fi
+    done
+    local pin_a pin_b
+    pin_a="$(engine_lock_pin "${repos[0]}")"
+    pin_b="$(engine_lock_pin "${repos[1]}")"
+    if [[ "$pin_a" != "$pin_b" ]]; then
+        die "error" "consumers still disagree after the bump: ${pin_a:-nothing} vs ${pin_b:-nothing}" 1
+    fi
+    if (( changed )); then
+        msg "$YELLOW" "note" "uv.lock changed — ship each consumer repo's lock bump through its own PR flow"
+    fi
+    msg "$GREEN" "engine" "both consumers pin severino-vault-engine ${pin_a:-nothing}"
+}
+
 # All help + the machine surface render from the one spec via the shared
 # intercept (main `-h`, `--describe`, focused `<cmd> -h`) — so even
 # `tools status -h` / `tools install -h` render help instead of acting.
@@ -949,5 +1023,6 @@ case "${1:-}" in
     describe)      shift; cmd_describe "$@" ;;
     tui)           shift; cmd_describe --tui "$@" ;;
     generate)      shift; cmd_generate "$@" ;;
+    bump-engine)   shift; cmd_bump_engine "$@" ;;
     *)             die_unknown command "$1" ;;
 esac

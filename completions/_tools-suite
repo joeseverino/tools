@@ -19,6 +19,7 @@ _tools_suite_contract() {
         'describe:Emit the command surface of every tool as one JSON document (the emit-once contract)'
         'tui:Open the full-screen command-surface explorer (shorthand for '\''describe --tui'\'')'
         'generate:Regenerate contract-derived completions and README reference/inventory'
+        'bump-engine:Re-lock severino-vault-engine in both MCP consumers and reinstall their uv tools'
       )
       _arguments -C \
         '(-h --help)'{-h,--help}'[show help]' \
@@ -36,6 +37,7 @@ _tools_suite_contract() {
             describe) _arguments '1:Describe just one tool (delegates to <tool> --describe):' '2:With a tool, project its contract to one command — the token-minimal AI path (tools describe hq restart):' '--pretty[Indent the JSON for reading (default: compact, diff-stable)]' '--repos[Also fold in sibling repos'\'' emitters (severino-vault-mcp)]' '--tui[Browse the whole toolchain in a full-screen explorer (aggregate only; / filters, Enter copies an invocation). Shorthand: '\''tools tui'\'']' ;;
             tui) _arguments '--repos[Also fold in sibling repos'\'' emitters (severino-vault-mcp)]' ;;
             generate) _arguments '1:Generated surface (default: all):(all completions readme)' '--check[Fail when generated files are stale; do not write]' ;;
+            bump-engine) _arguments '--lock-only[Update the uv.lock files but skip the uv tool reinstalls]' ;;
           esac
           ;;
       esac
