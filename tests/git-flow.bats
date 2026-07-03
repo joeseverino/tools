@@ -59,6 +59,25 @@ advance_origin() {
     [ "$(git_branch_state main)" = "zombie" ]
 }
 
+# The start-cut home: no unique commits YET, but the work rides uncommitted at
+# base tip — ship must commit HERE, not recut ship/* and strand the branch.
+@test "git_branch_state: a start-cut branch (dirty, at base tip) is current" {
+    setup_flow
+    git checkout -q -b feat/start-cut origin/main
+    printf 'wip\n' > wip.txt
+    [ "$(git_branch_state main)" = "current" ] \
+        && [ "$(git_target_branch main)" = "feat/start-cut" ]
+}
+
+# A dirty tree does NOT rescue a true zombie: behind base ⇒ still recut.
+@test "git_branch_state: a dirty branch behind base is still a zombie" {
+    setup_flow
+    git checkout -q -b feat/old origin/main
+    advance_origin
+    printf 'wip\n' > wip.txt
+    [ "$(git_branch_state main)" = "zombie" ]
+}
+
 @test "git_branch_state: an up-to-date feature branch with commits is current" {
     setup_flow
     git checkout -q -b feat/work origin/main
