@@ -37,39 +37,41 @@ equivalents in-tree.
 tools/
   bin/                   # public command surface
     # Core
-    tools       # Umbrella command for the personal CLI toolchain.
+    tools         # Umbrella command for the personal CLI toolchain.
     # Cryptography
-    encrypt     # Age-encrypt files to your public key; remove originals.
-    decrypt     # Age-decrypt .age files with your private key; restore originals.
-    open-age    # Decrypt a .age file to a temp file and open it in the default app.
+    encrypt       # Age-encrypt files to your public key; remove originals.
+    decrypt       # Age-decrypt .age files with your private key; restore originals.
+    open-age      # Decrypt a .age file to a temp file and open it in the default app.
     # Vault
-    inbox       # Quick-capture a note into the vault inbox.
-    vault       # Operations on the vault git repo.
+    inbox         # Quick-capture a note into the vault inbox.
+    vault         # Operations on the vault git repo.
     # Backup
-    backup      # Mirror the items in config/backup.sh into $BACKUPS_HOME.
+    backup        # Mirror the items in config/backup.sh into $BACKUPS_HOME.
     # Diagnostics
-    dns-test    # Compare DNS resolver latency across paths.
+    dns-test      # Compare DNS resolver latency across paths.
     # Drift guards
-    ts-acl      # Fetch the live Tailscale ACL policy and diff it against the vault cache.
-    cf-dns      # Fetch the live Cloudflare DNS records and diff them against the vault cache.
-    adguard     # Fetch the live AdGuard Home DNS rewrites and diff them against the vault cache.
-    nginx       # Fetch the live Nginx Proxy Manager proxy hosts and diff them against the vault cache.
+    ts-acl        # Fetch the live Tailscale ACL policy and diff it against the vault cache.
+    cf-dns        # Fetch the live Cloudflare DNS records and diff them against the vault cache.
+    adguard       # Fetch the live AdGuard Home DNS rewrites and diff them against the vault cache.
+    nginx         # Fetch the live Nginx Proxy Manager proxy hosts and diff them against the vault cache.
     # Integrations
-    hq          # Sync vault frontmatter to Severino HQ, plus routine HQ deployment ops.
-    site        # Public jseverino.com Astro site workflow.
-    brand       # Render Joe's brand kits via the branding-engine.
+    hq            # Sync vault frontmatter to Severino HQ, plus routine HQ deployment ops.
+    site          # Public jseverino.com Astro site workflow.
+    brand         # Render Joe's brand kits via the branding-engine.
     # Authoring
-    remember    # Write a Claude memory file + MEMORY.md index entry in one shot.
-    doc-to-pdf  # Render a Markdown file (with Mermaid) to PDF via local Chromium, offline.
-    diagram     # Render Mermaid .mmd sources to neighboring PNG files.
+    remember      # Write a Claude memory file + MEMORY.md index entry in one shot.
+    doc-to-pdf    # Render a Markdown file (with Mermaid) to PDF via local Chromium, offline.
+    diagram       # Render Mermaid .mmd sources to neighboring PNG files.
     # Workspace
-    repos       # Fleet inventory of every repo under ~/Documents/Code.
-    brief       # One emit-once snapshot of repos, vault, and writeups.
-    start       # Begin new work on a fresh branch off the default branch.
-    ship        # Commit, push, and PR pending work — one repo, or the whole fleet.
-    land        # Merge a green PR and delete its branch — the merge beat of the loop.
-    resync      # Reconcile local repos with the remote after merging PRs on GitHub.
-    backlog     # The fleet backlog — a thin client over the vault MCP's task brain.
+    repos         # Fleet inventory of every repo under ~/Documents/Code.
+    brief         # One emit-once snapshot of repos, vault, and writeups.
+    start         # Begin new work on a fresh branch off the default branch.
+    ship          # Commit, push, and PR pending work — one repo, or the whole fleet.
+    land          # Merge a green PR and delete its branch — the merge beat of the loop.
+    resync        # Reconcile local repos with the remote after merging PRs on GitHub.
+    backlog       # The fleet backlog — a thin client over the vault MCP's task brain.
+    # Other
+    gate-preview  # See a cordon change's blast radius: run the engine across every gated repo before merging it.
   .github/               # CI workflows and repository automation
   archive/               # retired scripts kept for reference
   bench/                 # measured claims asserted in CI
@@ -807,6 +809,27 @@ backlog stale  # open/active tasks untouched > 14 days
 backlog --project tools --json  # machine-read every tools task
 backlog add "Fix the bats PATH trap" --project tools --effort S  # capture a task
 backlog close backlog-cli  # mark it done (stamps closed:)
+```
+
+#### `gate-preview`
+
+See a cordon change's blast radius: run the engine across every gated repo before merging it.
+
+Answers 'what turns red if this cordon change ships?' before it ships. Every fleet repo carrying a gate (a cordon.checks.json or scripts/check.sh) gets the named engine run over it with --json, and the verdicts land in one table: repo, ok, and the failed check ids. Repos are discovered from repos --json (the one read surface), so the preview and the cockpit can't disagree about what the fleet is. The engine runs read-only (never --fix); a red row here is a red gate after merge.
+
+Usage: `gate-preview`
+
+| Argument | Description |
+|---|---|
+| `--cordon <DIR>` | Cordon checkout whose engine to run (default: $CORDON_HOME, else the sibling Assets/cordon) — point it at a branch worktree to preview a proposed check change |
+| `--json` | Machine-readable output: one object with a per-repo verdicts array |
+
+Effect: `read`
+
+**Examples**
+
+```sh
+gate-preview --cordon ~/wt/cordon-stricter-bats  # preview a branch's checks against the whole fleet
 ```
 <!-- END GENERATED CLI REFERENCE -->
 
