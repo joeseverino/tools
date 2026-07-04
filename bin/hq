@@ -80,7 +80,6 @@ describe_spec() {
     desc_pos year +optional             -- "Year to export (default: current year)"
     desc_pos format +optional "{md,json}" -- "Output format (default: md)"
     desc_env NOTES_HOME    -- "Vault root"
-    desc_env HQ_VAULT_DIRS -- "Colon-separated subdirs to index"
     desc_env HQ_SSH_HOST   -- "SSH alias of the HQ server"
     desc_env HQ_REMOTE_PATH -- "HQ checkout path on the server"
     desc_env HQ_LOCAL_PATH -- "Local HQ checkout"
@@ -99,7 +98,9 @@ build_manifest() {
     if [[ "$help" != *"hq-manifest"* ]]; then
         die "error" "installed severino-vault-mcp is outdated; run \`site reinstall-mcp\`"
     fi
-    severino-vault-mcp hq-manifest "$VAULT" "$HQ_VAULT_DIRS"
+    # Dir list is the MCP's to derive (indexed_dirs + slim content dirs) — the
+    # HQ_VAULT_DIRS second hand-kept copy is retired.
+    severino-vault-mcp hq-manifest "$VAULT"
 }
 
 cmd_manifest() {
@@ -285,7 +286,7 @@ with open(state, "w", encoding="utf-8") as fh:
         indent=2,
     )
     fh.write("\n")
-' "$tmp" "$state_file" "$VAULT" "$HQ_VAULT_DIRS" "$vault_head"
+' "$tmp" "$state_file" "$VAULT" "mcp-default" "$vault_head"
 }
 
 cmd_doctor() {
@@ -294,7 +295,7 @@ cmd_doctor() {
     # it for the structured report instead of re-walking the vault here.
     require_manifest_mcp
     local report
-    report="$(severino-vault-mcp hq-manifest "$VAULT" "$HQ_VAULT_DIRS" --report 2>/dev/null)" \
+    report="$(severino-vault-mcp hq-manifest "$VAULT" --report 2>/dev/null)" \
         || true
     [[ -n "$report" ]] \
         || die "error" "hq-manifest --report returned nothing; run \`site reinstall-mcp\`"
