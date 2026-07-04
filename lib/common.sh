@@ -225,8 +225,15 @@ print(s.get("manifest_sha256", ""), s.get("vault_dirs", ""),
     [[ -n "$sha" && -n "$dirs" && "$state_vault" == "$vault_path" ]] \
         || { echo "skip"; return 0; }
     local manifest
-    manifest="$(severino-vault-mcp hq-manifest "$vault_path" "$dirs" 2>/dev/null)" \
-        || { echo "skip"; return 0; }
+    # "mcp-default" records that the dir list is the MCP's derived default —
+    # replay the check the same way; an older state file still passes its list.
+    if [[ "$dirs" == "mcp-default" ]]; then
+        manifest="$(severino-vault-mcp hq-manifest "$vault_path" 2>/dev/null)" \
+            || { echo "skip"; return 0; }
+    else
+        manifest="$(severino-vault-mcp hq-manifest "$vault_path" "$dirs" 2>/dev/null)" \
+            || { echo "skip"; return 0; }
+    fi
     [[ -n "$manifest" ]] || { echo "skip"; return 0; }
     current="$(printf '%s\n' "$manifest" | shasum -a 256 | cut -d' ' -f1)"
     if [[ "$current" == "$sha" ]]; then
