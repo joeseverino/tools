@@ -100,6 +100,7 @@ header "ship" "$count"
 echo
 
 shipped=0
+skipped=0
 while IFS=$'\t' read -r name path branch uncommitted ahead has_remote; do
     [[ -n "$name" ]] || continue
 
@@ -134,7 +135,7 @@ while IFS=$'\t' read -r name path branch uncommitted ahead has_remote; do
             if ! newb="$(git_rebranch "$base" ship)"; then
                 printf '  %s%-10s%s %s\n' "$RED$BOLD" "skip" "$RESET" \
                     "$name: couldn't replay onto a fresh branch — a commit conflicts with already-merged work; rebase by hand: git rebase origin/$base"
-                exit 0
+                exit 3
             fi
             printf '  %s%-10s%s %s\n' "$DIM" "rebranch" "$RESET" "replayed onto $newb off origin/$base"
         else
@@ -146,10 +147,10 @@ while IFS=$'\t' read -r name path branch uncommitted ahead has_remote; do
                 printf '  %s%-12s%s %s\n' "$DIM" "" "$RESET" "shipping here would re-inherit work that may already be merged."
                 printf '  %s%-12s%s %s\n' "$DIM" "→ start" "$RESET" "start \"<slug>\"           (clean branch off origin/$base, then redo)"
                 printf '  %s%-12s%s %s\n' "$DIM" "→ replay" "$RESET" "ship${NAME:+ $NAME} --rebranch --go   (carry these commits onto a fresh branch)"
-                exit 0
+                exit 3
             elif (( tb != GIT_TARGET_OK )); then
                 printf '  %s%-10s%s %s\n' "$RED$BOLD" "skip" "$RESET" "$name: could not branch off origin/$base"
-                exit 0
+                exit 3
             fi
         fi
 
@@ -164,7 +165,7 @@ while IFS=$'\t' read -r name path branch uncommitted ahead has_remote; do
                 printf '  %s%-10s%s %s\n' "$DIM" "check" "$RESET" "$gate"
                 if ! eval "$gate"; then
                     printf '  %s%-10s%s %s\n' "$RED$BOLD" "skip" "$RESET" "$name: local gate failed — not pushed"
-                    exit 0
+                    exit 3
                 fi
             else
                 printf '  %s%-10s%s %s\n' "$DIM" "check" "$RESET" "$name: no local gate — pushing without one"
@@ -175,9 +176,12 @@ while IFS=$'\t' read -r name path branch uncommitted ahead has_remote; do
         # "iterate on an open PR" case) re-push it safely with --force-with-lease,
         # which refuses if the remote moved under us. ship only ever pushes its
         # own feature branches, so forcing here is correct, not dangerous.
+        # First attempt quiet; the fallback keeps its stderr so a real push
+        # failure lands in the terminal instead of vanishing behind /dev/null
+        # (the 2026-07-04 silent skips were double-silenced and undiagnosable).
         git_push_current 2>/dev/null \
-            || git push -q -u --force-with-lease origin HEAD 2>/dev/null \
-            || { printf '  %s%-10s%s %s\n' "$RED$BOLD" "skip" "$RESET" "$name: push failed (check gh auth / remote)"; exit 0; }
+            || git push -q -u --force-with-lease origin HEAD \
+            || { printf '  %s%-10s%s %s\n' "$RED$BOLD" "skip" "$RESET" "$name: push failed — see the error above"; exit 3; }
 
         if (( ! NOPR )); then
             title="${MSG:-$(git log -1 --format='%s' 2>/dev/null || true)}"
@@ -215,13 +219,18 @@ while IFS=$'\t' read -r name path branch uncommitted ahead has_remote; do
                 fi
             fi
         fi
-    )
-    shipped=$(( shipped + 1 ))
+    ) && rc=0 || rc=$?
+    case "$rc" in
+        0) shipped=$(( shipped + 1 )) ;;
+        3) skipped=$(( skipped + 1 )) ;;   # a skip is NOT a ship — say so
+        *) exit "$rc" ;;
+    esac
 done <<< "$plan"
 
 echo
 if (( GO )); then
     msg "$GREEN" "shipped" "$shipped repo(s)"
+    (( skipped > 0 )) && msg "$YELLOW" "skipped" "$skipped repo(s) — see the skip lines above"
     # Point at the next beat of the loop: the PR is open, land merges it once green.
     (( shipped > 0 )) && msg "$DIM" "next" "land${NAME:+ $NAME} once CI is green, then resync"
 else
