@@ -191,7 +191,7 @@ Umbrella command for the personal CLI toolchain.
 | `tools describe [tool] [command]` | `[tool]`<br>`[command]`<br>`--pretty`<br>`--repos`<br>`--tui` | `read` | Emit the command surface of every tool as one JSON document (the emit-once contract) |
 | `tools tui` | `--repos` | `read + interactive` | Open the full-screen command-surface explorer (shorthand for 'describe --tui') |
 | `tools generate [all|completions|readme]` | `[all\|completions\|readme]`<br>`--check` | `local_write` | Regenerate contract-derived completions and README reference/inventory |
-| `tools bump-engine` | `--lock-only` | `local_write + network` | Re-lock severino-vault-engine in both MCP consumers and reinstall their uv tools |
+| `tools bump-engine` | `--lock-only` | `local_write + network` | Re-lock severino-vault-engine in every consumer repo and reinstall their uv tools |
 
 **`tools describe` details**
 
@@ -208,7 +208,7 @@ The human tier of the emit-once contract: a two-pane explorer over every tool an
 
 **`tools bump-engine` details**
 
-The one flow for moving the MCP fleet to a newer vault-engine: each consumer (severino-vault-mcp, severino-edu-mcp) gets 'uv lock --upgrade-package severino-vault-engine', then its uv tool reinstalled so the running servers match the new pin. The lock edits are left uncommitted — ship each consumer repo's bump through its own PR flow. 'tools doctor' gates the invariant this maintains: both consumers pin the same engine commit (engine lock parity).
+The one flow for moving the fleet to a newer vault-engine: each consumer repo (the vault MCPs and the life CLI) gets 'uv lock --upgrade-package severino-vault-engine', then its uv tool reinstalled so the running servers match the new pin. The lock edits are left uncommitted — ship each consumer repo's bump through its own PR flow. 'tools doctor' gates the invariant this maintains: every consumer pins the same engine commit (engine lock parity).
 
 **Examples**
 
