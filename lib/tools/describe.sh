@@ -124,7 +124,7 @@ print(json.dumps(out, indent=2) if os.environ["TOOLS_DESC_PRETTY"] == "1" else j
 
         local siblings=""
         if (( repos )); then
-            local sib_bins=(severino-vault-mcp) sib_objs=() bin
+            local sib_bins=(severino-vault-mcp life) sib_objs=() bin
             for bin in "${sib_bins[@]}"; do
                 if command -v "$bin" >/dev/null 2>&1 \
                     && out=$("$bin" describe 2>/dev/null) && [[ "$out" == \{* ]]; then
