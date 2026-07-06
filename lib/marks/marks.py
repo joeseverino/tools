@@ -129,6 +129,7 @@ def _note(doc_id, title, body_lines):
         "---",
         f"doc_id: {doc_id}",
         f"title: {title}",
+        "doc_type: resource",
         "---",
         "",
         f"# {title}",
@@ -190,7 +191,8 @@ def append_ledger(path, rel, items, today):
             text = f.read()
     else:
         text = "\n".join(
-            ["---", f"doc_id: {doc_id}", f"title: {title}", "---", "", f"# {title}", ""]
+            ["---", f"doc_id: {doc_id}", f"title: {title}", "doc_type: resource",
+             "---", "", f"# {title}", ""]
         ) + "\n"
 
     new = [i for i in _dedupe(items) if _md_url(i["url"]) not in _ledger_urls(text)]
