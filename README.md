@@ -45,6 +45,7 @@ tools/
     # Vault
     inbox         # Quick-capture a note into the vault inbox.
     vault         # Operations on the vault git repo.
+    marks         # Safari Reading List & bookmarks, mirrored into the Life vault.
     # Backup
     backup        # Mirror the items in config/backup.sh into $BACKUPS_HOME.
     # Diagnostics
@@ -324,6 +325,30 @@ Operations on the vault git repo.
 | `vault status` | — | `read + network` | Working tree, inbox count, remote sync state, and whether doc metadata changed since the last hq sync |
 | `vault inbox` | — | `read` | List notes currently in the inbox |
 | `vault daily` | `--date <DATE>` | `vault_write` | Populate the daily note's generated brief region from brief --json (work to ship, review-due docs, stale backlog, drafts) as Obsidian callouts — idempotent; never touches your free-capture area below the region |
+
+#### `marks`
+
+Safari Reading List & bookmarks, mirrored into the Life vault.
+
+Safari's own iCloud-synced Bookmarks.plist is the single source of truth — marks never writes to it (deleting and organizing stay in Safari, which keeps iCloud sync honest). 'marks sync' derives two surfaces in the Life vault: current notes (Reading List.md, Bookmarks.md — exact regenerated mirrors of what is in Safari right now) and append-only Archive ledgers that record every URL ever seen, deduped, under dated headings. Clean up in Safari, run 'marks sync', and the current notes shrink while the archive never forgets.
+
+Re-running sync with no Safari changes is a byte-identical no-op; sync metadata (last run, counts) lives in the state file, not in the notes. Bare 'marks' is 'marks status'.
+
+| Invocation | Arguments / options | Effect | Summary |
+|---|---|---|---|
+| `marks status` | `--json` | `read` | Counts in Safari vs archived in the vault, and the last sync |
+| `marks list <reading-list|bookmarks|favorites>` | `<reading-list\|bookmarks\|favorites>`<br>`--json` | `read` | One collection as it is in Safari right now |
+| `marks sync` | `--dry-run`<br>`--json` | `vault_write` | Regenerate the current notes and append new URLs to the Archive ledgers |
+| `marks export` | — | `read` | The canonical model (reading-list, bookmarks, favorites) as one JSON document |
+
+**Examples**
+
+```sh
+marks  # counts in Safari vs archived, and last sync
+marks sync  # refresh current notes, append new URLs to the ledgers
+marks list reading-list  # what's in Safari's Reading List right now
+marks export | jq '.favorites'  # the whole model as one JSON document
+```
 
 #### `backup`
 

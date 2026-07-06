@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# marks [status|list|sync|export] — Safari Reading List & bookmarks, mirrored
+# into the Life vault. Safari's iCloud-synced Bookmarks.plist is the single
+# source of truth (never written); lib/marks/marks.py is the one parser and
+# the one note writer. Current notes are regenerated mirrors; the Archive
+# ledgers only ever append (deduped by URL) — clean current, archives forever.
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" marks "$@"
+
+describe_spec() {
+    desc_tool "marks" "Safari Reading List & bookmarks, mirrored into the Life vault."
+    desc_inventory "Vault" 65
+    desc_leaf_commands
+    desc_synopsis "marks [status] | marks list <collection> | marks sync [--dry-run]"
+    desc_effect read
+    desc_para "Safari's own iCloud-synced Bookmarks.plist is the single source of truth — marks never writes to it (deleting and organizing stay in Safari, which keeps iCloud sync honest). 'marks sync' derives two surfaces in the Life vault: current notes (Reading List.md, Bookmarks.md — exact regenerated mirrors of what is in Safari right now) and append-only Archive ledgers that record every URL ever seen, deduped, under dated headings. Clean up in Safari, run 'marks sync', and the current notes shrink while the archive never forgets."
+    desc_para "Re-running sync with no Safari changes is a byte-identical no-op; sync metadata (last run, counts) lives in the state file, not in the notes. Bare 'marks' is 'marks status'."
+    desc_env LIFE_HOME   -- "Life vault root (default ~/Documents/Life)"
+    desc_env MARKS_DIR   -- "Derived-notes folder (default \$LIFE_HOME/Bookmarks)"
+    desc_env MARKS_PLIST -- "Safari plist to read (default ~/Library/Safari/Bookmarks.plist)"
+    desc_env MARKS_STATE -- "Sync-state JSON (default \$XDG_STATE_HOME/severino-tools/marks-sync.json)"
+    desc_example "marks" -- "counts in Safari vs archived, and last sync"
+    desc_example "marks sync" -- "refresh current notes, append new URLs to the ledgers"
+    desc_example "marks list reading-list" -- "what's in Safari's Reading List right now"
+    desc_example "marks export | jq '.favorites'" -- "the whole model as one JSON document"
+
+    desc_cmd status -- "Counts in Safari vs archived in the vault, and the last sync"
+    desc_effect read
+    desc_opt --json -- "Machine-readable output"
+
+    desc_cmd list -- "One collection as it is in Safari right now"
+    desc_effect read
+    desc_pos collection "{reading-list,bookmarks,favorites}" -- "Which Safari collection to list"
+    desc_opt --json -- "Machine-readable output"
+
+    desc_cmd sync -- "Regenerate the current notes and append new URLs to the Archive ledgers"
+    desc_effect vault_write
+    desc_opt --dry-run -- "Report what would change without writing"
+    desc_opt --json -- "Machine-readable summary"
+
+    desc_cmd export -- "The canonical model (reading-list, bookmarks, favorites) as one JSON document"
+    desc_effect read
+}
+
+desc_help_intercept "$@"
+
+run_marks() {
+    python3 "$TOOLS_HOME/lib/marks/marks.py" \
+        --plist "$MARKS_PLIST" --dir "$MARKS_DIR" --state "$MARKS_STATE" "$@"
+}
+
+cmd="${1:-status}"
+[[ $# -gt 0 ]] && shift
+
+case "$cmd" in
+    status|list|sync|export) run_marks "$cmd" "$@" ;;
+    *)                       die_unknown command "$cmd" ;;
+esac

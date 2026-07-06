@@ -7,7 +7,6 @@ setup() {
     export TEST_ROOT="$BATS_TEST_TMPDIR/hq-manifest"
     export TEST_BIN="$TEST_ROOT/bin"
     export NOTES_HOME="$TEST_ROOT/vault"
-    export HQ_VAULT_DIRS="03 Runbooks:05 Writeups"
     export HQ_SSH_HOST="unused"
     export HQ_REMOTE_PATH="/unused"
     export HQ_LOCAL_PATH="$TEST_ROOT/hq"
@@ -37,7 +36,7 @@ SH
 
     [ "$status" -eq 0 ]
     [ "$output" = '[{"doc_id":"rb-example"}]' ]
-    [ "$(cat "$MCP_ARGS_LOG")" = "hq-manifest $NOTES_HOME $HQ_VAULT_DIRS" ]
+    [ "$(cat "$MCP_ARGS_LOG")" = "hq-manifest $NOTES_HOME" ]
 }
 
 @test "hq manifest fails closed when the MCP is missing or outdated" {
