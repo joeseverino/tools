@@ -15,6 +15,12 @@ cordon_schema_status() {
     local vendored="$TOOLS_HOME/schemas/cordon-v4.json"
     CORDON_CANONICAL="${CORDON_HOME:-$TOOLS_HOME/../cordon}/schema/cordon-v4.json"
     if [[ ! -f "$CORDON_CANONICAL" ]]; then
+        # No checkout — fall back to the pinned npm package (devDependency
+        # cordon-spec), so the check verifies on any machine and in CI instead
+        # of soft-warning. CORDON_PKG_SCHEMA is the test seam.
+        CORDON_CANONICAL="${CORDON_PKG_SCHEMA:-$TOOLS_HOME/node_modules/cordon-spec/schema/cordon-v4.json}"
+    fi
+    if [[ ! -f "$CORDON_CANONICAL" ]]; then
         CORDON_STATUS="absent"
     elif cmp -s "$vendored" "$CORDON_CANONICAL"; then
         CORDON_STATUS="synced"
