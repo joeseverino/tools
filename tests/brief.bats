@@ -122,3 +122,39 @@ assert pr["green-app"]["review"]=="approved", pr
     [ "$status" -eq 0 ]
     grep -qF 'nothing recorded yet' <<<"$output" && ! grep -q 'Commits' <<<"$output"
 }
+
+@test "a plugged section folds into digest, briefing, and the next block" {
+    setup_brief_fleet
+    cat > "$BATS_TEST_TMPDIR/garden-brief" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' '{"name":"garden","lines":[{"label":"attention","value":"ferns need water (3d overdue)","warn":true},{"label":"beds","value":"4 planted"}],"next":[{"label":"water","value":"garden water   (1 needs attention)"}],"queue":[{"sev":88,"subject":"ferns 3d overdue","why":"water them","action":{"label":"water","cmd":"garden water","effect":"read"}}]}'
+SH
+    chmod +x "$BATS_TEST_TMPDIR/garden-brief"
+    export BRIEF_SECTION_EMITTERS="$BATS_TEST_TMPDIR/garden-brief"
+
+    run brief_bin --json
+    [ "$status" -eq 0 ]
+    OUTPUT="$output" python3 - <<'PY'
+import json, os
+d = json.loads(os.environ["OUTPUT"])
+(s,) = d["sections"]
+assert s["name"] == "garden" and s["queue"][0]["sev"] == 88
+PY
+
+    run brief_bin
+    [ "$status" -eq 0 ]
+    grep -qF "ferns need water (3d overdue)" <<<"$output" \
+        && grep -qF "garden water   (1 needs attention)" <<<"$output"
+}
+
+@test "absent or failing section emitters degrade to the classic briefing" {
+    setup_brief_fleet
+    export BRIEF_SECTION_EMITTERS="/nonexistent-emitter --json"
+    run brief_bin --json
+    [ "$status" -eq 0 ]
+    OUTPUT="$output" python3 - <<'PY'
+import json, os
+d = json.loads(os.environ["OUTPUT"])
+assert "sections" not in d
+PY
+}

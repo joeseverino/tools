@@ -7,9 +7,12 @@
 set -euo pipefail
 
 source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
+# Optional user-local section emitters (gitignored; see config/brief.sh.example).
+# shellcheck source=/dev/null
+[[ -f "$TOOLS_HOME/config/brief.sh" ]] && source "$TOOLS_HOME/config/brief.sh"
 
 describe_spec() {
-    desc_tool "brief" "One emit-once snapshot of repos, vault, and writeups."
+    desc_tool "brief" "One emit-once snapshot of repos, vault, writeups, and any plugged-in section."
     desc_inventory "Workspace" 200
     desc_leaf_commands
     desc_synopsis "brief [options] | brief tui [options]"
@@ -18,10 +21,11 @@ describe_spec() {
     desc_opt --json     -- "Machine-readable digest (one JSON object)"
     desc_opt --prs      -- "Include each repo's open PR (number, CI, review) and surface green PRs to land (network — folds in 'repos --prs', the one PR owner)"
     desc_opt --days DAYS -- "Vault recent-changes window in days (default 7)"
-    desc_para "Pure aggregator: it never re-implements a fact. Repo and PR state come from 'repos' (--prs folds in 'repos --prs', the one PR/CI owner — brief runs no gh of its own), and every vault fact (recent changes, docs to review, inbox) comes from 'severino-vault-mcp brief' and 'list-writeups' — the vault's one owner. Run 'brief' to orient at the start of a session, 'brief --json' to consume the whole workspace state in a single parse, or 'brief tui' for the interactive cockpit. The 'next' block names the loop verbs from that one classification: ship (dirty), land (green PR, with --prs), resync (merged)."
+    desc_para "Pure aggregator: it never re-implements a fact. Repo and PR state come from 'repos' (--prs folds in 'repos --prs', the one PR/CI owner — brief runs no gh of its own), and every vault fact (recent changes, docs to review, inbox) comes from 'severino-vault-mcp brief' and 'list-writeups' — the vault's one owner. Additional surfaces plug in as sections: each command listed in BRIEF_SECTION_EMITTERS (config/brief.sh) emits one section document — name, labelled lines, ranked queue rows, next-verb entries — that brief renders generically; the emitter's own repo owns every word of its content. Run 'brief' to orient, 'brief --json' for one parse of everything, 'brief tui' for the cockpit. The 'next' block names the loop verbs from the one classification: ship (dirty), land (green PR, with --prs), resync (merged), plus whatever plugged sections contribute."
     desc_example "brief --prs" -- "morning orient with open-PR/CI state and the land verbs"
     desc_example "brief tui" -- "the interactive workspace cockpit"
     desc_env SVMC_BIN -- "Override the severino-vault-mcp binary (tests stub it)"
+    desc_env BRIEF_SECTION_EMITTERS -- "Section emitter commands, one per line (config/brief.sh)"
     desc_cmd tui -- "Open the workspace cockpit — a ranked queue of what needs you, run ship/land/resync"
     desc_effect remote_write +network +interactive
     desc_opt --days DAYS -- "Vault recent-changes window in days (default 7)"
@@ -62,8 +66,25 @@ fi
 # $NOTES_HOME so this never reads the MCP's own configured default vault.
 vault_json="$(svmc brief --days "$DAYS" 2>/dev/null || echo 'null')"
 writeups_json="$(svmc list-writeups --filter all 2>/dev/null || echo 'null')"
+# Pluggable sections: each command in BRIEF_SECTION_EMITTERS (one per line,
+# from config/brief.sh) emits ONE section document — {name, lines, queue,
+# next} — that brief renders generically. Domain semantics live entirely in
+# the emitter's own repo; this repo only knows the contract. A failing or
+# absent emitter degrades to nothing.
+sections_json="[]"
+if [[ -n "${BRIEF_SECTION_EMITTERS:-}" ]]; then
+    section_objs=""
+    while IFS= read -r emitter; do
+        [[ -z "$emitter" ]] && continue
+        # shellcheck disable=SC2086  # an emitter line is a command + its args
+        if out="$(eval $emitter 2>/dev/null)" && [[ "$out" == \{* ]]; then
+            section_objs+="${section_objs:+,}$out"
+        fi
+    done <<< "$BRIEF_SECTION_EMITTERS"
+    sections_json="[$section_objs]"
+fi
 
 mode="human"; (( JSON )) && mode="json"
-printf '{"repos":%s,"vault":%s,"writeups":%s}' \
-    "$repos_json" "$vault_json" "$writeups_json" \
+printf '{"repos":%s,"vault":%s,"writeups":%s,"sections":%s}' \
+    "$repos_json" "$vault_json" "$writeups_json" "$sections_json" \
     | node "$TOOLS_HOME/lib/brief/render.mjs" "$mode" "$PRS"

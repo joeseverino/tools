@@ -65,7 +65,7 @@ tools/
     diagram       # Render Mermaid .mmd sources to neighboring PNG files.
     # Workspace
     repos         # Fleet inventory of every repo under ~/Documents/Code.
-    brief         # One emit-once snapshot of repos, vault, and writeups.
+    brief         # One emit-once snapshot of repos, vault, writeups, and any plugged-in section.
     start         # Begin new work on a fresh branch off the default branch.
     ship          # Commit, push, and PR pending work — one repo, or the whole fleet.
     land          # Merge a green PR and delete its branch — the merge beat of the loop.
@@ -697,9 +697,9 @@ repos --prs --fetch --json  # the full honest snapshot: fresh behind/gone plus o
 
 #### `brief`
 
-One emit-once snapshot of repos, vault, and writeups.
+One emit-once snapshot of repos, vault, writeups, and any plugged-in section.
 
-Pure aggregator: it never re-implements a fact. Repo and PR state come from 'repos' (--prs folds in 'repos --prs', the one PR/CI owner — brief runs no gh of its own), and every vault fact (recent changes, docs to review, inbox) comes from 'severino-vault-mcp brief' and 'list-writeups' — the vault's one owner. Run 'brief' to orient at the start of a session, 'brief --json' to consume the whole workspace state in a single parse, or 'brief tui' for the interactive cockpit. The 'next' block names the loop verbs from that one classification: ship (dirty), land (green PR, with --prs), resync (merged).
+Pure aggregator: it never re-implements a fact. Repo and PR state come from 'repos' (--prs folds in 'repos --prs', the one PR/CI owner — brief runs no gh of its own), and every vault fact (recent changes, docs to review, inbox) comes from 'severino-vault-mcp brief' and 'list-writeups' — the vault's one owner. Additional surfaces plug in as sections: each command listed in BRIEF_SECTION_EMITTERS (config/brief.sh) emits one section document — name, labelled lines, ranked queue rows, next-verb entries — that brief renders generically; the emitter's own repo owns every word of its content. Run 'brief' to orient, 'brief --json' for one parse of everything, 'brief tui' for the cockpit. The 'next' block names the loop verbs from the one classification: ship (dirty), land (green PR, with --prs), resync (merged), plus whatever plugged sections contribute.
 
 | Invocation | Arguments / options | Effect | Summary |
 |---|---|---|---|

@@ -1,0 +1,18 @@
+# shellcheck shell=bash
+# brief.sh — user-local section emitters for `brief` (copy to config/brief.sh).
+#
+# Each line of BRIEF_SECTION_EMITTERS is one command; brief runs it and folds
+# its single JSON document in as a rendered section. The emitter owns every
+# word of its content (title lines, queue rows, next verbs) — this repo only
+# renders the contract:
+#
+#   { "name": "<section>",
+#     "lines": [ { "label": "...", "value": "...", "warn": true } ],
+#     "next":  [ { "label": "...", "value": "..." } ],
+#     "queue": [ { "sev": 88, "subject": "...", "why": "...",
+#                  "action": { "label": "...", "cmd": "...", "effect": "read",
+#                              "copy_only": false } } ] }
+#
+# A failing or absent emitter degrades to nothing.
+
+BRIEF_SECTION_EMITTERS=""

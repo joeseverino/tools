@@ -11,6 +11,9 @@ config/wp-static.sh
 # Optional local site workflow overrides — see config/site.sh.example.
 config/site.sh
 
+# User-local brief section emitters — see config/brief.sh.example.
+config/brief.sh
+
 # Automator .app bundles are user-specific and contain compiled stubs +
 # localization data. Adopters should build their own — see README.
 apps/
