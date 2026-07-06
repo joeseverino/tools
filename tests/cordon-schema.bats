@@ -8,7 +8,7 @@ load helpers
 
 # Run cordon_schema_status with a given CORDON_HOME, echo the resulting status.
 status_for() {
-    CORDON_HOME="$1" bash -c '
+    CORDON_HOME="$1" CORDON_PKG_SCHEMA="${2:-/nonexistent}" bash -c '
         source "$TOOLS_HOME/lib/common.sh"
         source "$TOOLS_HOME/lib/tools/describe.sh"
         cordon_schema_status
@@ -36,4 +36,9 @@ status_for() {
 @test "absent when the cordon repo is not found" {
     run status_for "$BATS_TEST_TMPDIR/nonexistent"
     [ "$output" = "absent" ]
+}
+
+@test "falls back to the pinned cordon-spec package when no checkout exists" {
+    run status_for "$BATS_TEST_TMPDIR/nonexistent" "$TOOLS_HOME/node_modules/cordon-spec/schema/cordon-v4.json"
+    [ "$status" -eq 0 ] && [ "$output" = "synced" ]
 }
