@@ -55,23 +55,25 @@ stub_uv() {
     [ "$status" -eq 0 ] && [ -z "$output" ]
 }
 
-@test "bump-engine --lock-only re-locks both consumers and reports parity" {
+@test "bump-engine --lock-only re-locks every consumer and reports parity" {
     write_lock "$BATS_TEST_TMPDIR/vault-mcp" "0.1.1" "b4f557e59fe0d4d1e5821bb3dbab49041c8e4bd9"
     write_lock "$BATS_TEST_TMPDIR/edu-mcp"   "0.1.1" "b4f557e59fe0d4d1e5821bb3dbab49041c8e4bd9"
+    write_lock "$BATS_TEST_TMPDIR/life"      "0.1.1" "b4f557e59fe0d4d1e5821bb3dbab49041c8e4bd9"
     stub_uv
-    MCP_HOME="$BATS_TEST_TMPDIR/vault-mcp" EDU_MCP_HOME="$BATS_TEST_TMPDIR/edu-mcp" \
+    MCP_HOME="$BATS_TEST_TMPDIR/vault-mcp" EDU_MCP_HOME="$BATS_TEST_TMPDIR/edu-mcp" LIFE_MCP_HOME="$BATS_TEST_TMPDIR/life" \
         run "$TOOLS_HOME/bin/tools" bump-engine --lock-only
     [ "$status" -eq 0 ] \
-        && grep -qF "both consumers pin severino-vault-engine 0.1.1 @b4f557e59fe0" <<<"$output" \
-        && [ "$(grep -c "lock --upgrade-package severino-vault-engine" "$UV_LOG")" -eq 2 ] \
+        && grep -qF "all 3 consumers pin severino-vault-engine 0.1.1 @b4f557e59fe0" <<<"$output" \
+        && [ "$(grep -c "lock --upgrade-package severino-vault-engine" "$UV_LOG")" -eq 3 ] \
         && ! grep -q "tool install" "$UV_LOG"
 }
 
 @test "bump-engine fails when the consumers still disagree after the bump" {
     write_lock "$BATS_TEST_TMPDIR/vault-mcp" "0.1.3" "fbf5db6b5ba43c99199f64e90c87f89bb74600c9"
     write_lock "$BATS_TEST_TMPDIR/edu-mcp"   "0.1.1" "b4f557e59fe0d4d1e5821bb3dbab49041c8e4bd9"
+    write_lock "$BATS_TEST_TMPDIR/life"      "0.1.1" "b4f557e59fe0d4d1e5821bb3dbab49041c8e4bd9"
     stub_uv
-    MCP_HOME="$BATS_TEST_TMPDIR/vault-mcp" EDU_MCP_HOME="$BATS_TEST_TMPDIR/edu-mcp" \
+    MCP_HOME="$BATS_TEST_TMPDIR/vault-mcp" EDU_MCP_HOME="$BATS_TEST_TMPDIR/edu-mcp" LIFE_MCP_HOME="$BATS_TEST_TMPDIR/life" \
         run "$TOOLS_HOME/bin/tools" bump-engine --lock-only
     [ "$status" -eq 1 ] && grep -qF "consumers still disagree" <<<"$output"
 }
@@ -79,8 +81,9 @@ stub_uv() {
 @test "bump-engine without --lock-only also reinstalls each uv tool" {
     write_lock "$BATS_TEST_TMPDIR/vault-mcp" "0.1.1" "b4f557e59fe0d4d1e5821bb3dbab49041c8e4bd9"
     write_lock "$BATS_TEST_TMPDIR/edu-mcp"   "0.1.1" "b4f557e59fe0d4d1e5821bb3dbab49041c8e4bd9"
+    write_lock "$BATS_TEST_TMPDIR/life"      "0.1.1" "b4f557e59fe0d4d1e5821bb3dbab49041c8e4bd9"
     stub_uv
-    MCP_HOME="$BATS_TEST_TMPDIR/vault-mcp" EDU_MCP_HOME="$BATS_TEST_TMPDIR/edu-mcp" \
+    MCP_HOME="$BATS_TEST_TMPDIR/vault-mcp" EDU_MCP_HOME="$BATS_TEST_TMPDIR/edu-mcp" LIFE_MCP_HOME="$BATS_TEST_TMPDIR/life" \
         run "$TOOLS_HOME/bin/tools" bump-engine
-    [ "$status" -eq 0 ] && [ "$(grep -c "tool install --reinstall ." "$UV_LOG")" -eq 2 ]
+    [ "$status" -eq 0 ] && [ "$(grep -c "tool install --reinstall ." "$UV_LOG")" -eq 3 ]
 }

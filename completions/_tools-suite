@@ -19,7 +19,7 @@ _tools_suite_contract() {
         'describe:Emit the command surface of every tool as one JSON document (the emit-once contract)'
         'tui:Open the full-screen command-surface explorer (shorthand for '\''describe --tui'\'')'
         'generate:Regenerate contract-derived completions and README reference/inventory'
-        'bump-engine:Re-lock severino-vault-engine in both MCP consumers and reinstall their uv tools'
+        'bump-engine:Re-lock severino-vault-engine in every consumer repo and reinstall their uv tools'
       )
       _arguments -C \
         '(-h --help)'{-h,--help}'[show help]' \
