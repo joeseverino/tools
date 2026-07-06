@@ -88,10 +88,10 @@ describe_spec() {
     desc_pos target +optional "{all,completions,readme}" -- "Generated surface (default: all)"
     desc_opt --check -- "Fail when generated files are stale; do not write"
 
-    desc_cmd bump-engine -- "Re-lock severino-vault-engine in both MCP consumers and reinstall their uv tools"
+    desc_cmd bump-engine -- "Re-lock severino-vault-engine in every consumer repo and reinstall their uv tools"
     desc_effect local_write +network
     desc_opt --lock-only -- "Update the uv.lock files but skip the uv tool reinstalls"
-    desc_para "The one flow for moving the MCP fleet to a newer vault-engine: each consumer (severino-vault-mcp, severino-edu-mcp) gets 'uv lock --upgrade-package severino-vault-engine', then its uv tool reinstalled so the running servers match the new pin. The lock edits are left uncommitted — ship each consumer repo's bump through its own PR flow. 'tools doctor' gates the invariant this maintains: both consumers pin the same engine commit (engine lock parity)."
+    desc_para "The one flow for moving the fleet to a newer vault-engine: each consumer repo (the vault MCPs and the life CLI) gets 'uv lock --upgrade-package severino-vault-engine', then its uv tool reinstalled so the running servers match the new pin. The lock edits are left uncommitted — ship each consumer repo's bump through its own PR flow. 'tools doctor' gates the invariant this maintains: every consumer pins the same engine commit (engine lock parity)."
     desc_example "tools bump-engine" -- "move both MCPs to the engine's current main and reinstall"
 
     desc_env TOOLS_HOME        -- "Read from ~/.zshrc; root of this repo"
@@ -290,23 +290,29 @@ cmd_doctor() {
         absent)  check_warn "cordon schema" "cordon repo not found (set CORDON_HOME) — can't verify vendored copy" ;;
     esac
 
-    # Both vault-engine consumers must pin the SAME engine commit — skew means
-    # a schema/core change reached one MCP and not the other silently. The
-    # consumer list and lock parse live in lib/tools/engine.sh, shared with
+    # Every vault-engine consumer must pin the SAME engine commit — skew means
+    # a schema/core change reached one consumer and not the others silently.
+    # The consumer list and lock parse live in lib/tools/engine.sh, shared with
     # `tools bump-engine` (the fix this check points at).
     local -a engine_repos=()
-    local engine_repo engine_pin_a engine_pin_b
+    local engine_repo engine_pin engine_first="" engine_skew=0 engine_missing="" engine_detail=""
     while IFS= read -r engine_repo; do engine_repos+=("$engine_repo"); done < <(engine_consumers)
-    if [[ ! -f "${engine_repos[0]}/uv.lock" || ! -f "${engine_repos[1]}/uv.lock" ]]; then
-        check_warn "engine lock parity" "uv.lock not found for both MCP consumers — parity not checked"
-    else
-        engine_pin_a="$(engine_lock_pin "${engine_repos[0]}")"
-        engine_pin_b="$(engine_lock_pin "${engine_repos[1]}")"
-        if [[ -n "$engine_pin_a" && "$engine_pin_a" == "$engine_pin_b" ]]; then
-            check "engine lock parity" 1 "both MCPs pin severino-vault-engine $engine_pin_a"
-        else
-            check "engine lock parity" 0 "$(basename "${engine_repos[0]}") pins ${engine_pin_a:-nothing}, $(basename "${engine_repos[1]}") pins ${engine_pin_b:-nothing} — run: tools bump-engine" || fail=1
+    for engine_repo in "${engine_repos[@]}"; do
+        if [[ ! -f "$engine_repo/uv.lock" ]]; then
+            engine_missing+="$(basename "$engine_repo") "
+            continue
         fi
+        engine_pin="$(engine_lock_pin "$engine_repo")"
+        engine_detail+="$(basename "$engine_repo") pins ${engine_pin:-nothing}, "
+        if [[ -z "$engine_first" ]]; then engine_first="$engine_pin"; fi
+        if [[ -z "$engine_pin" || "$engine_pin" != "$engine_first" ]]; then engine_skew=1; fi
+    done
+    if [[ -n "$engine_missing" ]]; then
+        check_warn "engine lock parity" "uv.lock not found for: ${engine_missing% }— parity not checked"
+    elif (( ! engine_skew )); then
+        check "engine lock parity" 1 "all ${#engine_repos[@]} consumers pin severino-vault-engine $engine_first"
+    else
+        check "engine lock parity" 0 "${engine_detail%, } — run: tools bump-engine" || fail=1
     fi
 
     # Symlinks in install dir (top-level tools + lib helpers)
@@ -980,7 +986,7 @@ cmd_bump_engine() {
     while IFS= read -r repo; do repos+=("$repo"); done < <(engine_consumers)
     for repo in "${repos[@]}"; do
         name="$(basename "$repo")"
-        [[ -f "$repo/uv.lock" ]] || die "error" "no uv.lock at $repo (set MCP_HOME / EDU_MCP_HOME)"
+        [[ -f "$repo/uv.lock" ]] || die "error" "no uv.lock at $repo (set MCP_HOME / EDU_MCP_HOME / LIFE_MCP_HOME)"
         before="$(engine_lock_pin "$repo")"
         msg "$DIM" "step" "$name: uv lock --upgrade-package severino-vault-engine"
         (cd "$repo" && "$uv" lock --upgrade-package severino-vault-engine)
@@ -996,16 +1002,20 @@ cmd_bump_engine() {
             (cd "$repo" && "$uv" tool install --reinstall .)
         fi
     done
-    local pin_a pin_b
-    pin_a="$(engine_lock_pin "${repos[0]}")"
-    pin_b="$(engine_lock_pin "${repos[1]}")"
-    if [[ "$pin_a" != "$pin_b" ]]; then
-        die "error" "consumers still disagree after the bump: ${pin_a:-nothing} vs ${pin_b:-nothing}" 1
+    local pin_first pin_this skew=0 detail=""
+    pin_first="$(engine_lock_pin "${repos[0]}")"
+    for repo in "${repos[@]}"; do
+        pin_this="$(engine_lock_pin "$repo")"
+        detail+="$(basename "$repo") pins ${pin_this:-nothing}, "
+        [[ "$pin_this" != "$pin_first" ]] && skew=1
+    done
+    if (( skew )); then
+        die "error" "consumers still disagree after the bump: ${detail%, }" 1
     fi
     if (( changed )); then
         msg "$YELLOW" "note" "uv.lock changed — ship each consumer repo's lock bump through its own PR flow"
     fi
-    msg "$GREEN" "engine" "both consumers pin severino-vault-engine ${pin_a:-nothing}"
+    msg "$GREEN" "engine" "all ${#repos[@]} consumers pin severino-vault-engine ${pin_first:-nothing}"
 }
 
 # All help + the machine surface render from the one spec via the shared

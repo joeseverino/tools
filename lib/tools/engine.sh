@@ -1,21 +1,24 @@
 # shellcheck shell=bash
 # engine.sh — the vault-engine consumer fleet seam.
 #
-# severino-vault-engine is the shared core behind both MCP servers; the
-# invariant is that every consumer's uv.lock pins the SAME engine commit, so
-# a schema/core change can never reach one MCP and not the other silently.
-# `tools bump-engine` moves the fleet together; the "engine lock parity"
-# check in `tools doctor` gates the invariant. Both read the consumer list
-# and the lock pin from here — one definition, two faces.
+# severino-vault-engine is the shared core behind every vault server and
+# CLI in the fleet; the invariant is that every consumer's uv.lock pins the
+# SAME engine commit, so a schema/core change can never reach one consumer
+# and not the others silently. `tools bump-engine` moves the fleet together;
+# the "engine lock parity" check in `tools doctor` gates the invariant. Both
+# read the consumer list and the lock pin from here — one definition, two
+# faces.
 
 # engine_consumers — print the consumer repo paths, one per line. Per-repo
-# env seams (MCP_HOME matches bin/site's; EDU_MCP_HOME is this file's) let
-# the bats suite point at fixtures, else the sibling checkouts resolve.
+# env seams (MCP_HOME matches bin/site's; EDU_MCP_HOME / LIFE_MCP_HOME are
+# this file's) let the bats suite point at fixtures, else the sibling
+# checkouts resolve.
 engine_consumers() {
     local code_home="${CODE_HOME:-$HOME/Documents/Code}"
     printf '%s\n' \
         "${MCP_HOME:-$code_home/Assets/severino-vault-mcp}" \
-        "${EDU_MCP_HOME:-$code_home/Assets/severino-edu-mcp}"
+        "${EDU_MCP_HOME:-$code_home/Assets/severino-edu-mcp}" \
+        "${LIFE_MCP_HOME:-$code_home/Assets/severino-life}"
 }
 
 # engine_lock_pin <repo> — print "<version> @<sha12>" for the locked
