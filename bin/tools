@@ -55,6 +55,7 @@ describe_spec() {
     desc_effect local_write
     desc_pos name     -- "Name of the new tool (creates bin/<name>)"
     desc_opt --drift  -- "Scaffold a drift-guard tool instead (show/diff/pull, with get_token/fetch_live/normalize + a config template)"
+    desc_opt --agent  -- "Scaffold a lightweight agent-facing tool that emits the versioned result envelope"
     desc_opt --verify -- "Generate derived surfaces and run the full non-benchmark check after scaffolding"
 
     desc_cmd install  -- "Create symlinks in \$INSTALL_DIR for every tool"
@@ -92,7 +93,7 @@ describe_spec() {
     desc_effect local_write +network
     desc_opt --lock-only -- "Update the uv.lock files but skip the uv tool reinstalls"
     desc_para "The one flow for moving the fleet to a newer vault-engine: each consumer repo (the vault MCPs and the life CLI) gets 'uv lock --upgrade-package severino-vault-engine', then its uv tool reinstalled so the running servers match the new pin. The lock edits are left uncommitted — ship each consumer repo's bump through its own PR flow. 'tools doctor' gates the invariant this maintains: every consumer pins the same engine commit (engine lock parity)."
-    desc_example "tools bump-engine" -- "move both MCPs to the engine's current main and reinstall"
+    desc_example "tools bump-engine" -- "move every declared engine consumer to current main and reinstall"
 
     desc_env TOOLS_HOME        -- "Read from ~/.zshrc; root of this repo"
     desc_env TOOLS_INSTALL_DIR -- "Override install target (default: ~/.local/bin)"
@@ -518,6 +519,12 @@ cmd_check() {
             printf '%s\n' "$err" | sed 's/^/    /'
             check "describe schema" 0 "validation errors above" || fail=1
         fi
+        if err=$(node "$TOOLS_HOME/lib/tools/validate-json.mjs" "$TOOLS_HOME/schemas/capabilities-v1.json" < "$TOOLS_HOME/config/capabilities.json" 2>&1); then
+            check "capability schema" 1 "fleet manifest valid"
+        else
+            printf '%s\n' "$err" | sed 's/^/    /'
+            check "capability schema" 0 "validation errors above" || fail=1
+        fi
         if err=$("$TOOLS_HOME/bin/tools" generate --check 2>&1); then
             check "generated surfaces" 1 "completions + README current"
         else
@@ -603,16 +610,18 @@ cmd_check() {
 # ---------- new (scaffold a tool with the house conventions) ----------
 
 cmd_new() {
-    local name="" drift=0 verify=0
+    local name="" drift=0 agent=0 verify=0
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --drift)    drift=1; shift ;;
+            --agent)    agent=1; shift ;;
             --verify)   verify=1; shift ;;
             -*)         die_unknown option "$1" new ;;
             *)          name="$1"; shift ;;
         esac
     done
-    [[ -n "$name" ]] || die "usage" "tools new <name> [--drift] [--verify] (try -h)" 2
+    [[ -n "$name" ]] || die "usage" "tools new <name> [--drift|--agent] [--verify] (try -h)" 2
+    (( drift + agent <= 1 )) || die "usage" "--drift and --agent are mutually exclusive" 2
     [[ "$name" =~ ^[a-z][a-z0-9-]*$ ]] || die "usage" "name must be lowercase letters, digits, dashes" 2
     local target="$TOOLS_HOME/bin/$name"
     [[ -e "$target" ]] && die "error" "bin/$name already exists"
@@ -632,6 +641,11 @@ process.stdin.on("end", () => {
 
     if (( drift )); then
         new_drift "$name" "$prefix" "$target" "$order" "$verify"
+        return 0
+    fi
+
+    if (( agent )); then
+        new_agent "$name" "$target" "$order" "$verify"
         return 0
     fi
 
@@ -683,6 +697,43 @@ EOF
     else
         msg "$DIM" "next" "2. tools generate && tools install"
         msg "$DIM" "next" "3. tools check"
+    fi
+    echo
+}
+
+new_agent() {
+    local name="$1" target="$2" order="$3" verify="${4:-0}"
+    cat > "$target" <<'EOF'
+#!/usr/bin/env bash
+# __NAME__ — lightweight agent-facing utility with a governed result envelope.
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/sdk.sh"
+
+describe_spec() {
+    desc_tool "__NAME__" "One-line description of __NAME__."
+    desc_inventory "Other" __ORDER__
+    desc_synopsis "__NAME__ [options]"
+    desc_effect read
+    desc_para "Emits the Severino Tools result-v1 envelope so agents and scripts receive stable success, error, warning, receipt, and next-action fields."
+}
+
+desc_help_intercept "$@"
+
+# Replace this payload with domain logic. For a failure:
+# result_error "invalid_input" "explain what was wrong" 0
+result_ok '{"message":"implement __NAME__"}'
+EOF
+    sed -i '' "s/__NAME__/$name/g" "$target"
+    sed -i '' "s/__ORDER__/$order/g" "$target"
+    chmod +x "$target"
+    echo
+    msg "$GREEN" "created" "bin/$name (agent result-v1 template)"
+    if (( verify )); then
+        cmd_generate all
+        cmd_check --no-bench
+    else
+        msg "$DIM" "next" "implement the handler, then tools generate && tools check"
     fi
     echo
 }

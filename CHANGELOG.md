@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Add the lightweight Tools SDK: narrow shell modules, argument-safe Node
+  process/JSON helpers, versioned result envelopes, and shared vault-governance
+  adapters. `common.sh` remains a compatibility aggregator.
+- Add a validated fleet capability manifest that derives sibling describe and
+  Brief emitters plus vault-engine consumers from one declaration.
+- Add `tools new --agent` for a Cordon-described result-v1 utility scaffold.
+- Bind `site manage` saves to the dashboard source fingerprint and route its MCP
+  calls through the shared Node adapter, preventing stale-session overwrites
+  when paired with severino-vault-mcp's stale-plan guard.
+
 ## [1.3.1](https://github.com/joeseverino/tools/compare/v1.3.0...v1.3.1) (2026-07-01)
 
 

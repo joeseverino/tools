@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.severino.dev/tools/result-v1.json",
+  "title": "Severino Tools Result v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["ok", "result_version", "data"],
+      "properties": {
+        "ok": { "const": true },
+        "result_version": { "const": 1 },
+        "data": {},
+        "warnings": { "type": "array", "items": { "type": "string" } },
+        "receipt": { "type": ["object", "null"] },
+        "next": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["ok", "result_version", "error"],
+      "properties": {
+        "ok": { "const": false },
+        "result_version": { "const": 1 },
+        "error": {
+          "type": "object",
+          "required": ["code", "message", "retryable"],
+          "properties": {
+            "code": { "type": "string", "minLength": 1 },
+            "message": { "type": "string", "minLength": 1 },
+            "retryable": { "type": "boolean" },
+            "details": {}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  ]
+}

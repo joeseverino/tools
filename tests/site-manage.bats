@@ -170,6 +170,7 @@ tui() { node "$TOOLS_HOME/lib/site/manage-tui.mjs"; }
     [[ "$output" == *"alpha: unpublish"* ]]
     [[ "$output" == *"saved"* ]]
     grep -q -- 'apply-writeup-plan.*"slug":"alpha".*"published":false' "$FAKE_MCP_LOG"
+    grep -q -- '"source_fingerprint":"fixture-source-123"' "$FAKE_MCP_LOG"
 }
 
 @test "replay: unfeaturing via f submits the complete featured order once" {

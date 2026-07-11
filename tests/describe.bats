@@ -374,6 +374,7 @@ o=json.load(sys.stdin)
 new=next(c for c in o["commands"] if c["name"] == "new")
 flags={flag for arg in new["args"] for flag in arg.get("flags", [])}
 assert "--verify" in flags
+assert "--agent" in flags
 '
 }
 

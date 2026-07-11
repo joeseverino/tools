@@ -71,9 +71,10 @@ writeups_json="$(svmc list-writeups --filter all 2>/dev/null || echo 'null')"
 # next} — that brief renders generically. Domain semantics live entirely in
 # the emitter's own repo; this repo only knows the contract. A failing or
 # absent emitter degrades to nothing.
-sections_json="[]"
+sections_json="$(node "$TOOLS_HOME/lib/tools/capabilities.mjs" run-all brief_section 2>/dev/null || echo '[]')"
 if [[ -n "${BRIEF_SECTION_EMITTERS:-}" ]]; then
-    section_objs=""
+    section_objs="${sections_json#[}"
+    section_objs="${section_objs%]}"
     while IFS= read -r emitter; do
         [[ -z "$emitter" ]] && continue
         # shellcheck disable=SC2086  # an emitter line is a command + its args

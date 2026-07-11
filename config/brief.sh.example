@@ -15,4 +15,5 @@
 #
 # A failing or absent emitter degrades to nothing.
 
+# shellcheck disable=SC2034 # Sourced configuration consumed by bin/brief.
 BRIEF_SECTION_EMITTERS=""

@@ -86,6 +86,15 @@ tools/
 ```
 <!-- END GENERATED REPO INVENTORY -->
 
+## Lightweight SDK
+
+This repository also supplies the shared command runtime for sibling repos,
+one-off scripts, and agent-generated utilities. Narrow shell and Node modules
+provide Cordon declarations, versioned result envelopes, safe process/JSON
+execution, and governed MCP adapters without importing domain logic. Start with
+[`docs/SDK.md`](docs/SDK.md), or run `tools new <name> --agent` for a conformant
+result-v1 scaffold.
+
 Layout rules, so the repo stays navigable as it grows:
 
 - **`bin/` is the public surface.** Exactly one executable per tool, no
@@ -185,7 +194,7 @@ Umbrella command for the personal CLI toolchain.
 | `tools status` | `--json` | `read + network` | One-screen health check across vault, inbox, backup, keys |
 | `tools doctor` | `--all`<br>`--live`<br>`--json` | `read + network` | Verify environment, deps, and installed symlinks |
 | `tools check` | `--no-bench`<br>`--ci` | `local_write` | Run the full CI suite locally: lint, tests, bench |
-| `tools new <name>` | `<name>`<br>`--drift`<br>`--verify` | `local_write` | Scaffold a new tool in bin/ with the house conventions |
+| `tools new <name>` | `<name>`<br>`--drift`<br>`--agent`<br>`--verify` | `local_write` | Scaffold a new tool in bin/ with the house conventions |
 | `tools install` | — | `local_write` | Create symlinks in $INSTALL_DIR for every tool |
 | `tools key [cache|forget|status|test]` | `[cache\|forget\|status\|test]` | `local_write + interactive` | Cache / forget / test the age key passphrase in Keychain |
 | `tools watch [enable|disable|status|run-now]` | `[enable\|disable\|status\|run-now]` | `local_write` | Manage the optional launchd auto-sync agent (off by default) |
@@ -214,7 +223,7 @@ The one flow for moving the fleet to a newer vault-engine: each consumer repo (t
 **Examples**
 
 ```sh
-tools bump-engine  # move both MCPs to the engine's current main and reinstall
+tools bump-engine  # move every declared engine consumer to current main and reinstall
 ```
 
 #### `encrypt`

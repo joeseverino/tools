@@ -7,6 +7,21 @@ from the code every session.
 
 Small bash/zsh/node tools that share one look and feel.
 
+## Reusable SDK boundary
+
+This repo is also the lightweight SDK for sibling CLIs, one-off scripts, and
+agent utilities. Stable public modules live under `lib/sdk/`; `common.sh` is a
+compatibility aggregator, not a destination for new domain helpers. Import the
+narrowest module possible. Shell commands use `lib/sdk.sh` when they need the
+Cordon runtime; Node commands use `process.mjs` / `result.mjs`; every vault CLI
+crossing uses `svmc.sh` or `svmc.mjs`.
+
+Generic structured output uses `schemas/result-v1.json`. Repository capabilities
+are declared once in `config/capabilities.json` and validated against
+`schemas/capabilities-v1.json`; do not add a new hardcoded sibling/consumer list.
+The actual repo fleet remains derived from `repos --json`. Full usage and
+extension rules: [`docs/SDK.md`](docs/SDK.md).
+
 ## Command-surface contract (`describe`)
 
 Every tool emits its command surface as one structured JSON document conforming
@@ -223,8 +238,9 @@ We own the MCP (`~/Documents/Code/Assets/severino-vault-mcp/`). Shell tools call
 it as a plain CLI — **don't** hand-edit vault frontmatter or shell out to `yq`;
 the MCP is the schema-validated, atomic writer.
 
-Every call goes through the shared **`svmc()`** wrapper in `lib/common.sh` (so
-every tool that sources `lib/init.sh` has it). It pins `SVMC_VAULT_PATH` to
+Every shell call goes through the shared **`svmc()`** adapter in
+`lib/sdk/svmc.sh` (also re-exported by `lib/common.sh` for compatibility), and
+Node consumers use `lib/sdk/svmc.mjs`. Both pin `SVMC_VAULT_PATH` to
 `$NOTES_HOME` AND names the binary in one place via `$SVMC_BIN` (the test seam),
 so a call site can neither read the MCP's own configured default vault nor dodge
 the hermetic stub:
@@ -233,9 +249,9 @@ the hermetic stub:
 svmc <subcommand> [args] [--pretty]     # bin/site, bin/backlog, bin/brief, …
 ```
 
-Add new call sites through `svmc`, never inline — an inline `severino-vault-mcp`
+Add new call sites through the matching adapter, never inline — an inline `severino-vault-mcp`
 call silently falls back to the MCP's own configured default vault (and bypasses
-`$SVMC_BIN`). One wrapper, every consumer (emit once, derive everywhere).
+`$SVMC_BIN`). One boundary, every consumer (emit once, derive everywhere).
 
 The console script is on PATH (`uv tool install`). Existing subcommands:
 `touch-reviewed <relative-path>` (set `last_reviewed` to today); the
