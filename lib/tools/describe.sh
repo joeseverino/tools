@@ -95,12 +95,16 @@ print(json.dumps(out, indent=2) if os.environ["TOOLS_DESC_PRETTY"] == "1" else j
         if (( repos )); then
             local obsidian_contract="${CODE_HOME:-$HOME/Documents/Code}/Projects/severino-obsidian/contract/obsidian-commands.json"
             sig=$({ cat "$TOOLS_HOME"/bin/* "$TOOLS_HOME"/lib/*.sh \
-                "$TOOLS_HOME"/lib/tools/describe.sh 2>/dev/null
+                "$TOOLS_HOME"/lib/sdk/*.sh "$TOOLS_HOME"/lib/tools/describe.sh \
+                "$TOOLS_HOME"/lib/tools/capabilities.mjs \
+                "$TOOLS_HOME"/lib/sdk/process.mjs \
+                "$TOOLS_HOME"/config/capabilities.json 2>/dev/null
                 [[ -r "$obsidian_contract" ]] && cat "$obsidian_contract"
             } | cksum) || sig=""
         else
             sig=$(cat "$TOOLS_HOME"/bin/* "$TOOLS_HOME"/lib/*.sh \
-                "$TOOLS_HOME"/lib/tools/describe.sh 2>/dev/null | cksum) || sig=""
+                "$TOOLS_HOME"/lib/sdk/*.sh "$TOOLS_HOME"/lib/tools/describe.sh \
+                2>/dev/null | cksum) || sig=""
         fi
         sig=${sig%% *}
     fi
@@ -124,18 +128,16 @@ print(json.dumps(out, indent=2) if os.environ["TOOLS_DESC_PRETTY"] == "1" else j
 
         local siblings=""
         if (( repos )); then
-            local sib_bins=(severino-vault-mcp life) sib_objs=() bin
-            for bin in "${sib_bins[@]}"; do
-                if command -v "$bin" >/dev/null 2>&1 \
-                    && out=$("$bin" describe 2>/dev/null) && [[ "$out" == \{* ]]; then
-                    sib_objs+=("$out")
-                fi
-            done
+            local capability_objs
+            capability_objs=$(node "$TOOLS_HOME/lib/tools/capabilities.mjs" run-all describe 2>/dev/null) \
+                || capability_objs="[]"
             local obsidian_contract="${CODE_HOME:-$HOME/Documents/Code}/Projects/severino-obsidian/contract/obsidian-commands.json"
             if [[ -r "$obsidian_contract" ]] && out=$(cat "$obsidian_contract") && [[ "$out" == \{* ]]; then
-                sib_objs+=("$out")
+                local capability_body="${capability_objs#[}"
+                capability_body="${capability_body%]}"
+                capability_objs="[${capability_body}${capability_body:+,}$out]"
             fi
-            siblings=$(printf ',"siblings":[%s]' "$(json_join "${sib_objs[@]:-}")")
+            siblings=$(printf ',"siblings":%s' "$capability_objs")
         fi
 
         body=$(printf '{"ok":true,"schema_version":%d,"repo":"tools","tools":[%s]%s}' \

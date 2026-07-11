@@ -14,11 +14,7 @@
 # this file's) let the bats suite point at fixtures, else the sibling
 # checkouts resolve.
 engine_consumers() {
-    local code_home="${CODE_HOME:-$HOME/Documents/Code}"
-    printf '%s\n' \
-        "${MCP_HOME:-$code_home/Assets/severino-vault-mcp}" \
-        "${EDU_MCP_HOME:-$code_home/Assets/severino-edu-mcp}" \
-        "${LIFE_MCP_HOME:-$code_home/Assets/severino-life}"
+    node "$TOOLS_HOME/lib/tools/capabilities.mjs" paths engine_consumer
 }
 
 # engine_lock_pin <repo> — print "<version> @<sha12>" for the locked

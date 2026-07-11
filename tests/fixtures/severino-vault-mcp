@@ -10,7 +10,7 @@ case "${1:-}" in
             printf '%s\n' "$*" >> "$FAKE_MCP_LOG"
         fi
         cat <<'JSON'
-{"ok":true,"writeups":[
+{"ok":true,"source_fingerprint":"fixture-source-123","writeups":[
  {"slug":"alpha","title":"Alpha Writeup","published":true,"featured":true,"featured_order":1,"published_at":"2026-01-01"},
  {"slug":"beta","title":"Beta Writeup","published":true,"featured":true,"featured_order":2,"published_at":"2026-02-01"},
  {"slug":"gamma","title":"Gamma Draft","published":false,"featured":false}
