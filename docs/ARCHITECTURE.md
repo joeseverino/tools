@@ -11,7 +11,7 @@ the contract that ties them together. House rules for editing live in
 | Dir | What |
 |---|---|
 | `bin/` | Exactly one executable per tool, nothing else. `tools install`, `tools describe`, `tools doctor`, and CI discover tools by globbing `bin/*`. |
-| `lib/` | Shared helpers flat (`common.sh`, `init.sh`, `key.sh`, `describe.sh`, `drift.sh`, `doctor.sh`, `tui.mjs`); tool-specific support under `lib/<tool>/`. |
+| `lib/` | Stable narrow SDK modules under `lib/sdk/`; `common.sh` as the compatibility aggregator; shared engines (`describe.sh`, `tui.mjs`); tool-specific support under `lib/<tool>/`. |
 | `config/` | Per-tool defaults from layout env vars. `*.example` are templates; their gitignored copies are user-specific. |
 | `schemas/` | Machine-enforced cross-tool contracts. Runtime verification inputs, not prose documentation. |
 | `tests/` | Hermetic bats suite — throwaway keys, tmpdirs, no Keychain. |
@@ -53,6 +53,19 @@ rejects missing metadata and duplicate positions. Every command also carries an
 **effect** — a blast-radius class an agent risk-gates on before running. See
 [`command-surface-contract.md`](command-surface-contract.md).
 
+## The reusable SDK substrate
+
+Tools' shared mechanics are a small SDK for this repo, sibling repos, one-off
+scripts, and agent utilities. Shell consumers import `lib/sdk/core.sh`,
+`lib/sdk/svmc.sh`, or `lib/sdk.sh`; Node consumers import `lib/sdk/process.mjs`,
+`result.mjs`, and `svmc.mjs`. Existing commands keep sourcing `common.sh`, which
+is now only a compatibility aggregator over those narrow modules.
+
+Structured utilities use the versioned `result-v1` envelope. Fleet capabilities
+(describe/brief emitters, engine consumers, schema and install surfaces) live in
+`config/capabilities.json` and are derived by `capabilities.mjs`; on-disk fleet
+state remains owned by `repos --json`. See [`SDK.md`](SDK.md).
+
 ## Safe AI tooling — the contract drives *and* guards the agent
 
 The same JSON that feeds the README and completions is what makes this toolchain
@@ -88,9 +101,9 @@ infra-dataset registry.
 ## The MCP boundary
 
 We own `severino-vault-mcp` but call it as a plain, schema-validated CLI — never
-hand-editing vault frontmatter or shelling out to `yq`. In `bin/site` every call
-goes through the `svmc()` wrapper (which sets `SVMC_VAULT_PATH`); elsewhere it is
-`SVMC_VAULT_PATH="$NOTES_HOME" severino-vault-mcp …`. The MCP is the one
+hand-editing vault frontmatter or shelling out to `yq`. Shell and Node callers
+go through `lib/sdk/svmc.sh` and `lib/sdk/svmc.mjs`, respectively; both set the
+vault path and binary override consistently. The MCP is the one
 canonical writer and the one canonical frontmatter schema (`hq schema`
 regenerates HQ's copy from it). It emits the **same `describe` contract** this
 repo defines (a subset + the shared `schema_version` and `effect`), so
