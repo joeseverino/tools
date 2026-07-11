@@ -117,3 +117,12 @@ site_bin() {
     [[ "$output" == *"TOOLS_ASSUME_YES=1"* ]]
     [ ! -f "$MCP_CALL_LOG" ]
 }
+
+@test "deploy command accepts the documented --yes bypass" {
+    export SITE_SKIP_MCP_DRIFT_CHECK=1
+
+    run site_bin land --yes
+
+    [ "$status" -ne 2 ]
+    [[ "$output" != *"set TOOLS_ASSUME_YES=1"* ]]
+}

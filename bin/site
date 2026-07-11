@@ -47,6 +47,10 @@ describe_spec() {
     desc_effect remote_write +network
     desc_opt --no-push      -- "Stop after the local build — no commit, no push, no PR (inspect the diff first)"
     desc_para "Gate every published writeup, hq sync, build + audits, commit the synced snapshot on the current branch (auto-branching off main when needed), push, then open or update the PR to main. Only the generated snapshot is committed; your code/config edits ride the same branch and PR once you commit them. Drafts stay in the vault and are never pushed. The PR carries CI and the Cloudflare preview; merge it with \`site land\` once both are green."
+    desc_cmd deps           -- "Absorb named Dependabot PR updates without unrelated direct-dependency drift"
+    desc_effect local_write +network
+    desc_pos pr +variadic   -- "Dependabot PR number(s) to absorb"
+    desc_para "Reads each PR's declared npm package and target version, updates only those packages, and fails closed if any other direct dependency moves. The original PRs remain open until the replacement lands; \`site reconcile\` closes superseded updates afterward."
     desc_cmd sign-security  -- "Clear-sign public/.well-known/security.txt with the security@ key"
     desc_effect local_write +interactive
     desc_cmd check-security -- "Verify signature, required fields, Expires, and WKD file"
@@ -92,7 +96,11 @@ describe_spec() {
     desc_cmd land           -- "Land the current branch's PR: confirm CI is green, squash-merge (signature-safe), wait for the deploy, then verify live"
     desc_effect deploy +network
     desc_pos slug +optional -- "Writeup slug to verify after the deploy; omit to verify every writeup the PR changed"
+    desc_opt --yes          -- "Run the deployment non-interactively"
     desc_para "Run after eyeballing the Cloudflare preview on the PR. Refuses to merge unless \`gh pr checks\` is all green, squash-merges (rebase strips SSH signatures, squash does not), deletes the branch, waits ~30s for the Cloudflare Pages rebuild, then runs the live checks. Requires the gh CLI."
+    desc_cmd reconcile      -- "Close stale security-expiry issues and Dependabot PRs already satisfied by main"
+    desc_effect remote_write +network
+    desc_opt --yes          -- "Apply reconciliations non-interactively"
     desc_cmd diagnose       -- "The collect-all gate: run every audit and report all failures in one pass"
     desc_effect read
     desc_delegate "the site repo's \`npm run diagnose\` — run it with --help for flags (--fast, --json)"
@@ -810,9 +818,14 @@ cmd_publish_all() {
         # exists first, so the message can still say opened vs updated;
         # git_open_or_update_pr returns the URL either way (--fill on create).
         local had_pr=""
-        had_pr="$(gh pr view --json url -q .url 2>/dev/null || true)"
+        had_pr="$("${GH_BIN:-gh}" pr view --json url -q .url 2>/dev/null || true)"
+        had_pr_body="$("${GH_BIN:-gh}" pr view --json body -q .body 2>/dev/null || true)"
         git_push_current
-        pr_url="$(git_open_or_update_pr main || true)"
+        pr_title="$(git log -1 --pretty=%s)"
+        pr_body="$(git_pr_body_summary main)"$'\n\n'"## Why"$'\n\n'"This change is published through the site workflow so code, the vault-synced snapshot, CI, and the Cloudflare preview stay on one reviewable branch."$'\n\n'"## Validation"$'\n\n'"- \`site publish\` completed the writeup gate, HQ sync, build, and audits."$'\n'"- CI and the Cloudflare preview must pass before \`site land\`."
+        update_pr_body=0
+        [[ -z "$had_pr_body" ]] && update_pr_body=1
+        pr_url="$(git_open_or_update_pr main "$pr_title" "$pr_body" "$update_pr_body" || true)"
         if [[ -n "$had_pr" ]]; then
             msg "$GREEN" "PR" "updated ${pr_url:-$had_pr}"
         else
@@ -820,6 +833,30 @@ cmd_publish_all() {
         fi
         msg "$DIM" "next" "check CI + the Cloudflare preview on the PR, then \`site land\`"
     )
+}
+
+cmd_deps() {
+    [[ "$#" -gt 0 ]] || { usage_command deps; return 0; }
+    require_site
+    command -v "${GH_BIN:-gh}" >/dev/null 2>&1 || die "error" "gh CLI not on PATH"
+    if ! GH_BIN="${GH_BIN:-gh}" node "$TOOLS_HOME/lib/site/deps-absorb.mjs" "$SITE_HOME" "$@"; then
+        git -C "$SITE_HOME" restore -- package.json package-lock.json
+        die "error" "dependency absorption failed; package files restored" 1
+    fi
+}
+
+cmd_reconcile() {
+    local yes=""
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+            --yes) yes=1; shift ;;
+            *) die_unknown flag "$1" reconcile ;;
+        esac
+    done
+    [[ -n "$yes" || -n "${TOOLS_ASSUME_YES:-}" ]] \
+        || die "blocked" "run \`site reconcile --yes\` to apply remote changes" 2
+    require_site
+    GH_BIN="${GH_BIN:-gh}" node "$TOOLS_HOME/lib/site/reconcile-github.mjs" "$SITE_HOME"
 }
 
 # Print writeup slugs touched across the given git diff range, one per line.
@@ -833,7 +870,13 @@ changed_writeup_slugs() {
 }
 
 cmd_land() {
-    local slug="${1:-}"
+    local slug=""
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+            --yes) shift ;;
+            *) [[ -z "$slug" ]] || die_unknown flag "$1" land; slug="$1"; shift ;;
+        esac
+    done
     require_site
     command -v gh >/dev/null 2>&1 || die "error" "gh CLI not on PATH"
     if [[ -n "$slug" && ! "$slug" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
@@ -847,7 +890,7 @@ cmd_land() {
         || die "error" "not on a PR branch (currently: ${branch:-detached HEAD}); checkout the branch whose PR you want to land"
 
     local pr_url
-    pr_url="$(gh pr view --json url -q .url 2>/dev/null || true)"
+    pr_url="$("${GH_BIN:-gh}" pr view --json url -q .url 2>/dev/null || true)"
     [[ -n "$pr_url" ]] || die "error" "no open PR for $branch — run \`site publish\` first"
 
     # Capture the writeups this PR changes before the branch is deleted.
@@ -867,7 +910,7 @@ cmd_land() {
     git_land || rc=$?
     if (( rc )); then
         if (( rc == 2 )); then
-            gh pr checks || true
+            "${GH_BIN:-gh}" pr checks || true
             die "error" "PR checks are not all green — wait for CI or fix failures, then re-run \`site land\`" 1
         fi
         die "error" "merge failed — check $pr_url" 1
@@ -876,6 +919,7 @@ cmd_land() {
 
     if [[ -z "$verify_slugs" ]]; then
         msg "$GREEN" "landed" "no writeup pages to verify (no writeup content changed)"
+        cmd_reconcile --yes
         return 0
     fi
 
@@ -895,6 +939,7 @@ cmd_land() {
     # Intentional splitting: one argument per slug.
     # shellcheck disable=SC2086
     msg "$GREEN" "landed" "live and verified:$(printf ' %s' $verify_slugs)"
+    cmd_reconcile --yes
 }
 
 cmd_release() {
@@ -1094,6 +1139,7 @@ case "${1:-}" in
     parity)         shift; run_npm check:parity "$@" ;;
     build)          shift; run_npm build "$@" ;;
     publish)        shift; cmd_publish_all "$@" ;;
+    deps)           shift; cmd_deps "$@" ;;
     sign-security)      shift; run_npm sign:security "$@" ;;
     check-security)     shift; run_npm check:security "$@" ;;
     scaffold-primer)    shift; run_npm scaffold:primer -- "$@" ;;
@@ -1107,6 +1153,7 @@ case "${1:-}" in
     manage)             shift; cmd_manage "$@" ;;
     verify)             shift; cmd_verify "$@" ;;
     land)               shift; cmd_land "$@" ;;
+    reconcile)          shift; cmd_reconcile "$@" ;;
     diagnose)           shift; run_npm diagnose -- "$@" ;;
     release)            shift; cmd_release "$@" ;;
     test)               shift; cmd_test "$@" ;;

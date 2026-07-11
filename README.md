@@ -502,6 +502,7 @@ Public jseverino.com Astro site workflow.
 | `site parity` | — | `read` | Assert vault Frontmatter Schema, Zod, and MCP agree on writeup fields |
 | `site build` | — | `local_write` | Run the full Astro build |
 | `site publish` | `--no-push` | `remote_write + network` | Open the PR: gate published writeups, hq sync, build + audits, commit the content snapshot, push the branch, open or update the PR to main |
+| `site deps <pr>...` | `<pr>...` | `local_write + network` | Absorb named Dependabot PR updates without unrelated direct-dependency drift |
 | `site sign-security` | — | `local_write + interactive` | Clear-sign public/.well-known/security.txt with the security@ key |
 | `site check-security` | — | `read` | Verify signature, required fields, Expires, and WKD file |
 | `site scaffold-primer` | Delegated: the site repo's `npm run scaffold:primer` — run it with --help for flags | `vault_write` | Scaffold a new 04 Reference/ primer with slim frontmatter |
@@ -514,7 +515,8 @@ Public jseverino.com Astro site workflow.
 | `site featured [slug] [target]` | `[slug]`<br>`[target]` | `vault_write` | Show the home-page featured order, or move one writeup and renumber automatically |
 | `site manage` | — | `vault_write + interactive` | Interactive manager: every writeup on one screen — reorder, feature, publish. Nothing written until you save |
 | `site verify <slug>` | `<slug>` | `read + network` | Post-publish live check: page status, OG image, tag pages, and home placement |
-| `site land [slug]` | `[slug]` | `deploy + network` | Land the current branch's PR: confirm CI is green, squash-merge (signature-safe), wait for the deploy, then verify live |
+| `site land [slug]` | `[slug]`<br>`--yes` | `deploy + network` | Land the current branch's PR: confirm CI is green, squash-merge (signature-safe), wait for the deploy, then verify live |
+| `site reconcile` | `--yes` | `remote_write + network` | Close stale security-expiry issues and Dependabot PRs already satisfied by main |
 | `site diagnose` | Delegated: the site repo's `npm run diagnose` — run it with --help for flags (--fast, --json) | `read` | The collect-all gate: run every audit and report all failures in one pass |
 | `site release <version>` | `<version>`<br>`--ship` | `deploy + network` | Bump package.json, run publish:check, commit + signed tag, push, create the GitHub release |
 | `site test` | `--visual`<br>`--ui`<br>`--update` | `local_write` | Run the Playwright end-to-end suite |
@@ -530,6 +532,10 @@ Public jseverino.com Astro site workflow.
 **`site publish` details**
 
 Gate every published writeup, hq sync, build + audits, commit the synced snapshot on the current branch (auto-branching off main when needed), push, then open or update the PR to main. Only the generated snapshot is committed; your code/config edits ride the same branch and PR once you commit them. Drafts stay in the vault and are never pushed. The PR carries CI and the Cloudflare preview; merge it with `site land` once both are green.
+
+**`site deps` details**
+
+Reads each PR's declared npm package and target version, updates only those packages, and fails closed if any other direct dependency moves. The original PRs remain open until the replacement lands; `site reconcile` closes superseded updates afterward.
 
 **`site publish-writeup` details**
 
