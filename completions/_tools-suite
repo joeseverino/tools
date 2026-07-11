@@ -236,6 +236,7 @@ _tools_suite_contract() {
         'parity:Assert vault Frontmatter Schema, Zod, and MCP agree on writeup fields'
         'build:Run the full Astro build'
         'publish:Open the PR: gate published writeups, hq sync, build + audits, commit the content snapshot, push the branch, open or update the PR to main'
+        'deps:Absorb named Dependabot PR updates without unrelated direct-dependency drift'
         'sign-security:Clear-sign public/.well-known/security.txt with the security@ key'
         'check-security:Verify signature, required fields, Expires, and WKD file'
         'scaffold-primer:Scaffold a new 04 Reference/ primer with slim frontmatter'
@@ -249,6 +250,7 @@ _tools_suite_contract() {
         'manage:Interactive manager: every writeup on one screen — reorder, feature, publish. Nothing written until you save'
         'verify:Post-publish live check: page status, OG image, tag pages, and home placement'
         'land:Land the current branch'\''s PR: confirm CI is green, squash-merge (signature-safe), wait for the deploy, then verify live'
+        'reconcile:Close stale security-expiry issues and Dependabot PRs already satisfied by main'
         'diagnose:The collect-all gate: run every audit and report all failures in one pass'
         'release:Bump package.json, run publish:check, commit + signed tag, push, create the GitHub release'
         'test:Run the Playwright end-to-end suite'
@@ -269,13 +271,15 @@ _tools_suite_contract() {
         args)
           case "${words[2]}" in
             publish) _arguments '--no-push[Stop after the local build — no commit, no push, no PR (inspect the diff first)]' ;;
+            deps) _arguments '*:Dependabot PR number(s) to absorb:' ;;
             publish-all) _arguments '--no-push[Stop after the local build — no commit, no push, no PR (inspect the diff first)]' ;;
             publish-writeup) _arguments '1:Writeup slug to highlight in the publish run:' ;;
             validate) _arguments '1:Writeup slug to gate-check:' '--draft[Tolerate the published / published_at blockers so a draft can be gate-checked mid-authoring]' ;;
             tech) _arguments '1:Filter by slug, label, or group (case-insensitive):' ;;
             featured) _arguments '1:Writeup to move; omit to print the current featured order:' '2:Destination: a slot number, or up | down | top | bottom | off:' ;;
             verify) _arguments '1:Writeup slug to verify on the live site:' ;;
-            land) _arguments '1:Writeup slug to verify after the deploy; omit to verify every writeup the PR changed:' ;;
+            land) _arguments '1:Writeup slug to verify after the deploy; omit to verify every writeup the PR changed:' '--yes[Run the deployment non-interactively]' ;;
+            reconcile) _arguments '--yes[Apply reconciliations non-interactively]' ;;
             release) _arguments '1:Target version, e.g. 1.4.0:' '--ship[Execute the release (dry-run prints the plan and stops without it)]' ;;
             test) _arguments '--visual[Run only the visual-regression specs]' '--ui[Open Playwright'\''s interactive UI mode]' '--update[Update the visual baselines]' ;;
             reinstall-mcp) _arguments '--yes[Run non-interactively; do not prompt before reinstalling]' '--editable[Install the MCP source checkout in editable mode for local development]' ;;

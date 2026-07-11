@@ -888,7 +888,7 @@ desc_help_intercept() {
     if (( _D_LEAF_COMMANDS )); then
         if [[ -n "${1:-}" ]] && _describe_has_command "$1"; then
             case "${2:-}" in -h|--help) usage_command "$1"; exit 0 ;; esac
-            desc_guard_effect "$1"
+            desc_guard_effect "$@"
         else
             desc_guard_effect ""
         fi
@@ -896,7 +896,7 @@ desc_help_intercept() {
     fi
     case "${1:-}" in ''|help) usage; exit 0 ;; esac
     case "${2:-}" in -h|--help) usage_command "$1"; exit 0 ;; esac
-    desc_guard_effect "$1"
+    desc_guard_effect "$@"
 }
 
 _describe_has_command() {
@@ -920,6 +920,7 @@ _describe_has_command() {
 # deploy command is gated the moment it declares its effect, with zero wiring.
 desc_guard_effect() {
     local cmd="$1"   # a command name for a subcommand tool, or "" = the leaf tool itself
+    shift || true
     # No spec means no declared effect (defaults to read) — nothing to gate. Also
     # keeps lib/drift.sh's hermetic test harness, which overrides usage() and
     # never declares describe_spec, working unchanged. `-f` not `-F`: zsh's `-F`
@@ -933,6 +934,10 @@ desc_guard_effect() {
     eff="${eff%%"$_DSEP"*}"
     [[ "$eff" == deploy ]] || return 0
     [[ -n "${TOOLS_ASSUME_YES:-}" ]] && return 0
+    local arg
+    for arg in "$@"; do
+        [[ "$arg" == "--yes" ]] && return 0
+    done
     if [[ ! -t 0 || ! -t 1 ]]; then
         die "blocked" "'$_D_NAME $cmd' is a deploy — set TOOLS_ASSUME_YES=1 to run non-interactively" 2
     fi
