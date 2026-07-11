@@ -9,9 +9,44 @@ load helpers
     [ "$status" -eq 0 ]
     [[ "$output" == *"valid: result-v1.json"* ]]
 
+    run bash -c 'source "$TOOLS_HOME/lib/sdk/core.sh"; result_ok '\''{"value":1}'\'' '\''["partial sync"]'\'' \
+      | node "$TOOLS_HOME/lib/tools/validate-json.mjs" "$TOOLS_HOME/schemas/result-v1.json"'
+    [ "$status" -eq 0 ]
+
     run bash -c 'source "$TOOLS_HOME/lib/sdk/core.sh"; result_error stale_plan "reload" 1 \
       | node "$TOOLS_HOME/lib/tools/validate-json.mjs" "$TOOLS_HOME/schemas/result-v1.json"'
     [ "$status" -eq 0 ]
+}
+
+@test "Node result SDK emits envelopes valid against the same schema" {
+    run bash -c 'node --input-type=module -e '\''
+      import { success, writeResult } from "./lib/sdk/result.mjs";
+      writeResult(success({ value: 1 }, { warnings: ["partial sync"] }));
+    '\'' | node "$TOOLS_HOME/lib/tools/validate-json.mjs" "$TOOLS_HOME/schemas/result-v1.json"'
+    [ "$status" -eq 0 ]
+
+    run bash -c 'node --input-type=module -e '\''
+      import { failure, writeResult } from "./lib/sdk/result.mjs";
+      writeResult(failure("stale_plan", "reload", { retryable: true }));
+    '\'' | node "$TOOLS_HOME/lib/tools/validate-json.mjs" "$TOOLS_HOME/schemas/result-v1.json"'
+    [ "$status" -eq 0 ]
+}
+
+@test "die_unknown degrades cleanly without the describe runtime" {
+    run bash -c 'source "$TOOLS_HOME/lib/sdk/core.sh"; die_unknown flag --nope'
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"unknown flag: --nope"* ]]
+    [[ "$output" != *"command not found"* ]]
+}
+
+@test "header takes an optional noun and pluralizes it" {
+    run bash -c 'source "$TOOLS_HOME/lib/sdk/core.sh"; header syncing 2 repo'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"syncing 2 repos"* ]]
+
+    run bash -c 'source "$TOOLS_HOME/lib/sdk/core.sh"; header archiving 1'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"archiving 1 file"* ]]
 }
 
 @test "Node process SDK parses JSON and reports invalid JSON" {

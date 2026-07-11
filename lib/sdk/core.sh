@@ -9,8 +9,15 @@ else
     BOLD=''; DIM=''; RESET=''; GREEN=''; RED=''; YELLOW=''
 fi
 
+# msg <color> <label> <body> — one status line: colored bold label in a
+# fixed-width column, then plain body.
 msg() { printf '  %s%-10s%s %s\n' "$1$BOLD" "$2" "$RESET" "$3"; }
 
+# die <label> <body> [<exit-code>], or die "<message>" (default "error" label —
+# without the 1-arg form a lone-arg call expands an unset $2 and crashes under
+# `set -u`). To stderr, always: a die inside a `x=$(some_fn)` caller must be
+# shown, not captured into the value (the silent set -e abort that bit the
+# drift guards). Callers never need `die … >&2`.
 die() {
     local label body code
     if (( $# >= 2 )); then label="$1"; body="$2"; code="${3:-1}"
@@ -20,19 +27,27 @@ die() {
     exit "$code"
 }
 
+# die_unknown <kind> <token> [<subcommand>] — the uniform usage error for an
+# unrecognized flag / command / value, SHOWING the valid surface rendered from
+# the tool's describe_spec so the fix is on screen. The renderers live in the
+# describe runtime (lib/sdk.sh); a consumer that sourced only core.sh still
+# gets the error line and exit 2, just without the rendered usage.
 die_unknown() {
     local kind="$1" token="$2" sub="${3:-}"
     echo
     msg "$RED" "usage" "unknown $kind: $token"
-    if [[ -n "$sub" ]]; then usage_command "$sub"; else usage; fi
+    if [[ -n "$sub" ]]; then typeset -f usage_command >/dev/null && usage_command "$sub"
+    else typeset -f usage >/dev/null && usage
+    fi
     exit 2
 }
 
+# header <verb> <count> [<noun>] — noun defaults to "file", pluralized with -s.
 header() {
-    local s=""
+    local noun="${3:-file}" s=""
     (( $2 == 1 )) || s="s"
     echo
-    printf '  %s%s%s %d file%s\n' "$BOLD" "$1" "$RESET" "$2" "$s"
+    printf '  %s%s%s %d %s%s\n' "$BOLD" "$1" "$RESET" "$2" "$noun" "$s"
     echo
 }
 
@@ -64,10 +79,13 @@ json_bool() { if (( $1 )); then printf 'true'; else printf 'false'; fi; }
 json_join() { local IFS=','; printf '%s' "$*"; }
 
 # Versioned result envelope for lightweight scripts and agent utilities.
-# data/details are pre-rendered JSON so callers never lose structured values.
+# data/warnings/receipt/next are pre-rendered JSON so callers never lose
+# structured values. The shape is pinned by schemas/result-v1.json;
+# lib/sdk/result.mjs is the Node face of the same envelope — change together.
 result_ok() {
-    local data="${1:-null}"
-    printf '{"ok":true,"result_version":1,"data":%s,"warnings":[],"receipt":null,"next":[]}\n' "$data"
+    local data="${1:-null}" warnings="${2:-[]}" receipt="${3:-null}" next="${4:-[]}"
+    printf '{"ok":true,"result_version":1,"data":%s,"warnings":%s,"receipt":%s,"next":%s}\n' \
+        "$data" "$warnings" "$receipt" "$next"
 }
 
 result_error() {

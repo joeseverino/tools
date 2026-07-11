@@ -63,8 +63,21 @@ setup() {
     [ "$status" -eq 2 ]
 }
 
-@test "missing memory dir is a clean error" {
-    run remember_bin user x "X" -b "body" --dir "$BATS_TEST_TMPDIR/nope"
+@test "first write creates a missing memory dir" {
+    run remember_bin user x "X" -b "body" --dir "$BATS_TEST_TMPDIR/fresh/memory"
+    [ "$status" -eq 0 ]
+    [ -f "$BATS_TEST_TMPDIR/fresh/memory/user_x.md" ]
+    grep -q "user_x.md" "$BATS_TEST_TMPDIR/fresh/memory/MEMORY.md"
+}
+
+@test "list and forget on a missing memory dir stay clean errors" {
+    run remember_bin --list --dir "$BATS_TEST_TMPDIR/nope"
     [ "$status" -ne 0 ]
     [[ "$output" == *"not found"* ]]
+    [ ! -d "$BATS_TEST_TMPDIR/nope" ]
+
+    run remember_bin --forget ghost --dir "$BATS_TEST_TMPDIR/nope"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"not found"* ]]
+    [ ! -d "$BATS_TEST_TMPDIR/nope" ]
 }
