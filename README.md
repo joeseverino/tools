@@ -71,6 +71,7 @@ tools/
     land          # Merge a green PR and delete its branch — the merge beat of the loop.
     resync        # Reconcile local repos with the remote after merging PRs on GitHub.
     backlog       # The fleet backlog — a thin client over the vault MCP's task brain.
+    repo          # Fleet entry as one verb — bootstrap a new repo from the baseline and register it everywhere.
     # Other
     gate-preview  # See a cordon change's blast radius: run the engine across every gated repo before merging it.
   .github/               # CI workflows and repository automation
@@ -834,6 +835,28 @@ backlog stale  # open/active tasks untouched > 14 days
 backlog --project tools --json  # machine-read every tools task
 backlog add "Fix the bats PATH trap" --project tools --effort S  # capture a task
 backlog close backlog-cli  # mark it done (stamps closed:)
+```
+
+#### `repo`
+
+Fleet entry as one verb — bootstrap a new repo from the baseline and register it everywhere.
+
+The fleet's front door. 'repo new' automates the cordon-starter README procedure end to end — copy the baseline, keep one emitter track, fresh git history, local guardrail hooks, initial commit, 'gh repo create', branch protection — then registers the repo in the vault project registry and HQ. 'repo register' is that registration half alone, for a repo that already exists on disk (the backfill path).
+
+Registration writes '01 Projects/<slug>/index.md' (frontmatter per the vault schema; skipped if it exists), upserts the HQ Project record via 'hq create project', and runs 'hq sync' so relations resolve immediately. One entry path means no repo can be on disk but invisible to the registry.
+
+| Invocation | Arguments / options | Effect | Summary |
+|---|---|---|---|
+| `repo new <slug>` | `<slug>`<br>`--root <R>`<br>`--track <T>`<br>`--name <NAME>`<br>`--category <CAT>`<br>`--description <TEXT>`<br>`--public`<br>`--local`<br>`--no-register`<br>`-n, --dry-run` | `remote_write` | Bootstrap a repo from the cordon-starter baseline, then register it |
+| `repo register <slug>` | `<slug>`<br>`--path <DIR>`<br>`--name <NAME>`<br>`--category <CAT>`<br>`--description <TEXT>`<br>`-n, --dry-run` | `remote_write` | Register an existing repo: vault project doc + HQ record + hq sync |
+
+**Examples**
+
+```sh
+repo new my-tool --description "One-liner for the docs"  # private bash-track repo in Projects/, registered
+repo new my-mcp --root assets --track node --category automation  # node-track repo in Assets/
+repo register screencasts --category automation  # backfill an existing repo into the registry
+repo new scratch --local --no-register -n  # dry-run a local-only scratch repo
 ```
 
 #### `gate-preview`

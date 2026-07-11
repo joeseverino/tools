@@ -1,0 +1,271 @@
+#!/usr/bin/env bash
+# repo new|register — fleet entry as one verb.
+#
+# Closes the unguarded seam at the front door of the fleet: repos that enter
+# by hand skip steps (severino-life, cordon-starter, screencasts, and actual
+# all reached disk with no vault project doc or HQ slug; severino-edu-mcp
+# shipped its first PR ungated). `new` bootstraps a repo from the
+# cordon-starter baseline — prune to one emitter track, fresh history, hooks,
+# initial commit, GitHub repo + branch protection — and then registers it the
+# same way `register` does for a repo that already exists: the
+# `01 Projects/<slug>/index.md` vault doc, the HQ project record, `hq sync`.
+# Entering the fleet IS registering; the registry mirrors the real fleet.
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
+
+describe_spec() {
+    desc_tool "repo" "Fleet entry as one verb — bootstrap a new repo from the baseline and register it everywhere."
+    desc_inventory "Workspace" 230
+    desc_leaf_commands
+    desc_synopsis "repo new <slug> [options] | repo register <slug> [options]"
+    desc_effect remote_write
+    desc_para "The fleet's front door. 'repo new' automates the cordon-starter README procedure end to end — copy the baseline, keep one emitter track, fresh git history, local guardrail hooks, initial commit, 'gh repo create', branch protection — then registers the repo in the vault project registry and HQ. 'repo register' is that registration half alone, for a repo that already exists on disk (the backfill path)."
+    desc_para "Registration writes '01 Projects/<slug>/index.md' (frontmatter per the vault schema; skipped if it exists), upserts the HQ Project record via 'hq create project', and runs 'hq sync' so relations resolve immediately. One entry path means no repo can be on disk but invisible to the registry."
+    desc_example "repo new my-tool --description \"One-liner for the docs\"" -- "private bash-track repo in Projects/, registered"
+    desc_example "repo new my-mcp --root assets --track node --category automation" -- "node-track repo in Assets/"
+    desc_example "repo register screencasts --category automation" -- "backfill an existing repo into the registry"
+    desc_example "repo new scratch --local --no-register -n" -- "dry-run a local-only scratch repo"
+
+    desc_cmd new -- "Bootstrap a repo from the cordon-starter baseline, then register it"
+    desc_effect remote_write
+    desc_opt --root R        -- "assets|projects — which Code root the repo lives under (default projects)"
+    desc_opt --track T       -- "bash|node — the emitter track to keep (default bash)"
+    desc_opt --name NAME     -- "Display name for the vault doc + HQ (default: slug, title-cased)"
+    desc_opt --category CAT  -- "HQ project category (default automation)"
+    desc_opt --description TEXT -- "One-liner for the vault doc + HQ entry"
+    desc_opt --public        -- "Create the GitHub repo public (default private)"
+    desc_opt --local         -- "Skip GitHub entirely — no gh create, no branch protection"
+    desc_opt --no-register   -- "Skip the vault doc + HQ registration"
+    desc_opt -n --dry-run    -- "Print the plan; touch nothing"
+    desc_pos slug            -- "kebab-case name — becomes the dir, the tool name, and the registry slug"
+
+    desc_cmd register -- "Register an existing repo: vault project doc + HQ record + hq sync"
+    desc_effect remote_write
+    desc_opt --path DIR      -- "Repo directory (default: \$CODE_HOME/Assets/<slug> then \$CODE_HOME/Projects/<slug>)"
+    desc_opt --name NAME     -- "Display name (default: slug, title-cased)"
+    desc_opt --category CAT  -- "HQ project category (default automation)"
+    desc_opt --description TEXT -- "One-liner for the vault doc + HQ entry"
+    desc_opt -n --dry-run    -- "Print the plan; touch nothing"
+    desc_pos slug            -- "The repo's registry slug (its directory name)"
+
+    desc_env CODE_HOME    -- "Roots the Code tree (~/.zshrc); repos live in Assets/ or Projects/"
+    desc_env NOTES_HOME   -- "The vault root — 01 Projects/<slug>/index.md is written there"
+    desc_env STARTER_HOME -- "The cordon-starter checkout (default \$CODE_HOME/Projects/cordon-starter)"
+}
+
+desc_help_intercept "$@"
+
+CMD="${1:-}"
+case "$CMD" in
+    new|register) shift ;;
+    "") die "usage" "repo needs a command: new or register (try -h)" 2 ;;
+    *)  die_unknown command "$CMD" ;;
+esac
+
+SLUG="" ROOT="projects" TRACK="bash" NAME="" CATEGORY="automation"
+DESCRIPTION="" VISIBILITY="--private" LOCAL=0 REGISTER=1 DRY=0 RPATH=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --root)        ROOT="${2:-}"; shift 2 ;;
+        --track)       TRACK="${2:-}"; shift 2 ;;
+        --name)        NAME="${2:-}"; shift 2 ;;
+        --category)    CATEGORY="${2:-}"; shift 2 ;;
+        --description) DESCRIPTION="${2:-}"; shift 2 ;;
+        --path)        RPATH="${2:-}"; shift 2 ;;
+        --public)      VISIBILITY="--public"; shift ;;
+        --local)       LOCAL=1; shift ;;
+        --no-register) REGISTER=0; shift ;;
+        -n|--dry-run)  DRY=1; shift ;;
+        -*)            die_unknown flag "$1" "$CMD" ;;
+        *)             [[ -n "$SLUG" ]] && die_unknown argument "$1" "$CMD"; SLUG="$1"; shift ;;
+    esac
+done
+
+[[ -n "$SLUG" ]] || die "usage" "$CMD needs a slug (try -h)" 2
+[[ "$SLUG" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] \
+    || die "usage" "slug must be kebab-case ([a-z0-9-]): $SLUG" 2
+case "$ROOT" in assets|projects) ;; *) die_unknown value "$ROOT" "$CMD" ;; esac
+case "$TRACK" in bash|node) ;; *) die_unknown value "$TRACK" "$CMD" ;; esac
+
+: "${CODE_HOME:?set in ~/.zshrc}"
+ROOT_DIR="Projects"; [[ "$ROOT" == "assets" ]] && ROOT_DIR="Assets"
+
+# Default display name: the slug, title-cased.
+if [[ -z "$NAME" ]]; then
+    NAME="$(printf '%s' "$SLUG" | tr '-' ' ' \
+        | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) substr($i,2)} 1')"
+fi
+
+# repo_https_url <dir> — origin as a display URL (ssh remotes normalized).
+repo_https_url() {
+    local url
+    url="$(git -C "$1" remote get-url origin 2>/dev/null || true)"
+    [[ -z "$url" ]] && return 0
+    url="${url%.git}"
+    case "$url" in
+        git@github.com:*) printf 'https://github.com/%s' "${url#git@github.com:}" ;;
+        *)                printf '%s' "$url" ;;
+    esac
+}
+
+# register_repo <dir> — the registration half: vault doc + HQ record + sync.
+register_repo() {
+    local dir="$1" url index_dir index
+    : "${NOTES_HOME:?set in ~/.zshrc}"
+    url="$(repo_https_url "$dir")"
+    index_dir="$NOTES_HOME/01 Projects/$SLUG"
+    index="$index_dir/index.md"
+
+    if [[ -f "$index" ]]; then
+        msg "$DIM" "kept" "vault doc exists: 01 Projects/$SLUG/index.md"
+    else
+        mkdir -p "$index_dir"
+        cat > "$index" <<EOF
+---
+doc_id: project-$SLUG
+title: $NAME
+doc_type: architecture_note
+system: $SLUG
+environment: local_mac
+status: active
+sensitivity: internal
+last_reviewed: $(date +%F)
+related_projects: []
+related_assets: []
+tags: []
+project_path: $dir
+aliases:
+  - $NAME
+---
+
+# $NAME
+
+## What this is
+
+${DESCRIPTION:-<!-- one paragraph: what this repo is and why it exists -->}
+
+## How it fits the fleet
+
+<!-- what it consumes, what consumes it, which projects it relates to -->
+
+## Build & dev
+
+Source: \`$dir/\`.
+EOF
+        msg "$GREEN" "vault" "01 Projects/$SLUG/index.md"
+    fi
+
+    local -a hq_args=(create project "$SLUG" --name "$NAME"
+        --category "$CATEGORY" --status active)
+    [[ -n "$url" ]] && hq_args+=(--repo "$url")
+    [[ -n "$DESCRIPTION" ]] && hq_args+=(--description "$DESCRIPTION")
+    hq "${hq_args[@]}" >/dev/null
+    msg "$GREEN" "hq" "project record upserted ($CATEGORY, active)"
+    hq sync >/dev/null
+    msg "$GREEN" "synced" "relations to '$SLUG' resolve"
+}
+
+# ---------- register ----------
+if [[ "$CMD" == "register" ]]; then
+    DIR="$RPATH"
+    if [[ -z "$DIR" ]]; then
+        for cand in "$CODE_HOME/Assets/$SLUG" "$CODE_HOME/Projects/$SLUG"; do
+            [[ -d "$cand" ]] && DIR="$cand" && break
+        done
+    fi
+    [[ -n "$DIR" && -d "$DIR" ]] \
+        || die "register" "no repo at \$CODE_HOME/{Assets,Projects}/$SLUG (or --path)" 1
+    if (( DRY )); then
+        msg "$DIM" "dry-run" "would register $DIR as '$SLUG' ($CATEGORY) + hq sync"
+        exit 0
+    fi
+    register_repo "$DIR"
+    exit 0
+fi
+
+# ---------- new ----------
+STARTER="${STARTER_HOME:-$CODE_HOME/Projects/cordon-starter}"
+[[ -d "$STARTER" ]] || die "new" "no cordon-starter checkout at $STARTER (set STARTER_HOME)" 1
+DEST="$CODE_HOME/$ROOT_DIR/$SLUG"
+[[ -e "$DEST" ]] && die "new" "already exists: $DEST" 1
+
+if (( DRY )); then
+    msg "$DIM" "dry-run" "would create $DEST from $STARTER ($TRACK track)"
+    (( LOCAL ))    || msg "$DIM" "dry-run" "would 'gh repo create $SLUG ${VISIBILITY#--}' + branch protection"
+    (( REGISTER )) && msg "$DIM" "dry-run" "would register '$SLUG' ($CATEGORY) + hq sync"
+    exit 0
+fi
+
+# 1. Copy the baseline; fresh history.
+rsync -a --exclude .git "$STARTER/" "$DEST/"
+git -C "$DEST" init -qb main
+msg "$GREEN" "created" "$DEST ${DIM}from cordon-starter${RESET}"
+
+# 2. Keep one emitter track; the tool takes the repo's name.
+if [[ "$TRACK" == "bash" ]]; then
+    mv "$DEST/bin/example-tool" "$DEST/bin/$SLUG"
+    rm -f "$DEST/bin/example-node" "$DEST/contract/example-node.json" "$DEST/package.json"
+    KEPT="example-tool"
+else
+    mv "$DEST/bin/example-node" "$DEST/bin/$SLUG"
+    rm -f "$DEST/bin/example-tool" "$DEST/contract/example-tool.json"
+    KEPT="example-node"
+fi
+rm -f "$DEST/contract/$KEPT.json"
+for f in "$DEST/bin/$SLUG" "$DEST/package.json"; do
+    [[ -f "$f" ]] || continue
+    LC_ALL=C sed "s/$KEPT/$SLUG/g" "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+done
+chmod +x "$DEST/bin/$SLUG"
+msg "$GREEN" "track" "$TRACK — bin/$SLUG ${DIM}(rewrite its describe_spec)${RESET}"
+
+# 3. Golden contract + hooks + gate. A red gate or failed regen doesn't abort
+#    the bootstrap — the repo is real; the report says what to finish by hand.
+if [[ "$TRACK" == "bash" ]]; then
+    if "$DEST/bin/$SLUG" --describe > "$DEST/contract/$SLUG.json" 2>/dev/null; then
+        msg "$GREEN" "contract" "contract/$SLUG.json"
+    else
+        rm -f "$DEST/contract/$SLUG.json"
+        msg "$YELLOW" "contract" "regen failed — finish: bin/$SLUG --describe > contract/$SLUG.json"
+    fi
+else
+    if ( cd "$DEST" && node "bin/$SLUG" --write >/dev/null 2>&1 ); then
+        msg "$GREEN" "contract" "contract/$SLUG.json"
+    else
+        msg "$YELLOW" "contract" "regen failed — finish: node bin/$SLUG --write"
+    fi
+fi
+( cd "$DEST" && scripts/setup-hooks.sh >/dev/null 2>&1 ) || true
+if ( cd "$DEST" && scripts/check.sh >/dev/null 2>&1 ); then
+    msg "$GREEN" "gate" "scripts/check.sh green"
+else
+    msg "$YELLOW" "gate" "scripts/check.sh red — finish the rename, then re-run it"
+fi
+
+# 4. Initial commit (the pre-commit hook allows the bootstrap commit).
+git -C "$DEST" add -A
+git -C "$DEST" commit -qm "Initial commit"
+msg "$GREEN" "committed" "initial commit on main"
+
+# 5. GitHub + branch protection.
+if (( LOCAL )); then
+    msg "$DIM" "local" "skipped gh create + governance (--local)"
+else
+    ( cd "$DEST" && gh repo create "$SLUG" "$VISIBILITY" --source=. --push >/dev/null )
+    msg "$GREEN" "github" "gh repo create $SLUG ${VISIBILITY#--} — pushed"
+    if ( cd "$DEST" && scripts/setup-governance.sh >/dev/null 2>&1 ); then
+        msg "$GREEN" "protected" "branch protection + repo security applied"
+    else
+        msg "$YELLOW" "protected" "setup-governance.sh failed — run it in $DEST"
+    fi
+fi
+
+# 6. Registration — the same half `repo register` runs.
+if (( REGISTER )); then
+    register_repo "$DEST"
+else
+    msg "$DIM" "skipped" "registration (--no-register) — later: repo register $SLUG"
+fi
+
+msg "$DIM" "next" "rewrite bin/$SLUG describe_spec · README · start \"first change\""
