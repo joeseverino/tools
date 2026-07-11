@@ -82,7 +82,12 @@ if [[ -z "$TARGET_DIR" ]]; then
     fi
 fi
 
-[[ -d "$TARGET_DIR" ]] || die "error" "memory dir not found: $TARGET_DIR"
+# Claude creates a project's memory dir lazily, so the first write in a fresh
+# project must do the same; list/forget on a missing dir stays an error.
+if [[ ! -d "$TARGET_DIR" ]]; then
+    [[ "$MODE" == "write" ]] || die "error" "memory dir not found: $TARGET_DIR"
+    mkdir -p "$TARGET_DIR" || die "error" "cannot create memory dir: $TARGET_DIR"
+fi
 INDEX="$TARGET_DIR/MEMORY.md"
 
 # ---- list mode --------------------------------------------------------------

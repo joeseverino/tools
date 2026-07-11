@@ -1,9 +1,19 @@
 # shellcheck shell=bash
 
+# hq_sync_state_file — where `hq sync` records what it shipped (manifest hash
+# + inputs), so `vault status` and `hq doctor` can detect staleness exactly
+# instead of relying on the "remember to run hq sync" convention.
 hq_sync_state_file() {
     printf '%s/severino-tools/hq-sync.json' "${XDG_STATE_HOME:-$HOME/.local/state}"
 }
 
+# hq_sync_freshness <vault-path> — compare the vault's current HQ manifest
+# hash against the one recorded by the last successful `hq sync`. Prints:
+#   never | skip | fresh <date> | stale <date>
+# ("skip": check can't run here — no MCP CLI, or state from another vault.)
+# Exact by construction: the hash covers precisely the frontmatter manifest HQ
+# imports (dirs read back from the state file; "mcp-default" replays the MCP's
+# derived default), so prose-only edits and unrelated commits never flag.
 hq_sync_freshness() {
     local vault_path="$1" state sha dirs synced state_vault current manifest
     state="$(hq_sync_state_file)"
