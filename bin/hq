@@ -58,12 +58,18 @@ describe_spec() {
     desc_effect deploy +network
     desc_opt -m --message TEXT -- "Commit message for the HQ repo change (required)"
 
+    desc_cmd env-diff  -- "Key-level drift between the 1Password 'severino-hq env' item (the source of truth) and the env rendered on prod. Key names only — values never print"
+    desc_effect read +network
+
+    desc_cmd env-apply -- "Apply 1Password env changes to prod now: runs severino-hq-secrets.service (renders + restarts only if something changed; the hourly timer does this anyway)"
+    desc_effect deploy +network
+
     desc_cmd logs      -- "Show app container logs (default tail 50)"
     desc_effect read +network
     desc_opt -f --follow -- "Stream live output until Ctrl-C"
     desc_opt --tail N    -- "Number of lines to show (default 50; ignored with --follow)"
 
-    desc_cmd restart   -- "\`docker compose restart app\` — no rebuild, no migrations. For env changes or stuck state"
+    desc_cmd restart   -- "\`docker compose restart app\` — no rebuild, no migrations. For stuck state (env changes need env-push: restart does not re-read .env)"
     desc_effect deploy +network
 
     desc_cmd open      -- "Open \$HQ_URL in the browser"
@@ -379,6 +385,51 @@ cmd_deploy() {
     msg "$GREEN" "deployed" "severino-hq (last published image)"
 }
 
+# env-diff / env-apply — prod's env renders from the 1Password "severino-hq
+# env" item via severino-hq-secrets.service on the server (see the HQ repo's
+# scripts/refresh-secrets.sh). Drift reporting is key-level only: values never
+# reach stdout. Value refresh is the hourly timer's job; env-apply just runs
+# the same unit on demand.
+cmd_env_diff() {
+    case "${1:-}" in "") ;; *) die_unknown flag "$1" env-diff ;; esac
+    command -v op >/dev/null 2>&1 || die "error" "1Password CLI (op) is required for env-diff"
+    local HQ_ENV_ITEM="severino-hq env"
+    local HQ_ENV_VAULT="Severino HQ Production"
+    local HQ_ENV_RENDERED="$HQ_REMOTE_PATH/secrets/severino_hq_env"
+    local drift
+    drift="$(
+        awk '
+            NR==FNR { l[$0] = 1; next }
+            { r[$0] = 1 }
+            END {
+                for (k in l) if (!(k in r)) print "item-only (not yet rendered): " k
+                for (k in r) if (!(k in l)) print "rendered-only (gone from item): " k
+            }' \
+            <(op item get "$HQ_ENV_ITEM" --vault "$HQ_ENV_VAULT" --format json \
+                | jq -r '.fields[] | select((.label // "") | test("^[A-Z][A-Z0-9_]+$")) | .label' | sort) \
+            <(ssh "$HQ_SSH_HOST" "sudo cat '$HQ_ENV_RENDERED'" | cut -d= -f1 | sort) \
+            | sort
+    )"
+    if [[ -z "$drift" ]]; then
+        msg "$GREEN" "in sync" "item keys match the rendered env on $HQ_SSH_HOST (values refresh hourly)"
+        return 0
+    fi
+    local line
+    while IFS= read -r line; do msg "$YELLOW" "drift" "$line"; done <<< "$drift"
+    msg "$DIM" "next" "hq env-apply renders the item to prod now"
+    return 1
+}
+
+cmd_env_apply() {
+    case "${1:-}" in ""|--yes) ;; *) die_unknown flag "$1" env-apply ;; esac
+    msg "$DIM" "applying" "severino-hq-secrets.service on $HQ_SSH_HOST"
+    ssh "$HQ_SSH_HOST" "sudo systemctl start severino-hq-secrets.service && sudo systemctl status severino-hq-secrets.service --no-pager | tail -3"
+    local health
+    health="$(ssh "$HQ_SSH_HOST" "sudo docker inspect --format '{{.State.Health.Status}}' severino-hq" 2>/dev/null || true)"
+    [[ "$health" == "healthy" ]] || die "error" "container is '${health:-unknown}' after env apply — check \`hq logs\`"
+    msg "$GREEN" "applied" "prod env is current; container healthy"
+}
+
 cmd_ship() {
     local message=""
     while [ "$#" -gt 0 ]; do
@@ -515,6 +566,8 @@ case "${1:-}" in
     validate)   shift; cmd_validate "$@" ;;
     create)     shift; cmd_create "$@" ;;
     deploy)     shift; cmd_deploy "$@" ;;
+    env-apply)  shift; cmd_env_apply "$@" ;;
+    env-diff)   shift; cmd_env_diff "$@" ;;
     ship)       shift; cmd_ship "$@" ;;
     logs)       shift; cmd_logs "$@" ;;
     restart)    shift; cmd_restart "$@" ;;
