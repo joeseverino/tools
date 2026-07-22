@@ -411,7 +411,7 @@ harness (`tests/helpers.bash`); `ship --check` runs `tools check --ci`. Set
 `tools status --json` / `tools doctor --json`
 give machine-readable state. `tools doctor --all` is the cross-system rollup
 (hq doctor, hq schema --check, site doctor); `--live` adds the drift guards
-(network + age key).
+(network + 1Password approval).
 
 For a fast inner loop while editing one area:
 - `bats tests/<file>.bats` — hermetic, ~seconds. Run it after editing `bin/site`
@@ -433,10 +433,7 @@ For a fast inner loop while editing one area:
   them in CI (non-reproducible).
 - **`die` (common.sh) writes to stderr** — so a `die` inside a `x=$(some_fn)`
   caller is shown, not captured into the value (the silent `set -e` abort that
-  bit the drift guards). Callers never need `die … >&2`; don't re-add it. A
-  helper that must *return* a failure rather than exit (e.g. `drift_read_creds`,
-  used in `< <( )`) still routes its own `msg … >&2` by hand — only `die` is
-  centralized.
+  once bit the drift guards). Callers never need `die … >&2`; don't re-add it.
 - **`${FLAG:+x}` is wrong for 0/1 flags** — `"0"` is non-empty, so it always
   substitutes. This bypassed the decrypt Keychain cache on every call for
   weeks. Use `if (( FLAG ))`. Related: `if ! cmd; then case $? in` is dead

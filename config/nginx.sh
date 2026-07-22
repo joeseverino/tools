@@ -3,15 +3,7 @@
 #
 # Sourced by `nginx`. Each variable can be overridden per-invocation.
 
-: "${KEYS_HOME:?set in ~/.zshrc}"
 : "${NOTES_HOME:?set in ~/.zshrc}"
-
-# age-encrypted env holding the NPM web-UI login (NPM has no API tokens at rest;
-# nginx exchanges these for a short-lived Bearer per call). Contents:
-#   NGINX_EMAIL=...
-#   NGINX_PASSWORD=...
-# Create with:  encrypt nginx.env   then move the .age here.
-: "${NGINX_CREDS:=$KEYS_HOME/nginx/nginx.env.age}"
 
 # Nginx Proxy Manager API base — reachable over LAN or Tailscale; the admin API
 # lives under /api on this host (homelab-server VM, admin UI on port 81).

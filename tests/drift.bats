@@ -10,13 +10,13 @@ setup() {
     DRIFT_DIR="$BATS_TEST_TMPDIR/drift"
     mkdir -p "$DRIFT_DIR"
 
-    # drift_main's preflight requires curl/jq/decrypt on PATH. The fake tool
-    # injects fetch_live (no network, no creds), so it never calls curl or
-    # decrypt — stub them. jq is real: normalize and the stub MCP need it.
+    # drift_main's preflight requires curl/jq/op on PATH. The fake tool injects
+    # fetch_live (no network, no creds), so it never calls curl or op — stub
+    # them. jq is real: normalize and the stub MCP need it.
     STUBS="$DRIFT_DIR/stubs"
     mkdir -p "$STUBS"
     local c
-    for c in curl decrypt; do
+    for c in curl op; do
         printf '#!/usr/bin/env bash\n' > "$STUBS/$c"
         chmod +x "$STUBS/$c"
     done
@@ -133,38 +133,4 @@ normalized_live() { jq -S 'sort_by(.id)' < "$LIVE_JSON"; }
     run "$TOOL" pull
     [ "$status" -eq 0 ]
     [[ "$output" != *"unbound variable"* ]]
-}
-
-# drift_read_creds — the shared credential reader the guards delegate to. The
-# guards' get_token/get_creds had no behavioral coverage; this exercises the
-# extract path and both failure modes (which now surface on stderr, not the
-# captured-and-lost stdout of the old inline `done < <(decrypt …) || die`).
-creds_helper() { # creds_helper <file>  — source the libs and run the reader
-    run bash -c '
-        source "'"$TOOLS_HOME"'/lib/common.sh"
-        source "'"$TOOLS_HOME"'/lib/drift.sh"
-        drift_read_creds "$1"
-    ' _ "$1"
-}
-
-@test "drift_read_creds: echoes the decrypted KEY=val stream" {
-    printf '#!/usr/bin/env bash\nprintf "K1=v1\\nK2=v2\\n"\n' > "$STUBS/decrypt"
-    : > "$DRIFT_DIR/creds.age"
-    creds_helper "$DRIFT_DIR/creds.age"
-    [ "$status" -eq 0 ]
-    grep -qx 'K1=v1' <<<"$output" && grep -qx 'K2=v2' <<<"$output"
-}
-
-@test "drift_read_creds: a missing file fails visibly (not a silent abort)" {
-    creds_helper "$DRIFT_DIR/nope.age"
-    [ "$status" -ne 0 ]
-    [[ "$output" == *"creds not found"* ]]
-}
-
-@test "drift_read_creds: a decrypt failure surfaces 'could not decrypt' (dead path fixed)" {
-    printf '#!/usr/bin/env bash\nexit 3\n' > "$STUBS/decrypt"
-    : > "$DRIFT_DIR/creds.age"
-    creds_helper "$DRIFT_DIR/creds.age"
-    [ "$status" -ne 0 ]
-    [[ "$output" == *"could not decrypt"* ]]
 }

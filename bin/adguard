@@ -18,22 +18,14 @@ describe_spec() {
     desc_synopsis "adguard <command>"
     desc_para "Rewrites are normalized to domain/answer, sorted by domain."
     drift_describe_commands
-    desc_env ADGUARD_CREDS         -- "age-encrypted env holding ADGUARD_USER + ADGUARD_PASS"
     desc_env ADGUARD_URL           -- "AdGuard Home base URL (e.g. http://192.168.1.233:3001)"
     desc_env ADGUARD_DATASET_ID    -- "infra-dataset id for the cache (default dns_rewrites)"
 }
 
-# Decrypt the creds env and echo "user:pass" for curl basic auth. In memory only.
 get_creds() {
-    local creds user="" pass="" k v
-    creds=$(drift_read_creds "${ADGUARD_CREDS}") || return 1
-    while IFS='=' read -r k v; do
-        case $k in
-            ADGUARD_USER) user=$v ;;
-            ADGUARD_PASS) pass=$v ;;
-        esac
-    done <<< "$creds"
-    [[ -n $user && -n $pass ]] || die "error" "creds need ADGUARD_USER + ADGUARD_PASS"
+    local user pass
+    user=$(secret_read adguard.username)
+    pass=$(secret_read adguard.password)
     printf '%s:%s' "$user" "$pass"
 }
 

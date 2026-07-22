@@ -22,10 +22,10 @@ source "$TOOLS_HOME/lib/common.sh"
 # set their own (setup_crypt, setup_manage, the hq/site fixtures) after this.
 unset NOTES_HOME VAULT INBOX_DIR KEYS_HOME BACKUPS_HOME AGE_PUBKEY AGE_KEY \
       CODE_HOME SITE_HOME HQ_SSH_HOST HQ_REMOTE_PATH HQ_URL HQ_VAULT_DIRS \
-      HQ_LOCAL_PATH HQ_SCHEMA_DOC ADGUARD_URL ADGUARD_CREDS \
+      HQ_LOCAL_PATH HQ_SCHEMA_DOC ADGUARD_URL \
       ADGUARD_VAULT_DOC ADGUARD_VAULT_HEADING CF_DNS_VAULT_DOC \
       CF_DNS_VAULT_HEADING TS_ACL_VAULT_DOC TS_ACL_VAULT_HEADING \
-      NGINX_VAULT_DOC NGINX_VAULT_HEADING 2>/dev/null || true
+      NGINX_VAULT_DOC NGINX_VAULT_HEADING TOOLS_SECRETS_REGISTRY 2>/dev/null || true
 
 # Repo bin first on $PATH (install dir stripped) and a clean git config — the
 # PATH-vs-repo trap that gave false greens locally and red on CI (a tool shelled

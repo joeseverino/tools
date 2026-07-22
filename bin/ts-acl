@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # ts-acl — fetch the live Tailscale ACL and diff it against the vault cache.
 # Drift-guard sibling of cf-dns / adguard; the show/diff/pull mechanics live in
-# lib/drift.sh. Uses a read-only (acl:read) OAuth client whose credentials live
-# age-encrypted at $TS_ACL_CREDS — no plaintext ever touches disk (decrypt -p
-# streams it).
+# lib/drift.sh. Uses a read-only (acl:read) OAuth client resolved from
+# 1Password through the shared logical-secret registry.
 set -euo pipefail
 
 source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "ts-acl" "$@"
@@ -20,36 +19,15 @@ describe_spec() {
     desc_inventory "Drift guards" 90
     desc_synopsis "ts-acl <command>"
     drift_describe_commands
-    desc_env TS_ACL_CREDS     -- "age-encrypted env with either TS_API_TOKEN, or TS_OAUTH_CLIENT_ID + TS_OAUTH_CLIENT_SECRET"
     desc_env TS_TAILNET       -- "tailnet to query (default \"-\": the credential's own)"
     desc_env TS_ACL_DATASET_ID -- "infra-dataset id for the cache (default tailscale_acl)"
 }
 
-# Resolve a Bearer token from the encrypted env and echo it. Supports either a
-# read-only OAuth client (preferred) or a plain API access token. The secret
-# stays in memory for the life of the call.
+# Exchange the registered read-only OAuth client for a short-lived Bearer.
 get_token() {
-    local creds id="" secret="" api_token="" k v
-    creds=$(drift_read_creds "$TS_ACL_CREDS") || return 1
-    while IFS='=' read -r k v; do
-        case $k in
-            TS_OAUTH_CLIENT_ID)     id=$v ;;
-            TS_OAUTH_CLIENT_SECRET) secret=$v ;;
-            TS_API_TOKEN)           api_token=$v ;;
-        esac
-    done <<< "$creds"
-
-    # Plain API access token: used directly as the Bearer, no exchange.
-    if [[ -n $api_token ]]; then
-        echo "$api_token"
-        return
-    fi
-
-    # OAuth client: exchange id+secret for a short-lived access token.
-    [[ -n $id && -n $secret ]] \
-        || die "error" "creds need TS_API_TOKEN, or TS_OAUTH_CLIENT_ID + TS_OAUTH_CLIENT_SECRET"
-
-    local resp token
+    local id secret resp token
+    id=$(secret_read tailscale.oauth_client_id)
+    secret=$(secret_read tailscale.oauth_client_secret)
     resp=$(curl -fsS "$API/oauth/token" \
                 -d "client_id=$id" \
                 -d "client_secret=$secret" \
