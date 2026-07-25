@@ -28,7 +28,7 @@ describe_spec() {
     desc_cmd manifest  -- "Print the manifest JSON (frontmatter from every doc) to stdout — for inspection or piping elsewhere"
     desc_effect read
 
-    desc_cmd sync      -- "Pipe the manifest into HQ's import_docs_manifest; upserts by doc_id, safe to re-run"
+    desc_cmd sync      -- "Sync the docs manifest and validated topology inventory into HQ; idempotent and safe to re-run"
     desc_effect remote_write +network
     desc_opt --prune     -- "Delete orphan DocumentationRecord rows (doc_ids in HQ but not in the manifest), plus ContentItems linked only to them. Use after a doc_id rename or retirement"
     desc_opt --no-update -- "Only create new records; never update existing ones"
@@ -51,7 +51,7 @@ describe_spec() {
     desc_example "hq create project my-site --name \"My Site\" --category cloudflare --status published --url https://example.com"
     desc_example "hq create asset example-com --name \"example.com\" --category domain"
 
-    desc_cmd deploy    -- "Fallback: re-pull the latest scanned GHCR image and restart the container (CI's deploy step)"
+    desc_cmd deploy    -- "Fallback: redeploy the immutable image from the last fully successful HQ CI run"
     desc_effect deploy +network
 
     desc_cmd ship      -- "Commit + push a small HQ change. The push IS the deploy: it triggers the gated pipeline (build → scan → deploy on green)"
@@ -107,6 +107,11 @@ build_manifest() {
     # Dir list is the MCP's to derive (indexed_dirs + slim content dirs) — the
     # HQ_VAULT_DIRS second hand-kept copy is retired.
     severino-vault-mcp hq-manifest "$VAULT"
+}
+
+build_topology_inventory() {
+    require_manifest_mcp
+    severino-vault-mcp topology --emit inventory
 }
 
 cmd_manifest() {
@@ -193,11 +198,13 @@ cmd_sync() {
 
     schema_drift_warn
 
-    local tmp
+    local tmp topology_tmp
     tmp="$(mktemp -t hq-manifest.XXXXXX.json)"
-    trap 'rm -f "${tmp:-}"' EXIT
+    topology_tmp="$(mktemp -t hq-topology.XXXXXX.json)"
+    trap 'rm -f "${tmp:-}" "${topology_tmp:-}"' EXIT
 
     build_manifest > "$tmp"
+    build_topology_inventory > "$topology_tmp"
 
     msg "$DIM" "sync" "vault → HQ"
     local stats_json
@@ -206,14 +213,21 @@ cmd_sync() {
             "cd '$HQ_REMOTE_PATH' && sudo docker compose exec -T app python manage.py import_docs_manifest --json --report-orphans$extra_flags -" \
             < "$tmp"
     )"
+    local topology_json
+    topology_json="$(
+        ssh "$HQ_SSH_HOST" \
+            "cd '$HQ_REMOTE_PATH' && sudo docker compose exec -T app python manage.py infrastructure_topology -" \
+            < "$topology_tmp"
+    )"
 
-    python3 - "$tmp" "$stats_json" "$prune" <<'PY'
+    python3 - "$tmp" "$stats_json" "$prune" "$topology_json" <<'PY'
 import json
 import sys
 
-manifest_path, raw_stats, prune_flag = sys.argv[1], sys.argv[2], sys.argv[3]
+manifest_path, raw_stats, prune_flag, raw_topology = sys.argv[1:5]
 manifest = json.load(open(manifest_path, encoding="utf-8"))
 stats = json.loads(raw_stats)
+topology = json.loads(raw_topology)
 prune = prune_flag == "1"
 
 created = stats.get("created", 0)
@@ -258,6 +272,11 @@ if orphans:
             print(f"          {doc_id}")
 else:
     print("Cleanup   no orphans")
+
+print(
+    "Topology  schema v%s · %s"
+    % (topology["schema_version"], topology["checksum"][:12])
+)
 
 if missing or (orphans and not prune):
     print("Done      synced with cleanup needed")
@@ -380,9 +399,27 @@ cmd_deploy() {
         *) die_unknown flag "$1" deploy ;;
     esac
 
-    msg "$DIM" "deploying" "$HQ_SSH_HOST: pull scanned GHCR image + restart"
-    ssh "$HQ_SSH_HOST" "cd '$HQ_REMOTE_PATH' && sudo docker compose pull app && sudo docker compose up -d --no-build app"
-    msg "$GREEN" "deployed" "severino-hq (last published image)"
+    command -v gh >/dev/null 2>&1 \
+        || die "error" "GitHub CLI (gh) is required to resolve the last green artifact"
+    local release_sha image
+    release_sha="$(
+        gh run list \
+            --repo joeseverino/severino-hq \
+            --workflow ci.yml \
+            --branch main \
+            --status success \
+            --limit 1 \
+            --json headSha \
+            --jq '.[0].headSha'
+    )"
+    [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]] \
+        || die "error" "could not resolve a successful immutable HQ release"
+    image="ghcr.io/joeseverino/severino-hq:sha-${release_sha:0:12}"
+
+    msg "$DIM" "deploying" "$HQ_SSH_HOST: $image (last green CI artifact)"
+    ssh "$HQ_SSH_HOST" \
+        "cd '$HQ_REMOTE_PATH' && ./scripts/deploy-image.sh '$image'"
+    msg "$GREEN" "deployed" "$image"
 }
 
 # env-diff / env-apply — prod's env renders from the 1Password "severino-hq
