@@ -115,5 +115,5 @@ repo defines (a subset + the shared `schema_version` and `effect`), so
 `node --check`, shellcheck, the bats suite, and the bench assertions
 (`--no-bench` skips the slow step). `tools doctor --all` is the cross-system
 rollup (hq doctor, hq schema --check, site doctor); `--live` adds the drift
-guards (network + age key). `tools status --json` / `tools doctor --json` give
+guards (network + 1Password approval). `tools status --json` / `tools doctor --json` give
 machine-readable state.

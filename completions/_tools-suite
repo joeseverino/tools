@@ -11,6 +11,7 @@ _tools_suite_contract() {
       commands=(
         'status:One-screen health check across vault, inbox, backup, keys'
         'doctor:Verify environment, deps, and installed symlinks'
+        'secrets:Inspect the logical secret registry without reading secret values'
         'check:Run the full CI suite locally: lint, tests, bench'
         'new:Scaffold a new tool in bin/ with the house conventions'
         'install:Create symlinks in $INSTALL_DIR for every tool'
@@ -29,7 +30,8 @@ _tools_suite_contract() {
         args)
           case "${words[2]}" in
             status) _arguments '--json[Machine-readable output (one JSON object)]' ;;
-            doctor) _arguments '--all[Cross-system rollup: also run hq doctor, hq schema --check, and site doctor (exit 1 if any gate fails)]' '--live[Implies --all; additionally run the drift guards (cf-dns / adguard / ts-acl) — live API reads that need network + the age key]' '--json[Machine-readable output (one object, "checks" array)]' ;;
+            doctor) _arguments '--all[Cross-system rollup: also run hq doctor, hq schema --check, and site doctor (exit 1 if any gate fails)]' '--live[Implies --all; additionally run the drift guards (cf-dns / adguard / ts-acl) — live API reads that require 1Password approval]' '--json[Machine-readable output (one object, "checks" array)]' ;;
+            secrets) _arguments '1:doctor (default) validates the provider and registry; inventory lists logical ids only:(doctor inventory)' ;;
             check) _arguments '--no-bench[Skip the bench scripts (the slowest step)]' '--ci[Run hermetically, as CI does: this checkout'\''s bin first with the install dir off $PATH (no stale shadow), an empty global/system git config (no leaked defaultBranch, aliases, or hooks), and the bats version surfaced. ship --check uses this mode; set TOOLS_CI_BATS_VERSION to fail on a bats version other than CI'\''s.]' ;;
             new) _arguments '1:Name of the new tool (creates bin/<name>):' '--drift[Scaffold a drift-guard tool instead (show/diff/pull, with get_token/fetch_live/normalize + a config template)]' '--agent[Scaffold a lightweight agent-facing tool that emits the versioned result envelope]' '--verify[Generate derived surfaces and run the full non-benchmark check after scaffolding]' ;;
             key) _arguments '1:Keychain action — cache (store), forget (clear), status (show, default), test (verify it still unlocks $AGE_KEY):(cache forget status test)' ;;

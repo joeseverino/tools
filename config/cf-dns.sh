@@ -3,15 +3,7 @@
 #
 # Sourced by `cf-dns`. Each variable can be overridden per-invocation.
 
-: "${KEYS_HOME:?set in ~/.zshrc}"
 : "${NOTES_HOME:?set in ~/.zshrc}"
-
-# age-encrypted env file holding a Cloudflare API token. Contents:
-#   CF_API_TOKEN=...
-# The token needs Zone.DNS:Read on the zone, plus Zone:Read so cf-dns can
-# resolve the zone id from CF_ZONE (skip the latter by pinning CF_ZONE_ID).
-# Create with:  encrypt cf-dns.env   then move the .age here.
-: "${CF_DNS_CREDS:=$KEYS_HOME/cloudflare/cf-dns.env.age}"
 
 # Zone to query. cf-dns resolves the id from the name unless CF_ZONE_ID is set.
 : "${CF_ZONE:=jseverino.com}"

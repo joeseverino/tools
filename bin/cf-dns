@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # cf-dns — fetch the live Cloudflare DNS records and diff them against the vault
 # mirror. Drift-guard sibling of ts-acl / adguard; the show/diff/pull mechanics
-# live in lib/drift.sh. A Zone.DNS:Read token (age-encrypted at $CF_DNS_CREDS,
-# streamed via decrypt -p — no plaintext on disk) is least-privilege.
+# live in lib/drift.sh. A Zone.DNS:Read token is resolved from 1Password through
+# the shared logical-secret registry.
 set -euo pipefail
 
 source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "cf-dns" "$@"
@@ -21,24 +21,13 @@ describe_spec() {
     desc_para "Records are normalized to type/name/content/proxied (+ priority for MX);"
     desc_para "Cloudflare-internal fields (id, timestamps, meta) are dropped."
     drift_describe_commands
-    desc_env CF_DNS_CREDS         -- "age-encrypted env holding CF_API_TOKEN"
     desc_env CF_ZONE              -- "zone name to query (resolved to an id via the API)"
     desc_env CF_ZONE_ID           -- "pin the zone id and skip name resolution"
     desc_env CF_DNS_DATASET_ID    -- "infra-dataset id for the cache (default public_dns)"
 }
 
-# Decrypt the creds env and echo CF_API_TOKEN. The secret stays in memory for
-# the life of the call — never written to disk.
 get_token() {
-    local creds token="" k v
-    creds=$(drift_read_creds "$CF_DNS_CREDS") || return 1
-    while IFS='=' read -r k v; do
-        case $k in
-            CF_API_TOKEN) token=$v ;;
-        esac
-    done <<< "$creds"
-    [[ -n $token ]] || die "error" "creds need CF_API_TOKEN=..."
-    echo "$token"
+    secret_read cloudflare.dns_token
 }
 
 # Resolve the zone id. Honor a pinned CF_ZONE_ID; else look it up by name.

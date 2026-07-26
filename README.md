@@ -193,6 +193,7 @@ Umbrella command for the personal CLI toolchain.
 |---|---|---|---|
 | `tools status` | `--json` | `read + network` | One-screen health check across vault, inbox, backup, keys |
 | `tools doctor` | `--all`<br>`--live`<br>`--json` | `read + network` | Verify environment, deps, and installed symlinks |
+| `tools secrets [doctor|inventory]` | `[doctor\|inventory]` | `read` | Inspect the logical secret registry without reading secret values |
 | `tools check` | `--no-bench`<br>`--ci` | `local_write` | Run the full CI suite locally: lint, tests, bench |
 | `tools new <name>` | `<name>`<br>`--drift`<br>`--agent`<br>`--verify` | `local_write` | Scaffold a new tool in bin/ with the house conventions |
 | `tools install` | — | `local_write` | Create symlinks in $INSTALL_DIR for every tool |
@@ -911,7 +912,7 @@ after the local checks it runs every system's own gate — `hq doctor`
 audits) — each timed, with a failing gate's output tail inlined, and one
 verdict / exit code at the end. `--live` also runs the drift guards
 (`cf-dns` / `adguard` / `ts-acl` diff): live API reads that need network
-and the age key. The gate registry lives in `lib/doctor.sh`; a gate's
+and 1Password approval. The gate registry lives in `lib/doctor.sh`; a gate's
 only contract is "exit 0 when healthy", so adding one is one line. Both
 commands take `--json` for machine-readable output (useful for agents
 and cron). `TOOLS_INSTALL_DIR` overrides the install target.
@@ -1377,28 +1378,12 @@ shells out to `kdig +tls`.
 Fetch the live Tailscale ACL policy and diff it against the copy stored in
 the vault, so policy drift gets caught instead of silently going stale.
 
-Auth credentials live age-encrypted at `$TS_ACL_CREDS`
-(default `$KEYS_HOME/tailscale/ts-oauth.env.age`) as an env file. Use either a
-plain API access token, or — preferred, read-only — an OAuth client:
-
-```
-# either
-TS_API_TOKEN=tskey-api-...
-# or
-TS_OAUTH_CLIENT_ID=k...
-TS_OAUTH_CLIENT_SECRET=tskey-client-...
-```
-
-An OAuth client scoped to `acl:read` is least-privilege and does not expire; an
-API access token is full-account and expires in 90 days (rotate before then).
-
-`ts-acl` streams it via `decrypt -p` (no plaintext on disk), exchanges it for a
-short-lived access token, then reads `GET /api/v2/tailnet/-/acl`. `diff` pulls
+The logical fields `tailscale.oauth_client_id` and
+`tailscale.oauth_client_secret` resolve through the shared 1Password registry
+to the `Tailscale ACL OAuth` item in Infrastructure. The OAuth client is scoped
+to `acl:read`; `ts-acl` exchanges it for a short-lived access token, then reads
+`GET /api/v2/tailnet/-/acl`. `diff` pulls
 the fenced ```json block from `$TS_ACL_VAULT_DOC`. Needs `curl` and `jq`.
-
-Setup: create either an API access token or (preferred) an OAuth client scoped
-to `acl:read` in the Tailscale admin console, then encrypt the env file to
-`$TS_ACL_CREDS`.
 
 ### cf-dns
 
@@ -1414,21 +1399,11 @@ timestamps, meta) are dropped, so the diff is stable. `diff` re-sorts both
 sides; `pull` rewrites the block in place. The accept-drift loop is:
 `cf-dns diff` → reconcile the prose tables → `cf-dns pull` → `hq sync`.
 
-Auth is a Cloudflare API token age-encrypted at `$CF_DNS_CREDS`
-(default `$KEYS_HOME/cloudflare/cf-dns.env.age`) as an env file:
-
-```
-CF_API_TOKEN=...
-```
-
-Scope it to `Zone.DNS:Read` (plus `Zone:Read` so `cf-dns` can resolve the zone
-id from `$CF_ZONE`; pin `$CF_ZONE_ID` to drop that). `cf-dns` streams the token
-via `decrypt -p` (no plaintext on disk), then reads
+The logical field `cloudflare.dns_token` resolves through the shared 1Password
+registry to the `Cloudflare DNS Drift` item in Infrastructure. Scope it to
+`Zone.DNS:Read` (plus `Zone:Read` so `cf-dns` can resolve the zone id from
+`$CF_ZONE`; pin `$CF_ZONE_ID` to drop that). `cf-dns` reads
 `GET /zones/{id}/dns_records`. Needs `curl` and `jq`.
-
-Setup: create the scoped token at Cloudflare → My Profile → API Tokens, then
-`encrypt cf-dns.env` and move the `.age` to `$CF_DNS_CREDS`. Seed the mirror
-with `cf-dns pull`.
 
 ### adguard
 
@@ -1443,21 +1418,10 @@ under `$ADGUARD_VAULT_HEADING` in `$ADGUARD_VAULT_DOC`; the prose rewrite tables
 in that doc stay for humans. Same accept-drift loop as `cf-dns`:
 `adguard diff` → reconcile the tables → `adguard pull` → `hq sync`.
 
-Auth is the AdGuard web-UI login (HTTP basic auth), age-encrypted at
-`$ADGUARD_CREDS` (default `$KEYS_HOME/adguard/adguard.env.age`):
-
-```
-ADGUARD_USER=...
-ADGUARD_PASS=...
-```
-
+The logical fields `adguard.username` and `adguard.password` resolve through
+the shared 1Password registry to the `AdGuard Home` item in Infrastructure.
 `$ADGUARD_URL` defaults to `http://192.168.1.233:3001` (reachable over LAN or
-Tailscale). `adguard` streams the creds via `decrypt -p` (no plaintext on
-disk). Needs `curl` and `jq`.
-
-Setup: `encrypt adguard.env` and move the `.age` to `$ADGUARD_CREDS`, then seed
-the mirror with `adguard pull`. This tool was scaffolded with
-`tools new adguard --drift` (see below).
+Tailscale). Needs `curl`, `jq`, and an approved 1Password session.
 
 ### nginx
 
@@ -1473,21 +1437,11 @@ for humans. Same accept-drift loop: `nginx diff` → reconcile the table →
 `nginx pull` → `hq sync`.
 
 NPM has no long-lived API tokens, so `nginx` exchanges the web-UI login for a
-short-lived Bearer per call (`POST $NGINX_URL/tokens`). The login is
-age-encrypted at `$NGINX_CREDS` (default `$KEYS_HOME/nginx/nginx.env.age`):
-
-```
-NGINX_EMAIL=...
-NGINX_PASSWORD=...
-```
-
-`$NGINX_URL` defaults to `http://192.168.1.233:81/api` (reachable over LAN or
-Tailscale). `nginx` streams the creds via `decrypt -p` (no plaintext on disk).
-Needs `curl` and `jq`.
-
-Setup: `encrypt nginx.env` and move the `.age` to `$NGINX_CREDS`, then seed the
-mirror with `nginx pull`. This tool was scaffolded with `tools new nginx --drift`
-(see below).
+short-lived Bearer per call (`POST $NGINX_URL/tokens`). The logical fields
+`nginx.username` and `nginx.password` resolve through the shared 1Password
+registry to the `Nginx Proxy Manager` item in Infrastructure. `$NGINX_URL`
+defaults to `http://192.168.1.233:81/api` (reachable over LAN or Tailscale).
+Needs `curl`, `jq`, and an approved 1Password session.
 
 ### remember
 

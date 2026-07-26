@@ -16,6 +16,7 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 # shellcheck source=config/crypt.sh
 [[ -n "${KEYS_HOME-}"    ]] && source "$TOOLS_HOME/config/crypt.sh"
 source "$TOOLS_HOME/lib/key.sh"
+source "$TOOLS_HOME/lib/secrets.sh"
 source "$TOOLS_HOME/lib/doctor.sh"
 # shellcheck source=lib/tools/describe.sh
 source "$TOOLS_HOME/lib/tools/describe.sh"
@@ -43,8 +44,12 @@ describe_spec() {
     desc_cmd doctor   -- "Verify environment, deps, and installed symlinks"
     desc_effect read +network
     desc_opt --all    -- "Cross-system rollup: also run hq doctor, hq schema --check, and site doctor (exit 1 if any gate fails)"
-    desc_opt --live   -- "Implies --all; additionally run the drift guards (cf-dns / adguard / ts-acl) — live API reads that need network + the age key"
+    desc_opt --live   -- "Implies --all; additionally run the drift guards (cf-dns / adguard / ts-acl) — live API reads that require 1Password approval"
     desc_opt --json   -- "Machine-readable output (one object, \"checks\" array)"
+
+    desc_cmd secrets  -- "Inspect the logical secret registry without reading secret values"
+    desc_effect read
+    desc_pos action +optional "{doctor,inventory}" -- "doctor (default) validates the provider and registry; inventory lists logical ids only"
 
     desc_cmd check    -- "Run the full CI suite locally: lint, tests, bench"
     desc_effect local_write
@@ -249,6 +254,20 @@ cmd_doctor() {
         fi
     done
 
+    # 1Password is the sole runtime credential provider for Tools. This check
+    # validates installation and the logical registry only; doctor never reads
+    # a secret value or triggers an item access prompt.
+    if command -v op >/dev/null; then
+        check "1Password CLI" 1 "$(command -v op)"
+    else
+        check "1Password CLI" 0 "not installed — install the 1Password CLI" || fail=1
+    fi
+    if secrets_registry_check; then
+        check "secrets registry" 1 "$(secrets_inventory | wc -l | tr -d ' ') logical fields"
+    else
+        check "secrets registry" 0 "$TOOLS_SECRETS_REGISTRY is invalid" || fail=1
+    fi
+
     # Node toolchain — optional: only doc-to-pdf / site manage / site compare
     # need it, so a missing node warns instead of failing.
     if command -v node >/dev/null; then
@@ -345,11 +364,29 @@ cmd_doctor() {
         if (( run_live )); then
             doctor_live_gates || fail=1
         else
-            check_warn "drift guards" "skipped — live API reads (network + age key); rerun with --live"
+            check_warn "drift guards" "skipped — live API reads (network + 1Password approval); rerun with --live"
         fi
     fi
 
     doctor_finish "$fail"
+}
+
+cmd_secrets() {
+    local action="${1:-doctor}"
+    case "$action" in
+        doctor)
+            command -v jq >/dev/null 2>&1 || die "error" "jq is not installed"
+            command -v op >/dev/null 2>&1 || die "error" "1Password CLI is not installed"
+            secrets_registry_check || die "error" "invalid secrets registry: $TOOLS_SECRETS_REGISTRY"
+            msg "$GREEN" "provider" "1Password CLI $(op --version)"
+            msg "$GREEN" "registry" "$(secrets_inventory | wc -l | tr -d ' ') logical fields; values not read"
+            ;;
+        inventory)
+            secrets_registry_check || die "error" "invalid secrets registry: $TOOLS_SECRETS_REGISTRY"
+            secrets_inventory
+            ;;
+        *) die_unknown action "$action" secrets ;;
+    esac
 }
 
 # ---------- install ----------
@@ -769,24 +806,14 @@ describe_spec() {
     desc_synopsis "__NAME__ <command>"
     # Tool and command effects are declared once by the shared surface.
     drift_describe_commands
-    desc_env __PREFIX___CREDS      -- "age-encrypted env holding the API credential"
     desc_env __PREFIX___DATASET_ID -- "infra-dataset id for the cache (default __NAME__)"
 }
 
-# Decrypt the creds env and echo the secret. Stays in memory only. Credential
-# decryption is shared (drift_read_creds in lib/drift.sh) — declare only your
-# file + the keys you pull; never re-copy the file-check and decrypt.
-# TODO: read whatever key(s) your API needs (Bearer token, user/pass, ...).
+# Resolve the credential through the shared logical-secret registry. Add the
+# logical id -> op:// reference once in config/secrets.json; never call `op`
+# directly or add a second credential backend in a tool.
 get_token() {
-    local creds token="" k v
-    creds=$(drift_read_creds "${__PREFIX___CREDS}") || return 1
-    while IFS='=' read -r k v; do
-        case $k in
-            __PREFIX___TOKEN) token=$v ;;
-        esac
-    done <<< "$creds"
-    [[ -n $token ]] || die "error" "creds need __PREFIX___TOKEN=..."
-    echo "$token"
+    secret_read __NAME__.token
 }
 
 # Fetch live state and reduce to the normalized, sorted set.
@@ -822,13 +849,7 @@ EOF
 #
 # Sourced by `__NAME__`. Each variable can be overridden per-invocation.
 
-: "${KEYS_HOME:?set in ~/.zshrc}"
 : "${NOTES_HOME:?set in ~/.zshrc}"
-
-# age-encrypted env holding the API credential(s). Contents (example):
-#   __PREFIX___TOKEN=...
-# Create with:  encrypt __NAME__.env   then move the .age here.
-: "${__PREFIX___CREDS:=$KEYS_HOME/__NAME__/__NAME__.env.age}"
 
 # Vault doc holding the machine-readable mirror, and the heading whose fenced
 # ```json block `diff`/`pull` read and rewrite.
@@ -840,8 +861,8 @@ EOF
 
     echo
     msg "$GREEN" "created" "bin/$name (drift guard) + config/$name.sh"
-    msg "$DIM"   "next"    "1. fill the TODOs: API base, get_token keys, fetch_live endpoint, normalize jq"
-    msg "$DIM"   "next"    "2. set CREDS / VAULT_DOC / VAULT_HEADING in config/$name.sh"
+    msg "$DIM"   "next"    "1. fill the TODOs: API base, logical secret id, fetch_live endpoint, normalize jq"
+    msg "$DIM"   "next"    "2. register the logical id in config/secrets.json and the dataset in the vault"
     if (( verify )); then
         msg "$DIM" "verify" "generating surfaces and running tools check --no-bench"
         cmd_generate all
@@ -1076,6 +1097,7 @@ desc_help_intercept "$@"
 case "${1:-}" in
     status)        shift; cmd_status   "$@" ;;
     doctor)        shift; cmd_doctor   "$@" ;;
+    secrets)       shift; cmd_secrets  "$@" ;;
     check)         shift; cmd_check    "$@" ;;
     new)           shift; cmd_new      "$@" ;;
     install)       shift; cmd_install  "$@" ;;
