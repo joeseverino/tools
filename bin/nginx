@@ -2,7 +2,7 @@
 # nginx — fetch the live Nginx Proxy Manager proxy hosts and diff them against
 # the vault cache. Drift-guard sibling of cf-dns / adguard; show / diff / pull
 # live in lib/drift.sh. NPM has no API tokens at rest: we exchange the web-UI
-# credentials (age-encrypted at $NGINX_CREDS) for a short-lived Bearer per call.
+# credentials resolved from 1Password for a short-lived Bearer per call.
 set -euo pipefail
 
 source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "nginx" "$@"
@@ -20,22 +20,14 @@ describe_spec() {
     desc_para "Proxy hosts are normalized to domain_names / forward_scheme / forward_host /"
     desc_para "forward_port / enabled, sorted by domain."
     drift_describe_commands
-    desc_env NGINX_CREDS         -- "age-encrypted env holding NGINX_EMAIL + NGINX_PASSWORD"
     desc_env NGINX_URL           -- "Nginx Proxy Manager API base (e.g. http://host:81/api)"
     desc_env NGINX_DATASET_ID    -- "infra-dataset id for the cache (default proxy_hosts)"
 }
 
-# Decrypt the creds env and echo "email<TAB>secret". In memory only, never on disk.
 get_creds() {
-    local creds email="" secret="" k v
-    creds=$(drift_read_creds "${NGINX_CREDS}") || return 1
-    while IFS='=' read -r k v; do
-        case $k in
-            NGINX_EMAIL)    email=$v ;;
-            NGINX_PASSWORD) secret=$v ;;
-        esac
-    done <<< "$creds"
-    [[ -n $email && -n $secret ]] || die "error" "creds need NGINX_EMAIL + NGINX_PASSWORD"
+    local email secret
+    email=$(secret_read nginx.username)
+    secret=$(secret_read nginx.password)
     printf '%s\t%s' "$email" "$secret"
 }
 

@@ -3,17 +3,20 @@
 How this toolchain handles secrets, and — just as important — what it does
 **not** protect against. Read the threat model before trusting it with anything.
 
-## Secrets at rest
+## Two secret domains
 
-Every credential these tools touch (the age key, SSH keys, the `ts-acl`
-Tailscale token / OAuth client secret, anything you `encrypt`) is stored
-**age-encrypted**. Plaintext exists only in process memory for the duration of a
-single command: `decrypt -p` streams to the consuming process and never writes a
-plaintext file (`open-age` decrypts to `$TMPDIR` and shreds on exit via trap).
+**Operational credentials live in 1Password.** API tokens and service logins
+used by Tools are items in the Infrastructure vault. Callers request logical ids
+through `lib/secrets.sh`; the sole id-to-`op://` mapping is
+`config/secrets.json`. A tool must never call `op` directly, embed an item
+reference, or add a fallback credential store. Values exist only in process
+memory for the API call and are never printed.
 
-Consequence: iCloud Drive, git history, and `$BACKUPS_HOME` only ever hold
-ciphertext. A leaked repo, a synced copy, or a stolen disk image yields nothing
-usable on its own.
+**Arbitrary encrypted files use age.** `encrypt`, `decrypt`, and `open-age`
+remain the file-encryption workflow. Ciphertext may be stored in iCloud or the
+backup mirror; plaintext is streamed or held temporarily according to the
+command's documented behavior. SSH private keys are not part of this domain:
+they live in 1Password and are served by its SSH agent.
 
 ## The passphrase
 
@@ -25,7 +28,13 @@ gated by the OS Keychain — see the Threat model for what that gate stops. See
 
 ## Threat model
 
-Two layers, do not conflate them.
+Three layers, do not conflate them.
+
+- **Operational credential release — gated by 1Password.** The desktop app,
+  vault policy, and its approval settings control interactive release. Tools
+  exposes only logical ids, and `tools secrets doctor` validates metadata
+  without reading values. Headless services use separately scoped service
+  accounts and host-bound credentials; they do not borrow the Mac session.
 
 - **Files at rest — strongly protected (verified).** Every secret is
   age-encrypted; iCloud Drive, git history, and `$BACKUPS_HOME` only ever hold
@@ -55,15 +64,19 @@ about what gets printed.
 
 - `tools key forget` removes any cached passphrase, forcing a prompt on every
   decrypt (guarantees the out-of-band gate).
-- Scope credentials to least privilege so anything that *is* decrypted can do
-  little — e.g. `ts-acl` with a read-only `acl:read` Tailscale token rather than
-  a full-account API token.
+- Scope credentials to least privilege so anything released can do little —
+  e.g. `ts-acl` uses a read-only `acl:read` OAuth client rather than a
+  full-account API token.
 - Tools still stream secrets to their destination and never print them
   (`ts-acl` sends the token to Tailscale, emits only the policy). Defense in
   depth, not the primary gate.
+- Review `config/secrets.json` as code: it may name Infrastructure items but
+  must never contain a credential value.
 
 ## Reporting / changing crypto
 
 Per `CONTRIBUTING.md`: any change to `encrypt`, `decrypt`, `open-age`,
 `lib/key.sh`, or the Keychain plumbing must state the threat-model impact
-explicitly in the PR description.
+explicitly in the PR description. Changes to `lib/secrets.sh` or
+`config/secrets.json` must also state whether provider, vault scope, value
+exposure, or headless behavior changed.

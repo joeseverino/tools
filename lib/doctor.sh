@@ -75,7 +75,7 @@ doctor_gates() {
     return "$fail"
 }
 
-# Live gates — drift guards hit real APIs (network + age key), so they only
+# Live gates — drift guards hit real APIs (network + 1Password approval), so they only
 # run when explicitly asked for (`tools doctor --live`).
 doctor_live_gates() {
     local fail=0
