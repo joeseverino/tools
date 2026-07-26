@@ -35,7 +35,7 @@ describe_spec() {
     desc_cmd create  -- "Create or update a Project or Asset in HQ"
     desc_effect remote_write +network
     desc_pos kind "{project,asset}" -- "What to create"
-    desc_delegate "HQ's manage.py — run 'hq create <kind> -h' for the live flags"
+    desc_delegate "HQ's capability schemas — run 'hq create <kind> -h' for the live fields"
 }
 ```
 

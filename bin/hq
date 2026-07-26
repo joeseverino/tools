@@ -47,7 +47,7 @@ describe_spec() {
     desc_effect remote_write +network
     desc_pos kind "{project,asset}" -- "What to create"
     desc_pos slug      -- "Registry slug (the create_project / create_asset key)"
-    desc_delegate "HQ's create_project / create_asset management commands (derived from the Django models) — run \`hq create <kind> -h\` for the live flag list (it reaches manage.py); an invalid value prints the allowed set"
+    desc_delegate "HQ's schema-validated project.upsert / asset.upsert MCP capabilities; field names and defaults are owned by HQ"
     desc_example "hq create project my-site --name \"My Site\" --category cloudflare --status published --url https://example.com"
     desc_example "hq create asset example-com --name \"example.com\" --category domain"
 
@@ -90,6 +90,7 @@ describe_spec() {
     desc_env HQ_REMOTE_PATH -- "HQ checkout path on the server"
     desc_env HQ_LOCAL_PATH -- "Local HQ checkout"
     desc_env HQ_URL        -- "Public URL of HQ"
+    desc_env HQ_MCP_CLIENT_CONFIG -- "Non-secret HQ MCP endpoint/auth-helper profile"
 }
 
 require_manifest_mcp() {
@@ -112,6 +113,16 @@ build_manifest() {
 build_topology_inventory() {
     require_manifest_mcp
     severino-vault-mcp topology --emit inventory
+}
+
+hq_mcp_call() {
+    [[ -x "$HQ_MCP_CLIENT" ]] || die "error" "HQ MCP client is unavailable: $HQ_MCP_CLIENT"
+    "$HQ_MCP_CLIENT"
+}
+
+require_hq_admin() {
+    [[ -n "$HQ_SSH_HOST" ]] || die "error" "HQ_SSH_HOST is required for host administration"
+    [[ -n "$HQ_REMOTE_PATH" ]] || die "error" "HQ_REMOTE_PATH is required for host administration"
 }
 
 cmd_manifest() {
@@ -186,12 +197,12 @@ schema_drift_warn() {
 }
 
 cmd_sync() {
-    local extra_flags=""
     local prune="0"
+    local update="1"
     while [ "$#" -gt 0 ]; do
         case "$1" in
-            --prune) extra_flags="$extra_flags --prune"; prune="1"; shift ;;
-            --no-update) extra_flags="$extra_flags --no-update"; shift ;;
+            --prune) prune="1"; shift ;;
+            --no-update) update="0"; shift ;;
             *) die_unknown flag "$1" sync ;;
         esac
     done
@@ -207,18 +218,21 @@ cmd_sync() {
     build_topology_inventory > "$topology_tmp"
 
     msg "$DIM" "sync" "vault → HQ"
-    local stats_json
-    stats_json="$(
-        ssh "$HQ_SSH_HOST" \
-            "cd '$HQ_REMOTE_PATH' && sudo docker compose exec -T app python manage.py import_docs_manifest --json --report-orphans$extra_flags -" \
-            < "$tmp"
+    local result_json stats_json topology_json
+    result_json="$(
+        jq -cn \
+            --slurpfile manifest "$tmp" \
+            --slurpfile topology "$topology_tmp" \
+            --argjson update "$update" \
+            --argjson prune "$prune" \
+            '{tool:"execute_capability",arguments:{name:"hq.sync",payload:{manifest:$manifest[0],topology:$topology[0],update_existing:$update,report_orphans:true,prune_orphans:$prune,confirm_prune:$prune}}}' \
+            | hq_mcp_call
     )"
-    local topology_json
-    topology_json="$(
-        ssh "$HQ_SSH_HOST" \
-            "cd '$HQ_REMOTE_PATH' && sudo docker compose exec -T app python manage.py infrastructure_topology -" \
-            < "$topology_tmp"
-    )"
+    if [[ "$(jq -r '.ok' <<<"$result_json")" != "true" ]]; then
+        die "error" "$(jq -r '.error.message // "HQ sync failed"' <<<"$result_json")"
+    fi
+    stats_json="$(jq -c '.documentation.stats' <<<"$result_json")"
+    topology_json="$(jq -c '.topology' <<<"$result_json")"
 
     python3 - "$tmp" "$stats_json" "$prune" "$topology_json" <<'PY'
 import json
@@ -364,36 +378,84 @@ sys.exit(1)
 
 cmd_validate() {
     msg "$DIM" "validate" "HQ registry ↔ vault docs"
-    # Logic lives in the testable manage.py audit_registry command, not an
-    # inline ORM script piped into `manage.py shell`.
-    ssh "$HQ_SSH_HOST" "cd '$HQ_REMOTE_PATH' && sudo docker compose exec -T app python manage.py audit_registry"
+    jq -cn '{tool:"audit_registry",arguments:{}}' | hq_mcp_call | python3 -c '
+import json, sys
+r = json.load(sys.stdin)
+projects = r["orphan_projects"]
+assets = r["orphan_assets"]
+print("Projects  {} total, {} with zero docs".format(r["projects_total"], len(projects)))
+for slug in projects:
+    print(f"          orphan: {slug}")
+print("Assets    {} total, {} with zero docs".format(r["assets_total"], len(assets)))
+for slug in assets:
+    print(f"          orphan: {slug}")
+print("Registry  " + (
+    "review orphans above — stale slug from a rename, or a duplicate row"
+    if projects or assets else
+    "ok — every Project and Asset is referenced by at least one doc"
+))
+'
 }
 
 cmd_create() {
     local kind="${1:-}"
-    local mgmt=""
     case "$kind" in
-        project) shift; mgmt="create_project" ;;
-        asset)   shift; mgmt="create_asset" ;;
+        project|asset) shift ;;
         # `hq create` (no kind) shows the spec-derived help; `hq create -h` is
         # handled centrally; `hq create <kind> -h` falls through to manage.py.
         "")      usage_command create; return 0 ;;
         *) die_unknown kind "$kind" create ;;
     esac
 
+    if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+        jq -cn '{tool:"describe_capabilities",arguments:{}}' | hq_mcp_call \
+            | python3 -c '
+import json, sys
+kind = sys.argv[1]
+catalog = json.load(sys.stdin)
+name = kind + ".upsert"
+capability = next((item for item in catalog["capabilities"] if item["name"] == name), None)
+if capability is None:
+    raise SystemExit("HQ does not advertise " + name)
+schema = capability["input_schema"]
+required = set(schema.get("required", []))
+print("Usage: hq create {} <slug> [--field value ...]".format(kind))
+print("\n" + capability["summary"] + "\n\nFields:")
+for field, spec in schema.get("properties", {}).items():
+    if field == "slug":
+        continue
+    label = "--" + field.replace("_", "-")
+    detail = []
+    if field in required:
+        detail.append("required")
+    if "default" in spec:
+        detail.append("default: {!r}".format(spec["default"]))
+    if spec.get("enum"):
+        detail.append("one of: " + ", ".join(map(str, spec["enum"])))
+    elif spec.get("format"):
+        detail.append(spec["format"])
+    elif spec.get("type"):
+        detail.append(spec["type"])
+    print("  {:28} {}".format(label, "; ".join(detail)))
+' "$kind"
+        return
+    fi
+
     [ "$#" -ge 1 ] || die "missing <slug>; try \`hq create $kind -h\`"
 
-    local remote_cmd="cd '$HQ_REMOTE_PATH' && sudo docker compose exec -T app python manage.py $mgmt"
-    local arg
-    for arg in "$@"; do
-        remote_cmd+=" $(printf '%q' "$arg")"
-    done
-
-    msg "$DIM" "hq" "$mgmt $1"
-    ssh "$HQ_SSH_HOST" "$remote_cmd"
+    local slug="$1" result
+    msg "$DIM" "hq" "$kind.upsert $slug"
+    result="$(python3 "$TOOLS_HOME/lib/hq-create-request.py" "$kind" "$@" | hq_mcp_call)"
+    if [[ "$(jq -r '.ok' <<<"$result")" != "true" ]]; then
+        die "error" "$(jq -r '.error.message // "HQ operation failed"' <<<"$result")"
+    fi
+    local created
+    created="$(jq -r '.created' <<<"$result")"
+    msg "$GREEN" "$kind" "$slug: $([[ "$created" == "true" ]] && printf created || printf updated)"
 }
 
 cmd_deploy() {
+    require_hq_admin
     case "${1:-}" in
         "") ;;
         *) die_unknown flag "$1" deploy ;;
@@ -428,6 +490,7 @@ cmd_deploy() {
 # reach stdout. Value refresh is the hourly timer's job; env-apply just runs
 # the same unit on demand.
 cmd_env_diff() {
+    require_hq_admin
     case "${1:-}" in "") ;; *) die_unknown flag "$1" env-diff ;; esac
     command -v op >/dev/null 2>&1 || die "error" "1Password CLI (op) is required for env-diff"
     local HQ_ENV_ITEM="severino-hq env"
@@ -458,6 +521,7 @@ cmd_env_diff() {
 }
 
 cmd_env_apply() {
+    require_hq_admin
     case "${1:-}" in ""|--yes) ;; *) die_unknown flag "$1" env-apply ;; esac
     msg "$DIM" "applying" "severino-hq-secrets.service on $HQ_SSH_HOST"
     ssh "$HQ_SSH_HOST" "sudo systemctl start severino-hq-secrets.service && sudo systemctl status severino-hq-secrets.service --no-pager | tail -3"
@@ -530,6 +594,7 @@ cmd_ship() {
 }
 
 cmd_logs() {
+    require_hq_admin
     local tail="50"
     local follow=""
     while [ "$#" -gt 0 ]; do
@@ -549,6 +614,7 @@ cmd_logs() {
 }
 
 cmd_restart() {
+    require_hq_admin
     msg "$DIM" "restarting" "severino-hq"
     ssh "$HQ_SSH_HOST" "cd '$HQ_REMOTE_PATH' && sudo docker compose restart app"
     msg "$GREEN" "restarted" "severino-hq"
@@ -563,10 +629,12 @@ cmd_open() {
 }
 
 cmd_shell() {
+    require_hq_admin
     ssh -t "$HQ_SSH_HOST" "cd '$HQ_REMOTE_PATH' && sudo docker compose exec app python manage.py shell"
 }
 
 cmd_superuser() {
+    require_hq_admin
     ssh -t "$HQ_SSH_HOST" "cd '$HQ_REMOTE_PATH' && sudo docker compose exec app python manage.py createsuperuser"
 }
 
@@ -574,26 +642,26 @@ cmd_export() {
     local year="${1:-$(date +%Y)}"
     local fmt="${2:-md}"
     case "$fmt" in
-        md|markdown) ext="md"; route="year-summary.md" ;;
-        json) ext="json"; route="year-summary.json" ;;
+        md|markdown) ext="md" ;;
+        json) ext="json" ;;
         *) die_unknown format "$fmt" export ;;
     esac
-    local out="year-summary-$year.$ext"
-    msg "$DIM" "fetching" "$HQ_URL/reports/export/$route?year=$year"
-    # Use curl with the system's resolver — Tailscale + AdGuard handle DNS.
-    # The endpoint requires auth; this expects /tmp/hq-cookies.txt to exist
-    # from a prior browser sign-in via `tailscale + browser`. If absent, run
-    # `hq open` and sign in, then re-export.
-    curl -fsSL --cookie-jar /tmp/hq-cookies.txt --cookie /tmp/hq-cookies.txt \
-        "$HQ_URL/reports/export/$route?year=$year" -o "$out"
+    local result out
+    result="$(jq -cn --argjson year "$year" --arg format "$ext" \
+        '{tool:"export_year_summary",arguments:{year:$year,format:$format}}' \
+        | hq_mcp_call)"
+    [[ "$(jq -r '.ok' <<<"$result")" == "true" ]] \
+        || die "error" "$(jq -r '.error.message // "report export failed"' <<<"$result")"
+    out="$(jq -r '.filename' <<<"$result")"
+    jq -r '.content' <<<"$result" > "$out"
     msg "$GREEN" "wrote" "$out"
     printf '%s\n' "$out"
 }
 
 # All help + the machine surface (main `-h`, `--describe`, focused `<cmd> -h`)
 # render from the one spec via the shared intercept; below is just command →
-# action. `hq create <kind> -h` still reaches manage.py (the owner of those
-# flags), since the intercept only fires when the help flag is the 2nd arg.
+# action. Routine domain operations use MCP; SSH commands below are explicitly
+# host-administration surfaces.
 desc_help_intercept "$@"
 case "${1:-}" in
     manifest)   shift; cmd_manifest "$@" ;;

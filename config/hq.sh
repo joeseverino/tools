@@ -22,12 +22,18 @@
 
 # SSH alias of the server where Severino HQ runs. Set in your ~/.zshrc to
 # match the entry in your ~/.ssh/config — e.g. `export HQ_SSH_HOST=hq-host`.
-: "${HQ_SSH_HOST:?set in ~/.zshrc — SSH alias for the HQ server}"
+: "${HQ_SSH_HOST:=}"
 
 # Project path on $HQ_SSH_HOST where the Django app is checked out.
 # e.g. `export HQ_REMOTE_PATH=/opt/apps/severino-hq`.
-: "${HQ_REMOTE_PATH:?set in ~/.zshrc — install path on \$HQ_SSH_HOST}"
+: "${HQ_REMOTE_PATH:=}"
 
 # URL where HQ is served (used for the open-in-browser helper).
 # e.g. `export HQ_URL=https://hq.example.com`.
 : "${HQ_URL:?set in ~/.zshrc — URL where HQ is served}"
+
+# Routine data-plane operations use HQ's authenticated MCP endpoint. The URL
+# and auth-helper path live together in a non-secret local client profile;
+# bearer credentials are resolved only at call time by the helper.
+: "${HQ_MCP_CLIENT_CONFIG:=$HOME/.config/severino-mcp/client.json}"
+: "${HQ_MCP_CLIENT:=$TOOLS_HOME/lib/hq-mcp-client.py}"
