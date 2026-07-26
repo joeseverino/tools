@@ -12,6 +12,31 @@
   calls through the shared Node adapter, preventing stale-session overwrites
   when paired with severino-vault-mcp's stale-plan guard.
 
+## [1.4.0](https://github.com/joeseverino/tools/compare/v1.3.1...v1.4.0) (2026-07-26)
+
+
+### Features
+
+* **cordon:** pin cordon-spec from npm — the schema check verifies everywhere ([#62](https://github.com/joeseverino/tools/issues/62)) ([2b78d36](https://github.com/joeseverino/tools/commit/2b78d36b384b62e802cfced257ca281fb8e8e8ba))
+* establish a reusable tools SDK ([#69](https://github.com/joeseverino/tools/issues/69)) ([7d8de2e](https://github.com/joeseverino/tools/commit/7d8de2e78af9e252f297e4f34cdd1b0a12cb09cb))
+* extract shared pdf-engine; fix brand-font drift in doc-to-pdf and diagram ([#72](https://github.com/joeseverino/tools/issues/72)) ([047a0fc](https://github.com/joeseverino/tools/commit/047a0fc024600271c84898490178c1428a8b0a16))
+* gate-preview — a cordon change's fleet blast radius before merge ([#56](https://github.com/joeseverino/tools/issues/56)) ([208f90c](https://github.com/joeseverino/tools/commit/208f90c9c084f4a026816bc49afaa53baf926f4e))
+* **hq:** env-diff/env-apply — prod env renders from 1Password via severino-hq-secrets.service ([#74](https://github.com/joeseverino/tools/issues/74)) ([1c32da2](https://github.com/joeseverino/tools/commit/1c32da23edaedc270d3c16bc628e9d14c0faf1b1))
+* **hq:** make Tools a schema-driven HQ MCP client ([#77](https://github.com/joeseverino/tools/issues/77)) ([6236fcd](https://github.com/joeseverino/tools/commit/6236fcd37c2bd83c2c647a612b1645c3e98b199a))
+* **repo:** fleet entry as one verb — new bootstraps from cordon-starter, register backfills the vault + HQ registry ([#68](https://github.com/joeseverino/tools/issues/68)) ([82e31e4](https://github.com/joeseverino/tools/commit/82e31e43bd4489f15b747d8a6ef2cfa025d885f7))
+* **secrets:** shared 1Password-backed secrets layer for the drift guards ([#76](https://github.com/joeseverino/tools/issues/76)) ([7ad02c7](https://github.com/joeseverino/tools/commit/7ad02c7dcb63d916382f28b70219f9b934b5cb56))
+* streamline site delivery workflows ([#71](https://github.com/joeseverino/tools/issues/71)) ([f1df118](https://github.com/joeseverino/tools/commit/f1df1183f803afdd313ea357262908d878c962c6))
+* **tools:** bump-engine + engine lock parity doctor check ([#54](https://github.com/joeseverino/tools/issues/54)) ([7951e80](https://github.com/joeseverino/tools/commit/7951e80dc2d7e487e857a397ad8489de6b88e9dc))
+
+
+### Bug Fixes
+
+* disable the catalog bats run — tools check --ci is the one bats gate ([#57](https://github.com/joeseverino/tools/issues/57)) ([a1d84b8](https://github.com/joeseverino/tools/commit/a1d84b8111a10a2a8767c54886f25ba3469a0c10))
+* **git:** a start-cut branch is current, not zombie — ship commits on it ([#58](https://github.com/joeseverino/tools/issues/58)) ([66b8346](https://github.com/joeseverino/tools/commit/66b83466fa4ba248b914b8ffc68c7238d8cb1e01))
+* guard sdk core seams, port seam rationale, bootstrap remember first write ([#70](https://github.com/joeseverino/tools/issues/70)) ([3bd08c2](https://github.com/joeseverino/tools/commit/3bd08c29cb370bb5ed6938fd1b543e476246e335))
+* **land:** don't count failed merges as landed in the summary ([#75](https://github.com/joeseverino/tools/issues/75)) ([12cb03a](https://github.com/joeseverino/tools/commit/12cb03a24d75aa12e08255298158145f3083cf2a))
+* **ship:** a skip is not a ship — honest tally, and push failures speak ([#60](https://github.com/joeseverino/tools/issues/60)) ([cc184b8](https://github.com/joeseverino/tools/commit/cc184b896d97de7252747720817cce7539cafb23))
+
 ## [1.3.1](https://github.com/joeseverino/tools/compare/v1.3.0...v1.3.1) (2026-07-01)
 
 
