@@ -33,8 +33,8 @@ DRIFT_REVIEW_BIN="${DRIFT_REVIEW_BIN:-severino-vault-mcp}"
 
 # One credential boundary for every guard. The registry and provider mechanics
 # live in secrets.sh; guards know only the logical ids they require.
-# shellcheck source=lib/secrets.sh
-source "$TOOLS_HOME/lib/secrets.sh"
+# shellcheck source=lib/sdk/secrets.sh
+source "$TOOLS_HOME/lib/sdk/secrets.sh"
 
 # Read the registry's cached value for this dataset and re-normalize it, so it
 # compares byte-for-byte against fetch_live.

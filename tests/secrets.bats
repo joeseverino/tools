@@ -20,11 +20,11 @@ SH
 }
 
 read_secret() {
-    run bash -c 'source "$TOOLS_HOME/lib/common.sh"; source "$TOOLS_HOME/lib/secrets.sh"; secret_read "$1"' _ "$1"
+    run bash -c 'source "$TOOLS_HOME/lib/common.sh"; source "$TOOLS_HOME/lib/sdk/secrets.sh"; secret_read "$1"' _ "$1"
 }
 
 @test "registry validates and inventory exposes logical ids only" {
-    run bash -c 'source "$TOOLS_HOME/lib/common.sh"; source "$TOOLS_HOME/lib/secrets.sh"; secrets_registry_check && secrets_inventory'
+    run bash -c 'source "$TOOLS_HOME/lib/common.sh"; source "$TOOLS_HOME/lib/sdk/secrets.sh"; secrets_registry_check && secrets_inventory'
     [ "$status" -eq 0 ]
     [ "$output" = "example.token" ]
 }
@@ -33,6 +33,15 @@ read_secret() {
     read_secret example.token
     [ "$status" -eq 0 ]
     [ "$output" = "fixture-secret" ]
+}
+
+@test "registry validation is owned by the versioned schema" {
+    printf '%s\n' '{"schema_version":1,"provider":"1password","secrets":{"bad id":"not-a-provider-ref"}}' \
+        > "$BATS_TEST_TMPDIR/invalid-secrets.json"
+    export TOOLS_SECRETS_REGISTRY="$BATS_TEST_TMPDIR/invalid-secrets.json"
+
+    run bash -c 'source "$TOOLS_HOME/lib/common.sh"; source "$TOOLS_HOME/lib/sdk/secrets.sh"; secrets_registry_check'
+    [ "$status" -ne 0 ]
 }
 
 @test "unknown logical ids fail without invoking a fallback" {

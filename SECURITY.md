@@ -6,11 +6,11 @@ How this toolchain handles secrets, and — just as important — what it does
 ## Two secret domains
 
 **Operational credentials live in 1Password.** API tokens and service logins
-used by Tools are items in the Infrastructure vault. Callers request logical ids
-through `lib/secrets.sh`; the sole id-to-`op://` mapping is
-`config/secrets.json`. A tool must never call `op` directly, embed an item
-reference, or add a fallback credential store. Values exist only in process
-memory for the API call and are never printed.
+used by Tools are items in explicitly approved vaults. Callers request logical ids
+through `lib/sdk/secrets.sh`; the sole id-to-`op://` mapping is
+`config/secrets.json`, validated by `schemas/secrets-v1.json`. A tool must never
+call `op` directly, embed an item reference, or add a fallback credential store.
+Values exist only in process memory for the API call and are never printed.
 
 **Arbitrary encrypted files use age.** `encrypt`, `decrypt`, and `open-age`
 remain the file-encryption workflow. Ciphertext may be stored in iCloud or the
@@ -77,6 +77,6 @@ about what gets printed.
 
 Per `CONTRIBUTING.md`: any change to `encrypt`, `decrypt`, `open-age`,
 `lib/key.sh`, or the Keychain plumbing must state the threat-model impact
-explicitly in the PR description. Changes to `lib/secrets.sh` or
+explicitly in the PR description. Changes to `lib/sdk/secrets.sh` or
 `config/secrets.json` must also state whether provider, vault scope, value
 exposure, or headless behavior changed.

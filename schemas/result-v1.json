@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.severino.dev/tools/result-v1.json",
+  "$id": "https://raw.githubusercontent.com/joeseverino/tools/main/schemas/result-v1.json",
   "title": "Severino Tools Result v1",
   "oneOf": [
     {
