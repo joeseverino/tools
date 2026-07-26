@@ -64,7 +64,10 @@ is now only a compatibility aggregator over those narrow modules.
 Structured utilities use the versioned `result-v1` envelope. Fleet capabilities
 (describe/brief emitters, engine consumers, schema and install surfaces) live in
 `config/capabilities.json` and are derived by `capabilities.mjs`; on-disk fleet
-state remains owned by `repos --json`. See [`SDK.md`](SDK.md).
+state remains owned by `repos --json`. Operational credentials are requested by
+logical id through `lib/sdk/secrets.sh`; `schemas/secrets-v1.json` is the one
+registry contract and the provider references never leak into callers. See
+[`SDK.md`](SDK.md).
 
 ## Safe AI tooling — the contract drives *and* guards the agent
 

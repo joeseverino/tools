@@ -275,9 +275,10 @@ drift (CI / pre-deploy, including the vault's Frontmatter Schema doc). Don't
 hand-maintain enum lists anywhere downstream.
 
 **No hand-rolled logic in `bin/hq`:** `hq doctor` reports the vault↔HQ gap via
-`severino-vault-mcp hq-manifest --report` (not a re-walk), and `hq validate`
-calls HQ's `manage.py audit_registry` (not an inline ORM script over SSH). Keep
-the contract/logic in the MCP or a `manage.py` command; `bin/hq` just formats.
+`svmc hq-manifest --report` (not a re-walk), and `hq validate` calls HQ's
+authenticated `audit_registry` MCP tool (not an inline ORM script over SSH).
+Keep the contract/logic in the owning MCP or HQ application service; `bin/hq`
+just transports and formats emitted JSON.
 
 **Cross-repo JSON contract** (keep both sides in sync):
 - One JSON object per call; exit 0 on success, 1 on failure.

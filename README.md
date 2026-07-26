@@ -458,12 +458,12 @@ Severino HQ glue. Reads YAML frontmatter from the vault and upserts the HQ docs 
 | Invocation | Arguments / options | Effect | Summary |
 |---|---|---|---|
 | `hq manifest` | — | `read` | Print the manifest JSON (frontmatter from every doc) to stdout — for inspection or piping elsewhere |
-| `hq sync` | `--prune`<br>`--no-update` | `remote_write + network` | Pipe the manifest into HQ's import_docs_manifest; upserts by doc_id, safe to re-run |
+| `hq sync` | `--prune`<br>`--no-update` | `remote_write + network` | Sync the docs manifest and validated topology inventory into HQ; idempotent and safe to re-run |
 | `hq doctor` | — | `read` | Report vault docs missing or with invalid frontmatter, and whether HQ's last-synced manifest is stale |
 | `hq schema` | `--check` | `local_write` | Regenerate HQ's docs_index/schema.json from the installed MCP (the canonical frontmatter contract) |
 | `hq validate` | — | `read + network` | Report HQ registry entries (Projects/Assets) that no vault doc references. Read-only |
 | `hq create <project|asset> <slug>` | `<project\|asset>`<br>`<slug>` | `remote_write + network` | Create or update a Project or Asset in HQ (idempotent upsert by slug) |
-| `hq deploy` | — | `deploy + network` | Fallback: re-pull the latest scanned GHCR image and restart the container (CI's deploy step) |
+| `hq deploy` | — | `deploy + network` | Fallback: redeploy the immutable image from the last fully successful HQ CI run |
 | `hq ship` | `-m, --message <TEXT>` | `deploy + network` | Commit + push a small HQ change. The push IS the deploy: it triggers the gated pipeline (build → scan → deploy on green) |
 | `hq env-diff` | — | `read + network` | Key-level drift between the 1Password 'severino-hq env' item (the source of truth) and the env rendered on prod. Key names only — values never print |
 | `hq env-apply` | — | `deploy + network` | Apply 1Password env changes to prod now: runs severino-hq-secrets.service (renders + restarts only if something changed; the hourly timer does this anyway) |
