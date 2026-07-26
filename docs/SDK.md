@@ -13,6 +13,7 @@ lib/sdk.sh               shell command runtime (core + Cordon emitter)
 lib/sdk/process.mjs      argument-safe sync/async process execution
 lib/sdk/result.mjs       result-v1 constructors and rendering
 lib/sdk/svmc.{sh,mjs}    governed vault CLI crossing
+lib/sdk/secrets.sh       logical secret ids, schema validation, provider crossing
 config/capabilities.json fleet capability declarations
 ```
 
@@ -55,6 +56,10 @@ writeResult(result.ok ? success(result.json) : failure('command_failed', result.
 Use `svmc(args)` from `lib/sdk/svmc.mjs` for vault governance. It owns binary
 selection, vault-path propagation, argument-safe execution, JSON parsing, and
 the MCP `{ok,error}` convention.
+
+Shell consumers use `secret_read <logical-id>` from `lib/sdk/secrets.sh`; the
+versioned `schemas/secrets-v1.json` contract validates the registry before any
+provider call. Callers never know a vault name, item name, or provider URI.
 
 ## Capability registry
 

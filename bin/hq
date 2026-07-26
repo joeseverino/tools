@@ -94,25 +94,25 @@ describe_spec() {
 }
 
 require_manifest_mcp() {
-    command -v severino-vault-mcp >/dev/null 2>&1 \
+    svmc_available \
         || die "error" "severino-vault-mcp is required; run \`site reinstall-mcp\`"
 }
 
 build_manifest() {
     require_manifest_mcp
     local help
-    help="$(severino-vault-mcp --help 2>&1 || true)"
+    help="$(svmc --help 2>&1 || true)"
     if [[ "$help" != *"hq-manifest"* ]]; then
         die "error" "installed severino-vault-mcp is outdated; run \`site reinstall-mcp\`"
     fi
     # Dir list is the MCP's to derive (indexed_dirs + slim content dirs) — the
     # HQ_VAULT_DIRS second hand-kept copy is retired.
-    severino-vault-mcp hq-manifest "$VAULT"
+    svmc hq-manifest "$VAULT"
 }
 
 build_topology_inventory() {
     require_manifest_mcp
-    severino-vault-mcp topology --emit inventory
+    svmc topology --emit inventory
 }
 
 hq_mcp_call() {
@@ -138,7 +138,7 @@ cmd_schema() {
     esac
 
     require_manifest_mcp
-    if ! severino-vault-mcp schema --json >/dev/null 2>&1; then
+    if ! svmc schema --json >/dev/null 2>&1; then
         die "error" "installed severino-vault-mcp lacks \`schema\`; run \`site reinstall-mcp\`"
     fi
 
@@ -148,7 +148,7 @@ cmd_schema() {
 
     if [[ "$check" == "1" ]]; then
         local failed=0
-        if diff -q <(severino-vault-mcp schema --json) "$dest" >/dev/null 2>&1; then
+        if diff -q <(svmc schema --json) "$dest" >/dev/null 2>&1; then
             msg "$GREEN" "ok" "docs_index/schema.json matches the MCP"
         else
             msg "$RED" "drift" "docs_index/schema.json is stale — run \`hq schema\`"
@@ -158,7 +158,7 @@ cmd_schema() {
         local doc_out
         if [[ ! -f "$HQ_SCHEMA_DOC" ]]; then
             msg "$YELLOW" "skip" "vault schema doc not found: $HQ_SCHEMA_DOC"
-        elif doc_out="$(severino-vault-mcp schema --check-doc "$HQ_SCHEMA_DOC" 2>&1)"; then
+        elif doc_out="$(svmc schema --check-doc "$HQ_SCHEMA_DOC" 2>&1)"; then
             msg "$GREEN" "ok" "vault Frontmatter Schema doc matches the MCP"
         else
             msg "$RED" "drift" "vault Frontmatter Schema doc lists stale enum values:"
@@ -168,12 +168,12 @@ cmd_schema() {
 
         [[ "$failed" == "0" ]] || die "error" "schema drift — fix the above" 1
     else
-        severino-vault-mcp schema --json > "$dest"
+        svmc schema --json > "$dest"
         msg "$GREEN" "wrote" "docs_index/schema.json (from the MCP)"
 
         local doc_out
         if [[ -f "$HQ_SCHEMA_DOC" ]] \
-            && ! doc_out="$(severino-vault-mcp schema --check-doc "$HQ_SCHEMA_DOC" 2>&1)"; then
+            && ! doc_out="$(svmc schema --check-doc "$HQ_SCHEMA_DOC" 2>&1)"; then
             msg "$YELLOW" "warn" "vault Frontmatter Schema doc lists stale enum values:"
             printf '%s\n' "$doc_out" | sed 's/^/  /'
             msg "$DIM" "fix" "update the enum lines in $HQ_SCHEMA_DOC by hand"
@@ -186,11 +186,11 @@ cmd_schema() {
 # MCP. A stale contract means the deployed importer can reject docs the MCP
 # considers valid. Best-effort — silent if the MCP or the file is absent.
 schema_drift_warn() {
-    command -v severino-vault-mcp >/dev/null 2>&1 || return 0
-    severino-vault-mcp schema --json >/dev/null 2>&1 || return 0
+    svmc_available || return 0
+    svmc schema --json >/dev/null 2>&1 || return 0
     local dest="$HQ_LOCAL_PATH/docs_index/schema.json"
     [[ -f "$dest" ]] || return 0
-    if ! diff -q <(severino-vault-mcp schema --json) "$dest" >/dev/null 2>&1; then
+    if ! diff -q <(svmc schema --json) "$dest" >/dev/null 2>&1; then
         msg "$YELLOW" "schema" \
             "HQ docs_index/schema.json lags the MCP — run \`hq schema\`, commit, deploy"
     fi
@@ -334,7 +334,7 @@ cmd_doctor() {
     # it for the structured report instead of re-walking the vault here.
     require_manifest_mcp
     local report
-    report="$(severino-vault-mcp hq-manifest "$VAULT" --report 2>/dev/null)" \
+    report="$(svmc hq-manifest "$VAULT" --report 2>/dev/null)" \
         || true
     [[ -n "$report" ]] \
         || die "error" "hq-manifest --report returned nothing; run \`site reinstall-mcp\`"

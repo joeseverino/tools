@@ -16,7 +16,7 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 # shellcheck source=config/crypt.sh
 [[ -n "${KEYS_HOME-}"    ]] && source "$TOOLS_HOME/config/crypt.sh"
 source "$TOOLS_HOME/lib/key.sh"
-source "$TOOLS_HOME/lib/secrets.sh"
+source "$TOOLS_HOME/lib/sdk/secrets.sh"
 source "$TOOLS_HOME/lib/doctor.sh"
 # shellcheck source=lib/tools/describe.sh
 source "$TOOLS_HOME/lib/tools/describe.sh"

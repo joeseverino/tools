@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.severino.dev/tools/capabilities-v1.json",
+  "$id": "https://raw.githubusercontent.com/joeseverino/tools/main/schemas/capabilities-v1.json",
   "title": "Severino Fleet Capabilities v1",
   "type": "object",
   "required": ["capabilities_version", "repositories"],
