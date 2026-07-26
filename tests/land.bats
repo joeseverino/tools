@@ -94,6 +94,14 @@ assert o["group"]=="Workspace", o.get("group")
     grep -qF -- "--admin" "$GH_MERGE_LOG"
 }
 
+@test "land summary does not count a failed merge as landed" {
+    setup_land_fleet
+    GH_MERGE_FAIL=1 run land_bin green-app --go
+    [ "$status" -eq 0 ]
+    grep -qF "merge failed" <<<"$output" \
+      && grep -qF "landed     0 PR(s)" <<<"$output"
+}
+
 @test "land --go refuses a fleet without --all" {
     setup_land_fleet
     run land_bin --go

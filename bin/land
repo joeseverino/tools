@@ -88,7 +88,9 @@ while IFS=$'\t' read -r name path number ci url; do
     (( GO )) || continue
     (( green || ADMIN )) || continue
 
-    (
+    # The subshell's exit status gates the tally: a failed merge prints "skip"
+    # and exits 1, so it never counts as landed.
+    if (
         cd "$path"
         # git.sh owns the merge mechanic; land owns the policy (which repo, green
         # gate, admin override) already decided above. git_merge_pr merges the
@@ -97,10 +99,11 @@ while IFS=$'\t' read -r name path number ci url; do
             printf '  %s%-10s%s %s\n' "$GREEN$BOLD" "merged" "$RESET" "$name: PR #$number → ${url:-merged}"
         else
             printf '  %s%-10s%s %s\n' "$RED$BOLD" "skip" "$RESET" "$name: merge failed (check gh auth / protection — try --admin)"
-            exit 0
+            exit 1
         fi
-    )
-    landed=$(( landed + 1 ))
+    ); then
+        landed=$(( landed + 1 ))
+    fi
 done <<< "$plan"
 
 echo
