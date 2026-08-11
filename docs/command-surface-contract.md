@@ -147,9 +147,8 @@ about to act on instead of the whole surface. An unknown command returns
 folds in sibling repos that emit the same contract — today
 `severino-vault-mcp describe`. `schemas/cordon-v4.json` here is a copy vendored
 verbatim from the [Cordon repo](https://github.com/joeseverino/cordon) (the
-single source of the contract); `tools check` / `tools doctor` diff it against
-the canonical source (`cordon_schema_status`, via `$CORDON_HOME` or the sibling
-checkout) so the copy can't silently drift. `tools` is one conformant emitter,
+single source of the contract); `tools contracts --check` compares it with the
+pinned `cordon-spec` package so the copy cannot silently drift. `tools` is one conformant emitter,
 and `tools check` runs `tools describe --repos` through that schema, so a drifted
 *sibling emitter* fails *here* (the cross-repo drift guard). One schema, every
 emitter checked. (When the sibling isn't installed, `--repos` folds in nothing.)

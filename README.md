@@ -202,6 +202,7 @@ Umbrella command for the personal CLI toolchain.
 | `tools describe [tool] [command]` | `[tool]`<br>`[command]`<br>`--pretty`<br>`--repos`<br>`--tui` | `read` | Emit the command surface of every tool as one JSON document (the emit-once contract) |
 | `tools tui` | `--repos` | `read + interactive` | Open the full-screen command-surface explorer (shorthand for 'describe --tui') |
 | `tools generate [all|completions|readme]` | `[all\|completions\|readme]`<br>`--check` | `local_write` | Regenerate contract-derived completions and README reference/inventory |
+| `tools contracts` | `--check`<br>`--json` | `read` | Inspect the producer → consumer contract graph and projection drift |
 | `tools bump-engine` | `--lock-only` | `local_write + network` | Re-lock severino-vault-engine in every consumer repo and reinstall their uv tools |
 
 **`tools describe` details**
@@ -216,6 +217,10 @@ tools tui  # interactive explorer over the whole toolchain (alias of describe --
 **`tools tui` details**
 
 The human tier of the emit-once contract: a two-pane explorer over every tool and command, with / to filter, e to expand the selected command's full prose + examples, and Enter to copy a ready-to-paste invocation.
+
+**`tools contracts` details**
+
+Contracts are declared once in config/contracts.json. Owners emit source facts; consumers declare check and repair commands. This command discovers repository paths through the capability registry and never maintains a second fleet inventory.
 
 **`tools bump-engine` details**
 

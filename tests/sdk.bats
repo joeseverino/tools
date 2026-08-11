@@ -71,6 +71,29 @@ load helpers
     [ "$output" = "$BATS_TEST_TMPDIR/mcp
 $BATS_TEST_TMPDIR/edu
 $BATS_TEST_TMPDIR/life" ]
+
+    MCP_HOME="$BATS_TEST_TMPDIR/mcp" run node --input-type=module -e '
+      import { repositoryEntries } from "./lib/tools/capabilities.mjs";
+      const mcp = repositoryEntries().find((entry) => entry.id === "severino-vault-mcp");
+      if (mcp.path !== process.env.MCP_HOME) process.exit(1);
+    '
+    [ "$status" -eq 0 ]
+}
+
+@test "contract graph validates, fingerprints owners, and checks declared projections" {
+    run bash -c 'node "$TOOLS_HOME/lib/tools/validate-json.mjs" "$TOOLS_HOME/schemas/contract-graph-v1.json" \
+      < "$TOOLS_HOME/config/contracts.json"'
+    [ "$status" -eq 0 ]
+
+    run "$TOOLS_HOME/bin/tools" contracts --check --json
+    [ "$status" -eq 0 ]
+    node -e '
+      const graph = JSON.parse(process.argv[1]);
+      if (graph.contract_graph_version !== 1 || graph.contracts.length < 2) process.exit(1);
+      if (!graph.contracts.every((item) => item.fingerprint.available)) process.exit(1);
+      if (!graph.projections.some((item) => item.contract === "tools.command-inventory.v4")) process.exit(1);
+      if (!graph.projections.every((item) => item.ok)) process.exit(1);
+    ' "$output"
 }
 
 @test "common remains a compatibility aggregator over narrow SDK modules" {

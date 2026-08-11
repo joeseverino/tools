@@ -15,6 +15,7 @@ lib/sdk/result.mjs       result-v1 constructors and rendering
 lib/sdk/svmc.{sh,mjs}    governed vault CLI crossing
 lib/sdk/secrets.sh       logical secret ids, schema validation, provider crossing
 config/capabilities.json fleet capability declarations
+config/contracts.json    producer → consumer contract graph
 ```
 
 `lib/common.sh` remains a compatibility aggregator for the existing suite. New
@@ -72,6 +73,22 @@ state; the manifest declares capabilities, not inventory.
 Add a field only when two consumers need it. Validate every manifest change
 against `schemas/capabilities-v1.json`; a wire-format change requires a new
 versioned schema.
+
+## Contract graph
+
+`config/contracts.json` declares each domain contract once, names its owner,
+and connects it to derived consumer projections. A projection provides its
+owner's check command and, when available, repair command; Tools only executes
+and reports those surfaces. It does not reproduce the domain comparison.
+
+`tools contracts` renders the graph with a SHA-256 fingerprint of every
+available source. `tools contracts --check` runs every declared projection
+check and fails on drift. Repository paths resolve through the capability
+registry, so the graph never becomes another fleet inventory.
+
+The graph is validated against `schemas/contract-graph-v1.json`. Add an edge
+when a real consumer projection exists; do not register aspirational
+dependencies or checks that duplicate an owner's business rules.
 
 ## Boundaries
 
