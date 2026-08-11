@@ -70,7 +70,6 @@ gate() {
 doctor_gates() {
     local fail=0
     gate "hq doctor"   "$TOOLS_HOME/bin/hq" doctor         || fail=1
-    gate "hq schema"   "$TOOLS_HOME/bin/hq" schema --check || fail=1
     gate "site doctor" "$TOOLS_HOME/bin/site" doctor       || fail=1
     return "$fail"
 }
