@@ -73,7 +73,9 @@ Cross-repository SSOT relationships live in `config/contracts.json`. The graph
 records contract owners and executable projection checks while repository
 discovery stays in `repos --json` and path resolution stays in the capability
 registry. `tools contracts --check` is the generic drift face: domain owners
-perform comparisons; Tools composes their results.
+perform comparisons; Tools composes their results. Its `local → fleet → live`
+scope ladder keeps CI hermetic while allowing doctor to widen the same graph
+deliberately.
 
 ## Safe AI tooling — the contract drives *and* guards the agent
 

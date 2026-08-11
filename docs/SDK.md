@@ -82,9 +82,12 @@ owner's check command and, when available, repair command; Tools only executes
 and reports those surfaces. It does not reproduce the domain comparison.
 
 `tools contracts` renders the graph with a SHA-256 fingerprint of every
-available source. `tools contracts --check` runs every declared projection
-check and fails on drift. Repository paths resolve through the capability
-registry, so the graph never becomes another fleet inventory.
+available source. `tools contracts --check` runs declared projection checks
+and fails on drift. Projection scopes form a strict `local → fleet → live`
+ladder: CI selects `local`, `tools doctor --all` selects `fleet`, and
+`tools doctor --live` opts into live systems. Repository paths and emitter
+commands resolve through the capability registry, so the graph never becomes
+another fleet inventory or command catalog.
 
 The graph is validated against `schemas/contract-graph-v1.json`. Add an edge
 when a real consumer projection exists; do not register aspirational

@@ -11,6 +11,15 @@
       }
     },
     {
+      "id": "vault.frontmatter.v1",
+      "owner": "severino-vault-mcp",
+      "description": "Canonical vault frontmatter fields, enums, and ownership rules.",
+      "source": {
+        "repository": "severino-vault-mcp",
+        "capability": "schema_contract"
+      }
+    },
+    {
       "id": "tools.command-inventory.v4",
       "owner": "tools",
       "description": "Local command inventory emitted from every Tools Cordon surface.",
@@ -26,6 +35,7 @@
       "contract": "cordon.command-surface.v4",
       "consumer": "tools",
       "description": "Vendored Cordon schema used by hermetic validation.",
+      "scope": "local",
       "check": {
         "repository": "tools",
         "argv": ["node", "lib/tools/check-cordon-schema.mjs"]
@@ -36,6 +46,7 @@
       "contract": "tools.command-inventory.v4",
       "consumer": "tools",
       "description": "README inventory/reference and shell completions.",
+      "scope": "local",
       "check": {
         "repository": "tools",
         "argv": ["bin/tools", "generate", "--check"]
@@ -43,6 +54,21 @@
       "repair": {
         "repository": "tools",
         "argv": ["bin/tools", "generate"]
+      }
+    },
+    {
+      "id": "hq.frontmatter-schema",
+      "contract": "vault.frontmatter.v1",
+      "consumer": "severino-hq",
+      "description": "HQ's committed docs_index schema and the vault's human schema document.",
+      "scope": "fleet",
+      "check": {
+        "repository": "tools",
+        "argv": ["bin/hq", "schema", "--check"]
+      },
+      "repair": {
+        "repository": "tools",
+        "argv": ["bin/hq", "schema"]
       }
     }
   ]

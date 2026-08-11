@@ -98,6 +98,7 @@ describe_spec() {
     desc_effect read
     desc_opt --check -- "Run every declared projection check and fail when any derived artifact is stale"
     desc_opt --json  -- "Emit the graph, source fingerprints, and projection status as JSON"
+    desc_opt --scope SCOPE "{local,fleet,live}" -- "Maximum projection scope to inspect (default: fleet)"
     desc_para "Contracts are declared once in config/contracts.json. Owners emit source facts; consumers declare check and repair commands. This command discovers repository paths through the capability registry and never maintains a second fleet inventory."
 
     desc_cmd bump-engine -- "Re-lock severino-vault-engine in every consumer repo and reinstall their uv tools"
@@ -310,7 +311,10 @@ cmd_doctor() {
     # Contract owners and projections are declared once in the graph. Doctor
     # consumes its verdict instead of growing bespoke cross-repo drift logic.
     local contract_result contract_ok=0 contract_detail=""
-    contract_result=$(node "$TOOLS_HOME/lib/tools/contracts.mjs" --check --json 2>/dev/null) || true
+    local contract_scope="local"
+    (( run_all )) && contract_scope="fleet"
+    (( run_live )) && contract_scope="live"
+    contract_result=$(node "$TOOLS_HOME/lib/tools/contracts.mjs" --check --scope "$contract_scope" --json 2>/dev/null) || true
     if [[ -n "$contract_result" ]]; then
         contract_ok=$(node -e 'const x=JSON.parse(process.argv[1]); process.stdout.write(x.ok ? "1" : "0")' "$contract_result")
         contract_detail=$(node -e 'const x=JSON.parse(process.argv[1]); const p=x.projections; process.stdout.write(p.filter(v=>v.ok&&!v.skipped).length+" current, "+p.filter(v=>v.skipped).length+" unavailable")' "$contract_result")
@@ -458,6 +462,9 @@ cmd_contracts() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --check|--json) args+=("$1") ;;
+            --scope)
+                [[ -n "${2:-}" ]] || die "usage" "tools contracts --scope <local|fleet|live>" 2
+                args+=("$1" "$2"); shift ;;
             *) die_unknown option "$1" contracts ;;
         esac
         shift
@@ -589,7 +596,7 @@ cmd_check() {
             printf '%s\n' "$err" | sed 's/^/    /'
             check "contract graph schema" 0 "validation errors above" || fail=1
         fi
-        if err=$(node "$TOOLS_HOME/lib/tools/contracts.mjs" --check --json 2>&1); then
+        if err=$(node "$TOOLS_HOME/lib/tools/contracts.mjs" --check --scope local --json 2>&1); then
             check "contract projections" 1 "all declared projections current"
         else
             printf '%s\n' "$err" | sed 's/^/    /'

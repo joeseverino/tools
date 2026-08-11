@@ -85,15 +85,28 @@ $BATS_TEST_TMPDIR/life" ]
       < "$TOOLS_HOME/config/contracts.json"'
     [ "$status" -eq 0 ]
 
-    run "$TOOLS_HOME/bin/tools" contracts --check --json
+    run "$TOOLS_HOME/bin/tools" contracts --check --scope local --json
     [ "$status" -eq 0 ]
     node -e '
       const graph = JSON.parse(process.argv[1]);
       if (graph.contract_graph_version !== 1 || graph.contracts.length < 2) process.exit(1);
-      if (!graph.contracts.every((item) => item.fingerprint.available)) process.exit(1);
+      if (!graph.contracts.filter((item) => item.id !== "vault.frontmatter.v1").every((item) => item.fingerprint.available)) process.exit(1);
+      if (!graph.contracts.find((item) => item.id === "vault.frontmatter.v1").fingerprint.skipped) process.exit(1);
       if (!graph.projections.some((item) => item.contract === "tools.command-inventory.v4")) process.exit(1);
       if (!graph.projections.every((item) => item.ok)) process.exit(1);
+      if (graph.projections.some((item) => item.scope !== "local")) process.exit(1);
     ' "$output"
+
+    run node --input-type=module -e '
+      import fs from "node:fs";
+      import { repositoryCapability } from "./lib/tools/capabilities.mjs";
+      const graph = JSON.parse(fs.readFileSync("config/contracts.json"));
+      const edge = graph.projections.find((item) => item.id === "hq.frontmatter-schema");
+      const source = graph.contracts.find((item) => item.id === edge.contract).source;
+      if (edge.scope !== "fleet" || !edge.repair) process.exit(1);
+      if (repositoryCapability(source.repository, source.capability).join(" ") !== "severino-vault-mcp schema --contract") process.exit(1);
+    '
+    [ "$status" -eq 0 ]
 }
 
 @test "common remains a compatibility aggregator over narrow SDK modules" {
