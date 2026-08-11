@@ -101,6 +101,15 @@ describe_spec() {
     desc_opt --scope SCOPE "{local,fleet,live}" -- "Maximum projection scope to inspect (default: fleet)"
     desc_para "Contracts are declared once in config/contracts.json. Owners emit source facts; consumers declare check and repair commands. This command discovers repository paths through the capability registry and never maintains a second fleet inventory."
 
+    desc_cmd derive -- "Regenerate a declared consumer projection from its owner contract"
+    desc_effect local_write
+    desc_pos projection +optional -- "Projection id from tools contracts (omit only with --all)"
+    desc_opt --all -- "Plan every repairable projection in scope; required for a batch"
+    desc_opt --go -- "Execute the plan, then run each projection's declared check"
+    desc_opt --json -- "Emit the plan or execution receipts as JSON"
+    desc_opt --scope SCOPE "{local,fleet}" -- "Maximum projection scope to derive (default: local)"
+    desc_para "Dry-run by default. Repairs are schema-limited to local writes and execute only owner-declared commands; remote writes and deploys cannot enter this generic path."
+
     desc_cmd bump-engine -- "Re-lock severino-vault-engine in every consumer repo and reinstall their uv tools"
     desc_effect local_write +network
     desc_opt --lock-only -- "Update the uv.lock files but skip the uv tool reinstalls"
@@ -470,6 +479,10 @@ cmd_contracts() {
         shift
     done
     node "$TOOLS_HOME/lib/tools/contracts.mjs" "${args[@]}"
+}
+
+cmd_derive() {
+    node "$TOOLS_HOME/lib/tools/derive.mjs" "$@"
 }
 
 # ---------- check (the CI suite, runnable locally) ----------
@@ -1129,6 +1142,7 @@ case "${1:-}" in
     tui)           shift; cmd_describe --tui "$@" ;;
     generate)      shift; cmd_generate "$@" ;;
     contracts)     shift; cmd_contracts "$@" ;;
+    derive)        shift; cmd_derive "$@" ;;
     bump-engine)   shift; cmd_bump_engine "$@" ;;
     *)             die_unknown command "$1" ;;
 esac

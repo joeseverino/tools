@@ -93,6 +93,11 @@ The graph is validated against `schemas/contract-graph-v1.json`. Add an edge
 when a real consumer projection exists; do not register aspirational
 dependencies or checks that duplicate an owner's business rules.
 
+`tools derive <projection>` renders the owner-declared repair as a dry-run;
+`--go` executes it and immediately re-runs the projection check. `--all` is
+required for batches. Generic repairs are schema-limited to `local_write`, so
+remote mutations and deployments remain in their explicit governed workflows.
+
 ## Boundaries
 
 - Cordon describes commands and effects.

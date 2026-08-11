@@ -21,6 +21,7 @@ _tools_suite_contract() {
         'tui:Open the full-screen command-surface explorer (shorthand for '\''describe --tui'\'')'
         'generate:Regenerate contract-derived completions and README reference/inventory'
         'contracts:Inspect the producer → consumer contract graph and projection drift'
+        'derive:Regenerate a declared consumer projection from its owner contract'
         'bump-engine:Re-lock severino-vault-engine in every consumer repo and reinstall their uv tools'
       )
       _arguments -C \
@@ -41,6 +42,7 @@ _tools_suite_contract() {
             tui) _arguments '--repos[Also fold in sibling repos'\'' emitters (severino-vault-mcp, life)]' ;;
             generate) _arguments '1:Generated surface (default: all):(all completions readme)' '--check[Fail when generated files are stale; do not write]' ;;
             contracts) _arguments '--check[Run every declared projection check and fail when any derived artifact is stale]' '--json[Emit the graph, source fingerprints, and projection status as JSON]' '--scope[Maximum projection scope to inspect (default: fleet)]:scope:(local fleet live)' ;;
+            derive) _arguments '1:Projection id from tools contracts (omit only with --all):' '--all[Plan every repairable projection in scope; required for a batch]' '--go[Execute the plan, then run each projection'\''s declared check]' '--json[Emit the plan or execution receipts as JSON]' '--scope[Maximum projection scope to derive (default: local)]:scope:(local fleet)' ;;
             bump-engine) _arguments '--lock-only[Update the uv.lock files but skip the uv tool reinstalls]' ;;
           esac
           ;;

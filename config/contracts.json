@@ -53,7 +53,8 @@
       },
       "repair": {
         "repository": "tools",
-        "argv": ["bin/tools", "generate"]
+        "argv": ["bin/tools", "generate"],
+        "effect": "local_write"
       }
     },
     {
@@ -68,7 +69,8 @@
       },
       "repair": {
         "repository": "tools",
-        "argv": ["bin/hq", "schema"]
+        "argv": ["bin/hq", "schema"],
+        "effect": "local_write"
       }
     }
   ]

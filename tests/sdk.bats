@@ -109,6 +109,25 @@ $BATS_TEST_TMPDIR/life" ]
     [ "$status" -eq 0 ]
 }
 
+@test "derive is dry-run by default and verifies an owner-declared repair" {
+    local repo="$BATS_TEST_TMPDIR/consumer"
+    local graph="$BATS_TEST_TMPDIR/contracts.json"
+    mkdir -p "$repo"
+    cat > "$graph" <<'JSON'
+{"contract_graph_version":1,"contracts":[{"id":"fixture.v1","owner":"fixture","description":"Fixture contract.","source":{"repository":"severino-vault-mcp","path":"source.json"}}],"projections":[{"id":"fixture.output","contract":"fixture.v1","consumer":"fixture","description":"Fixture projection.","scope":"local","check":{"repository":"severino-vault-mcp","argv":["test","-f","derived.txt"]},"repair":{"repository":"severino-vault-mcp","argv":["touch","derived.txt"],"effect":"local_write"}}]}
+JSON
+
+    TOOLS_CONTRACT_GRAPH="$graph" MCP_HOME="$repo" run "$TOOLS_HOME/bin/tools" derive fixture.output --json
+    [ "$status" -eq 0 ]
+    [ ! -e "$repo/derived.txt" ]
+    [[ "$output" == *'"status":"planned"'* ]]
+
+    TOOLS_CONTRACT_GRAPH="$graph" MCP_HOME="$repo" run "$TOOLS_HOME/bin/tools" derive fixture.output --go --json
+    [ "$status" -eq 0 ]
+    [ -e "$repo/derived.txt" ]
+    [[ "$output" == *'"status":"derived"'* ]]
+}
+
 @test "common remains a compatibility aggregator over narrow SDK modules" {
     run bash -c 'source "$TOOLS_HOME/lib/common.sh"; type result_ok; type svmc; type vault_tree; type ci_shell_env; type hq_sync_freshness'
     [ "$status" -eq 0 ]
