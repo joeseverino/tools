@@ -202,7 +202,7 @@ Umbrella command for the personal CLI toolchain.
 | `tools describe [tool] [command]` | `[tool]`<br>`[command]`<br>`--pretty`<br>`--repos`<br>`--tui` | `read` | Emit the command surface of every tool as one JSON document (the emit-once contract) |
 | `tools tui` | `--repos` | `read + interactive` | Open the full-screen command-surface explorer (shorthand for 'describe --tui') |
 | `tools generate [all|completions|readme]` | `[all\|completions\|readme]`<br>`--check` | `local_write` | Regenerate contract-derived completions and README reference/inventory |
-| `tools contracts` | `--check`<br>`--json`<br>`--scope <local\|fleet\|live>` | `read` | Inspect the producer → consumer contract graph and projection drift |
+| `tools contracts [id]` | `[id]`<br>`--check`<br>`--json`<br>`--scope <local\|fleet\|live>` | `read` | Inspect the producer → consumer contract graph and projection drift |
 | `tools derive [projection]` | `[projection]`<br>`--all`<br>`--go`<br>`--json`<br>`--scope <local\|fleet>` | `local_write` | Regenerate a declared consumer projection from its owner contract |
 | `tools bump-engine` | `--lock-only` | `local_write + network` | Re-lock severino-vault-engine in every consumer repo and reinstall their uv tools |
 

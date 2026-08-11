@@ -96,6 +96,7 @@ describe_spec() {
 
     desc_cmd contracts -- "Inspect the producer → consumer contract graph and projection drift"
     desc_effect read
+    desc_pos id +optional -- "Contract or projection id to inspect (default: complete graph)"
     desc_opt --check -- "Run every declared projection check and fail when any derived artifact is stale"
     desc_opt --json  -- "Emit the graph, source fingerprints, and projection status as JSON"
     desc_opt --scope SCOPE "{local,fleet,live}" -- "Maximum projection scope to inspect (default: fleet)"
@@ -468,13 +469,17 @@ cmd_generate() {
 
 cmd_contracts() {
     local -a args=()
+    local id=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --check|--json) args+=("$1") ;;
             --scope)
                 [[ -n "${2:-}" ]] || die "usage" "tools contracts --scope <local|fleet|live>" 2
                 args+=("$1" "$2"); shift ;;
-            *) die_unknown option "$1" contracts ;;
+            -*) die_unknown option "$1" contracts ;;
+            *)
+                [[ -z "$id" ]] || die "usage" "tools contracts accepts one contract or projection id" 2
+                id="$1"; args+=("$1") ;;
         esac
         shift
     done

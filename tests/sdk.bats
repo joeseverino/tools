@@ -128,6 +128,20 @@ JSON
     [[ "$output" == *'"status":"derived"'* ]]
 }
 
+@test "contract lookup returns one token-minimal dependency slice" {
+    run "$TOOLS_HOME/bin/tools" contracts tools.generated-surfaces --scope local --json
+    [ "$status" -eq 0 ]
+    node -e '
+      const graph = JSON.parse(process.argv[1]);
+      if (graph.contracts.length !== 1 || graph.contracts[0].id !== "tools.command-inventory.v4") process.exit(1);
+      if (graph.projections.length !== 1 || graph.projections[0].id !== "tools.generated-surfaces") process.exit(1);
+    ' "$output"
+
+    run "$TOOLS_HOME/bin/tools" contracts missing.contract --json
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"contract or projection not found"* ]]
+}
+
 @test "common remains a compatibility aggregator over narrow SDK modules" {
     run bash -c 'source "$TOOLS_HOME/lib/common.sh"; type result_ok; type svmc; type vault_tree; type ci_shell_env; type hq_sync_freshness'
     [ "$status" -eq 0 ]

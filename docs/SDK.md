@@ -89,6 +89,10 @@ ladder: CI selects `local`, `tools doctor --all` selects `fleet`, and
 commands resolve through the capability registry, so the graph never becomes
 another fleet inventory or command catalog.
 
+Pass a contract or projection id to return only that dependency slice. This is
+the token-minimal impact path for operators and agents: the owner, source
+fingerprint, affected consumers, checks, and repairs without the full graph.
+
 The graph is validated against `schemas/contract-graph-v1.json`. Add an edge
 when a real consumer projection exists; do not register aspirational
 dependencies or checks that duplicate an owner's business rules.
