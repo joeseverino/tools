@@ -12,6 +12,13 @@
   calls through the shared Node adapter, preventing stale-session overwrites
   when paired with severino-vault-mcp's stale-plan guard.
 
+## [1.5.0](https://github.com/joeseverino/tools/compare/v1.4.0...v1.5.0) (2026-08-11)
+
+
+### Features
+
+* establish contract-driven Tools control plane ([#80](https://github.com/joeseverino/tools/issues/80)) ([0e65f5c](https://github.com/joeseverino/tools/commit/0e65f5c21d0e570fcea29049654eb12573fe3046))
+
 ## [1.4.0](https://github.com/joeseverino/tools/compare/v1.3.1...v1.4.0) (2026-07-26)
 
 
