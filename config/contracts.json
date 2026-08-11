@@ -1,0 +1,77 @@
+{
+  "contract_graph_version": 1,
+  "contracts": [
+    {
+      "id": "cordon.command-surface.v4",
+      "owner": "cordon",
+      "description": "Canonical Cordon v4 command-surface schema.",
+      "source": {
+        "repository": "tools",
+        "path": "node_modules/cordon-spec/schema/cordon-v4.json"
+      }
+    },
+    {
+      "id": "vault.frontmatter.v1",
+      "owner": "severino-vault-mcp",
+      "description": "Canonical vault frontmatter fields, enums, and ownership rules.",
+      "source": {
+        "repository": "severino-vault-mcp",
+        "capability": "schema_contract"
+      }
+    },
+    {
+      "id": "tools.command-inventory.v4",
+      "owner": "tools",
+      "description": "Local command inventory emitted from every Tools Cordon surface.",
+      "source": {
+        "repository": "tools",
+        "argv": ["bin/tools", "describe"]
+      }
+    }
+  ],
+  "projections": [
+    {
+      "id": "tools.cordon-schema-v4",
+      "contract": "cordon.command-surface.v4",
+      "consumer": "tools",
+      "description": "Vendored Cordon schema used by hermetic validation.",
+      "scope": "local",
+      "check": {
+        "repository": "tools",
+        "argv": ["node", "lib/tools/check-cordon-schema.mjs"]
+      }
+    },
+    {
+      "id": "tools.generated-surfaces",
+      "contract": "tools.command-inventory.v4",
+      "consumer": "tools",
+      "description": "README inventory/reference and shell completions.",
+      "scope": "local",
+      "check": {
+        "repository": "tools",
+        "argv": ["bin/tools", "generate", "--check"]
+      },
+      "repair": {
+        "repository": "tools",
+        "argv": ["bin/tools", "generate"],
+        "effect": "local_write"
+      }
+    },
+    {
+      "id": "hq.frontmatter-schema",
+      "contract": "vault.frontmatter.v1",
+      "consumer": "severino-hq",
+      "description": "HQ's committed docs_index schema and the vault's human schema document.",
+      "scope": "fleet",
+      "check": {
+        "repository": "tools",
+        "argv": ["bin/hq", "schema", "--check"]
+      },
+      "repair": {
+        "repository": "tools",
+        "argv": ["bin/hq", "schema"],
+        "effect": "local_write"
+      }
+    }
+  ]
+}
