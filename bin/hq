@@ -33,8 +33,18 @@ describe_spec() {
     desc_opt --prune     -- "Delete orphan DocumentationRecord rows (doc_ids in HQ but not in the manifest), plus ContentItems linked only to them. Use after a doc_id rename or retirement"
     desc_opt --no-update -- "Only create new records; never update existing ones"
 
+    desc_cmd dev       -- "Run the composed stack locally: the host plus every private plugin checkout found, on one interpreter"
+    desc_effect local_write +network
+    desc_para "Data-meaning settings (time zone, fiscal year start, review interval) are inherited from the production 1Password env rather than defaulted — a dev/prod time zone difference does not error, it silently reinterprets every timestamp an import writes."
+    desc_pos addr +optional -- "Bind address (default \$HQ_DEV_BIND). Binds all interfaces because dev-hq.jseverino.com proxies to this Mac"
+    desc_opt --fresh -- "Delete the scratch database first, so the boot starts from empty and re-migrates"
+    desc_example "hq dev"                    -- "serve the composed stack on 0.0.0.0:8000"
+    desc_example "hq dev --fresh"            -- "start from an empty scratch database"
+    desc_example "hq dev 127.0.0.1:8001"     -- "second instance, loopback only"
+
     desc_cmd doctor    -- "Report vault docs missing or with invalid frontmatter, and whether HQ's last-synced manifest is stale"
     desc_effect read
+    desc_opt --env -- "Instead: compare the settings that change what data MEANS (time zone, USE_TZ, reporting windows) between the resolved dev env and production. Exit 1 on a difference. Needs the 1Password CLI; prints these named non-secret settings only"
 
     desc_cmd schema    -- "Regenerate HQ's docs_index/schema.json from the installed MCP (the canonical frontmatter contract)"
     desc_effect local_write
@@ -86,6 +96,10 @@ describe_spec() {
     desc_pos year +optional             -- "Year to export (default: current year)"
     desc_pos format +optional "{md,json}" -- "Output format (default: md)"
     desc_env NOTES_HOME    -- "Vault root"
+    desc_env HQ_DEV_PLUGINS -- "Plugin checkouts \`hq dev\` composes (<path>=<module:attribute>)"
+    desc_env HQ_DEV_PYTHON -- "Interpreter carrying HQ's pinned runtime"
+    desc_env HQ_DEV_BIND   -- "Default bind address for \`hq dev\`"
+    desc_env HQ_DEV_DB     -- "Scratch SQLite path for \`hq dev\`"
     desc_env HQ_SSH_HOST   -- "SSH alias of the HQ server"
     desc_env HQ_REMOTE_PATH -- "HQ checkout path on the server"
     desc_env HQ_LOCAL_PATH -- "Local HQ checkout"
@@ -123,6 +137,171 @@ hq_mcp_call() {
 require_hq_admin() {
     [[ -n "$HQ_SSH_HOST" ]] || die "error" "HQ_SSH_HOST is required for host administration"
     [[ -n "$HQ_REMOTE_PATH" ]] || die "error" "HQ_REMOTE_PATH is required for host administration"
+}
+
+# ----- composed local dev ------------------------------------------------------
+#
+# Production is one image composing the host with every admitted plugin, so a
+# local boot that loads the host alone is not the thing that ships. `hq dev`
+# assembles the same composition from the checkouts on this Mac, and takes the
+# settings that change what data MEANS from prod's own env rather than from
+# whatever the committed defaults happen to be.
+
+HQ_PROD_ENV=""          # KEY=value lines, HQ_SEMANTIC_ENV only — never secrets
+HQ_PROD_UNFORWARDED=""  # key names prod sets that read semantic but aren't forwarded
+
+# hq_load_prod_env — resolve production's data-meaning env from 1Password once.
+# Reads only the names in HQ_SEMANTIC_ENV; that allowlist is what keeps this
+# from being a path to printing DJANGO_SECRET_KEY. It dies rather than falling
+# back to the committed defaults on purpose: an unreachable 1Password that
+# silently yields America/Chicago is precisely how a bad import gets written and
+# reviewed without anyone seeing an error.
+hq_load_prod_env() {
+    [[ -n "$HQ_PROD_ENV" ]] && return 0
+    command -v op >/dev/null 2>&1 \
+        || die "error" "1Password CLI (op) is required to resolve production's data-meaning settings"
+    local item allow
+    item="$(op item get "$HQ_ENV_ITEM" --vault "$HQ_ENV_VAULT" --format json 2>/dev/null)" \
+        || die "error" "cannot read \"$HQ_ENV_ITEM\" from 1Password — unlock the app and retry"
+    allow="^($(IFS='|'; printf '%s' "${HQ_SEMANTIC_ENV[*]}"))\$"
+    HQ_PROD_ENV="$(jq -r --arg allow "$allow" \
+        '.fields[] | select((.label // "") | test($allow)) | "\(.label)=\(.value // "")"' \
+        <<<"$item")"
+    # Key names only — the point is to notice the forward list lagging the item,
+    # and a value is never needed to notice that.
+    HQ_PROD_UNFORWARDED="$(jq -r --arg allow "$allow" --arg semantic "$HQ_SEMANTIC_PATTERN" \
+        '.fields[] | (.label // "")
+         | select(test("^[A-Z][A-Z0-9_]+$") and test($semantic) and (test($allow) | not))' \
+        <<<"$item")"
+    item=""
+    grep -q '^DJANGO_TIME_ZONE=.' <<<"$HQ_PROD_ENV" \
+        || die "error" "\"$HQ_ENV_ITEM\" has no DJANGO_TIME_ZONE value to inherit"
+}
+
+hq_prod_value() {
+    local line
+    line="$(grep -m1 "^$1=" <<<"$HQ_PROD_ENV" || true)"
+    printf '%s' "${line#*=}"
+}
+
+HQ_DEV_PYTHONPATH=""
+HQ_DEV_REFS=""
+
+# hq_resolve_dev_plugins — the host plus whichever plugin checkouts are on this
+# machine. A missing sibling is skipped rather than fatal: the composition is
+# the point, but a partial one still beats hand-assembling PYTHONPATH.
+hq_resolve_dev_plugins() {
+    [[ -n "$HQ_DEV_PYTHONPATH" ]] && return 0
+    local entry dir ref
+    local -a paths=("$HQ_LOCAL_PATH") refs=()
+    for entry in ${HQ_DEV_PLUGINS[@]+"${HQ_DEV_PLUGINS[@]}"}; do
+        dir="${entry%%=*}"
+        ref="${entry#*=}"
+        if [[ ! -d "$dir/src" ]]; then
+            msg "$DIM" "skip" "no checkout at $dir" >&2
+            continue
+        fi
+        paths+=("$dir/src")
+        refs+=("$ref")
+    done
+    HQ_DEV_PYTHONPATH="$(IFS=:; printf '%s' "${paths[*]}")"
+    HQ_DEV_REFS="$(IFS=,; printf '%s' "${refs[*]:-}")"
+}
+
+# hq_dev_env — the complete environment the composed dev stack runs under, as
+# `KEY=value` arguments for `env -i`. Complete, not additive: the operator's
+# shell is excluded so a stale `export DJANGO_TIME_ZONE` cannot reinterpret the
+# data underneath the server, and so this list is the whole truth about what the
+# dev stack sees. DJANGO_DEBUG is required — plugin admission fails closed
+# without a Cordon lock, which only the production image carries.
+hq_dev_env() {
+    hq_resolve_dev_plugins
+    hq_load_prod_env
+    printf '%s\n' \
+        "PATH=$PATH" \
+        "HOME=$HOME" \
+        "USER=${USER-}" \
+        "TERM=${TERM-}" \
+        "LANG=${LANG-}" \
+        "TMPDIR=${TMPDIR-}" \
+        "DJANGO_SETTINGS_MODULE=config.settings" \
+        "DJANGO_DEBUG=true" \
+        "PYTHONPATH=$HQ_DEV_PYTHONPATH" \
+        "SEVERINO_HQ_PLUGINS=$HQ_DEV_REFS" \
+        "DJANGO_ALLOWED_HOSTS=$HQ_DEV_HOSTS" \
+        "DJANGO_CSRF_TRUSTED_ORIGINS=$HQ_DEV_ORIGINS" \
+        "SEVERINO_DATABASE_PATH=$HQ_DEV_DB"
+    printf '%s\n' "$HQ_PROD_ENV"
+}
+
+# hq_effective_settings <KEY=VALUE>... — what HQ's settings actually resolve to
+# under the given environment. Resolved through the real config.settings, so a
+# committed default counts as a value and a setting that is not yet
+# environment-driven (USE_TZ) is still compared. Plugins stay off: what a
+# setting means belongs to the host, and loading them would drag in admission.
+hq_effective_settings() {
+    env -i \
+        PATH="$PATH" \
+        HOME="$HOME" \
+        DJANGO_SETTINGS_MODULE=config.settings \
+        DJANGO_DEBUG=true \
+        SEVERINO_HQ_PLUGINS= \
+        PYTHONPATH="$HQ_LOCAL_PATH" \
+        SEVERINO_APP_ENV_PATH=/nonexistent \
+        "$@" \
+        "$HQ_DEV_PYTHON" -c '
+import sys
+from django.conf import settings
+
+for name in sys.argv[1:]:
+    print("%s=%s" % (name, getattr(settings, name, "(unset)")))
+' "${HQ_SEMANTIC_SETTINGS[@]}"
+}
+
+require_dev_runtime() {
+    [[ -f "$HQ_LOCAL_PATH/manage.py" ]] \
+        || die "error" "no HQ checkout at $HQ_LOCAL_PATH"
+    [[ -x "$HQ_DEV_PYTHON" ]] \
+        || die "error" "no interpreter with HQ's runtime at $HQ_DEV_PYTHON"
+}
+
+cmd_dev() {
+    local bind="$HQ_DEV_BIND" fresh=0
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --fresh) fresh=1; shift ;;
+            -*)      die_unknown flag "$1" dev ;;
+            *)       bind="$1"; shift ;;
+        esac
+    done
+
+    require_dev_runtime
+    hq_resolve_dev_plugins
+    hq_load_prod_env
+
+    # Both resolutions above are cached and already succeeded, so nothing here
+    # can die inside the substitution and leave a half-built environment.
+    local -a dev_env=()
+    local line
+    while IFS= read -r line; do dev_env+=("$line"); done < <(hq_dev_env)
+
+    mkdir -p "$(dirname "$HQ_DEV_DB")"
+    if (( fresh )); then
+        rm -f "$HQ_DEV_DB"
+        msg "$DIM" "fresh" "recreated the scratch database"
+    fi
+
+    # Migrate then serve, the same order the production entrypoint uses: cheap
+    # when there is nothing to apply, and it retires "pulled a plugin migration
+    # and forgot" as a category.
+    env -i "${dev_env[@]}" "$HQ_DEV_PYTHON" "$HQ_LOCAL_PATH/manage.py" migrate --noinput
+
+    msg "$GREEN" "plugins"  "${HQ_DEV_REFS:-none found — host only}"
+    msg "$GREEN" "timezone" "$(hq_prod_value DJANGO_TIME_ZONE) (inherited from \"$HQ_ENV_ITEM\")"
+    msg "$DIM"   "database" "$HQ_DEV_DB"
+    msg "$DIM"   "serving"  "$bind"
+    exec env -i "${dev_env[@]}" \
+        "$HQ_DEV_PYTHON" "$HQ_LOCAL_PATH/manage.py" runserver "$bind"
 }
 
 cmd_manifest() {
@@ -328,7 +507,90 @@ with open(state, "w", encoding="utf-8") as fh:
 ' "$tmp" "$state_file" "$VAULT" "mcp-default" "$vault_head"
 }
 
+# Dev/prod parity for the settings that change what stored data MEANS. A
+# difference here produces no error and no failed request — it reinterprets
+# every timestamp and reporting window under a boot that otherwise looks fine,
+# which is why this is a gate and not a note in a README.
+#
+# Both sides are resolved through the real config.settings, and the dev side is
+# read back out of the environment `hq dev` builds rather than assumed, so this
+# also fails when `hq dev` stops forwarding something it used to.
+cmd_doctor_env() {
+    require_dev_runtime
+    hq_load_prod_env
+
+    local semantic
+    semantic="^($(IFS='|'; printf '%s' "${HQ_SEMANTIC_ENV[*]}"))="
+
+    local -a dev_semantic=() prod_semantic=()
+    local line
+    while IFS= read -r line; do dev_semantic+=("$line"); done \
+        < <(hq_dev_env | grep -E "$semantic")
+    while IFS= read -r line; do prod_semantic+=("$line"); done \
+        < <(printf '%s\n' "$HQ_PROD_ENV")
+
+    # Either side can legitimately be empty — that is what "dev forwards
+    # nothing" looks like — so both expansions tolerate an unset array rather
+    # than aborting before the comparison that would have reported it.
+    local dev prod
+    dev="$(hq_effective_settings ${dev_semantic[@]+"${dev_semantic[@]}"})"
+    prod="$(hq_effective_settings ${prod_semantic[@]+"${prod_semantic[@]}"})"
+
+    python3 - "$dev" "$prod" "$HQ_PROD_UNFORWARDED" <<'PY'
+import sys
+
+dev_raw, prod_raw, unforwarded = sys.argv[1:4]
+
+
+def parse(raw):
+    return dict(
+        line.split("=", 1) for line in raw.splitlines() if "=" in line
+    )
+
+
+dev, prod = parse(dev_raw), parse(prod_raw)
+rows = [
+    (name, dev.get(name, "(unset)"), prod.get(name, "(unset)"))
+    for name in sorted(set(dev) | set(prod))
+]
+widths = [
+    max(len(str(cell)) for cell in column)
+    for column in zip(("setting", "dev", "prod"), *rows)
+]
+mismatched = [row for row in rows if row[1] != row[2]]
+
+print()
+print("  %-*s  %-*s  %-*s  %s" % (widths[0], "setting", widths[1], "dev",
+                                  widths[2], "prod", "verdict"))
+for name, dev_value, prod_value in rows:
+    print("  %-*s  %-*s  %-*s  %s" % (
+        widths[0], name, widths[1], dev_value, widths[2], prod_value,
+        "ok" if dev_value == prod_value else "MISMATCH",
+    ))
+print()
+
+missing = [key for key in unforwarded.splitlines() if key]
+for key in missing:
+    print("  prod sets %s, which reads as data-meaning and dev does not "
+          "inherit" % key)
+    print("  fix       add it to HQ_SEMANTIC_ENV in config/hq.sh")
+if missing:
+    print()
+
+if mismatched or missing:
+    print("  dev and prod disagree about what the data means")
+    sys.exit(1)
+print("  dev matches prod on every data-meaning setting")
+PY
+}
+
 cmd_doctor() {
+    case "${1:-}" in
+        --env) shift; cmd_doctor_env "$@"; return ;;
+        "")    : ;;
+        *)     die_unknown flag "$1" doctor ;;
+    esac
+
     # The "what counts as a valid indexed doc" contract (skip rules, slim
     # writeup/page tolerance) lives once, in the MCP's manifest generator. Ask
     # it for the structured report instead of re-walking the vault here.
@@ -493,10 +755,35 @@ cmd_env_diff() {
     require_hq_admin
     case "${1:-}" in "") ;; *) die_unknown flag "$1" env-diff ;; esac
     command -v op >/dev/null 2>&1 || die "error" "1Password CLI (op) is required for env-diff"
-    local HQ_ENV_ITEM="severino-hq env"
-    local HQ_ENV_VAULT="Severino HQ Production"
     local HQ_ENV_RENDERED="$HQ_REMOTE_PATH/secrets/severino_hq_env"
-    local drift
+    # Both sides are read into variables first, and each is required to be
+    # non-empty. Comparing two process substitutions inline meant an unreachable
+    # 1Password and a refused SSH key produced two empty key lists, which differ
+    # in no way -- so the check printed "in sync" and exited 0 having read
+    # nothing at all. A parity check that goes green when it cannot see either
+    # side is worse than no check, because it is trusted.
+    # Each read is captured with its own error text and checked before use. The
+    # first version let `set -e` abort on the failed substitution, so the command
+    # exited non-zero with no output at all -- fail-closed, but silent, which
+    # tells the operator nothing about which half is unreachable.
+    local item_json rendered_raw item_keys rendered_keys drift
+    if ! item_json="$(op item get "$HQ_ENV_ITEM" --vault "$HQ_ENV_VAULT" --format json 2>&1)"; then
+        die "error" "cannot read \"$HQ_ENV_ITEM\" from 1Password: ${item_json##*$'\n'}"
+    fi
+    item_keys="$(jq -r '.fields[] | select((.label // "") | test("^[A-Z][A-Z0-9_]+$")) | .label' <<<"$item_json" | sort)"
+    [[ -n "$item_keys" ]] \
+        || die "error" "\"$HQ_ENV_ITEM\" yielded no environment keys — wrong item?"
+
+    # BatchMode so a refused agent key fails immediately instead of blocking on
+    # a password prompt no one is watching: a check that hangs is a check that
+    # gets skipped.
+    if ! rendered_raw="$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$HQ_SSH_HOST" \
+        "sudo cat '$HQ_ENV_RENDERED'" 2>&1)"; then
+        die "error" "cannot read $HQ_SSH_HOST:$HQ_ENV_RENDERED: ${rendered_raw##*$'\n'}"
+    fi
+    rendered_keys="$(cut -d= -f1 <<<"$rendered_raw" | sort)"
+    [[ -n "$rendered_keys" ]] \
+        || die "error" "$HQ_ENV_RENDERED is empty on $HQ_SSH_HOST — has the env been rendered?"
     drift="$(
         awk '
             NR==FNR { l[$0] = 1; next }
@@ -505,10 +792,7 @@ cmd_env_diff() {
                 for (k in l) if (!(k in r)) print "item-only (not yet rendered): " k
                 for (k in r) if (!(k in l)) print "rendered-only (gone from item): " k
             }' \
-            <(op item get "$HQ_ENV_ITEM" --vault "$HQ_ENV_VAULT" --format json \
-                | jq -r '.fields[] | select((.label // "") | test("^[A-Z][A-Z0-9_]+$")) | .label' | sort) \
-            <(ssh "$HQ_SSH_HOST" "sudo cat '$HQ_ENV_RENDERED'" | cut -d= -f1 | sort) \
-            | sort
+            <(printf '%s\n' "$item_keys") <(printf '%s\n' "$rendered_keys") | sort
     )"
     if [[ -z "$drift" ]]; then
         msg "$GREEN" "in sync" "item keys match the rendered env on $HQ_SSH_HOST (values refresh hourly)"
@@ -666,6 +950,7 @@ desc_help_intercept "$@"
 case "${1:-}" in
     manifest)   shift; cmd_manifest "$@" ;;
     sync)       shift; cmd_sync "$@" ;;
+    dev)        shift; cmd_dev "$@" ;;
     doctor)     shift; cmd_doctor "$@" ;;
     schema)     shift; cmd_schema "$@" ;;
     validate)   shift; cmd_validate "$@" ;;
