@@ -53,6 +53,11 @@ describe_spec() {
     desc_cmd validate  -- "Report HQ registry entries (Projects/Assets) that no vault doc references. Read-only"
     desc_effect read +network
 
+    desc_cmd life-sync -- "Emit the Life vault projection on this Mac and install it on HQ (renewals, goals, tasks, claims, vehicles)"
+    desc_effect remote_write +network
+    desc_para "The Mac is the only machine that can read the vault, so the snapshot originates here. HQ reconciles by doc_id and prunes anything the document omits — so an empty or malformed snapshot is refused locally rather than sent, because sending it would delete the records it failed to mention."
+    desc_example "hq life-sync" -- "refresh HQ's Life records from the vault"
+
     desc_cmd create    -- "Create or update a Project or Asset in HQ (idempotent upsert by slug)"
     desc_effect remote_write +network
     desc_pos kind "{project,asset}" -- "What to create"
@@ -716,6 +721,45 @@ for field, spec in schema.get("properties", {}).items():
     msg "$GREEN" "$kind" "$slug: $([[ "$created" == "true" ]] && printf created || printf updated)"
 }
 
+# cmd_life_sync — emit the Life vault projection here, install it on prod.
+#
+# The Mac is the only machine that can read the vault, so the snapshot has to
+# originate here. HQ's ingest reconciles by doc_id and PRUNES whatever the
+# document omits, which is the reason for the validation below: a half-built
+# index or an emitter that failed partway produces a structurally valid but
+# short snapshot, and shipping that deletes every record it forgot to mention.
+# Cheaper to refuse here than to restore there.
+cmd_life_sync() {
+    require_hq_admin
+    command -v life >/dev/null 2>&1 \
+        || die "error" "the 'life' CLI is required to emit the snapshot"
+
+    local snapshot counts
+    msg "$DIM" "emitting" "life snapshot"
+    snapshot="$(life snapshot --json)" \
+        || die "error" "life snapshot failed; nothing was sent"
+
+    jq -e 'has("schema_version") and has("content_hash") and (.data | type == "object")' \
+        >/dev/null 2>&1 <<<"$snapshot" \
+        || die "error" "life snapshot is not a valid envelope; nothing was sent"
+
+    # Refuse a snapshot with no records at all. Every collection empty is
+    # indistinguishable from "the vault is gone" and would prune everything.
+    [[ "$(jq '[.data[] | length] | add // 0' <<<"$snapshot")" -gt 0 ]] \
+        || die "error" "life snapshot contains no records; refusing to prune prod"
+
+    counts="$(jq -r '.data | to_entries | map("\(.value | length) \(.key)") | join(" · ")' \
+        <<<"$snapshot")"
+    msg "$DIM" "sending" "$counts"
+
+    # -T because stdin is a pipe, not a terminal: `docker compose exec` without
+    # it allocates a TTY and the document never reaches the command.
+    printf '%s' "$snapshot" | ssh "$HQ_SSH_HOST" \
+        "cd '$HQ_REMOTE_PATH' && sudo docker compose exec -T app python manage.py ingest_life_snapshot" \
+        || die "error" "ingest failed on $HQ_SSH_HOST"
+    msg "$GREEN" "synced" "life → severino-hq"
+}
+
 cmd_deploy() {
     require_hq_admin
     case "${1:-}" in
@@ -751,6 +795,46 @@ cmd_deploy() {
 # scripts/refresh-secrets.sh). Drift reporting is key-level only: values never
 # reach stdout. Value refresh is the hourly timer's job; env-apply just runs
 # the same unit on demand.
+# hq pin — point every plugin at the host commit they will actually be tested
+# against, then trigger. Doing this by hand is a race: a run started before the
+# variable moves is tested against the previous contract, fails for a reason
+# that no longer exists, and the log sends you chasing it. The order is the
+# whole point, so it belongs in one command.
+cmd_pin() {
+    local rerun=0
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --rerun) rerun=1; shift ;;
+            *) die_unknown flag "$1" pin ;;
+        esac
+    done
+    command -v gh >/dev/null 2>&1 || die "error" "gh is required to set repository variables"
+
+    local sha
+    sha="$(git -C "$HQ_LOCAL_PATH" ls-remote origin main | cut -f1)"
+    [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || die "error" "could not resolve severino-hq main"
+    msg "$DIM" "host" "$sha"
+
+    local entry dir name
+    for entry in ${HQ_DEV_PLUGINS[@]+"${HQ_DEV_PLUGINS[@]}"}; do
+        dir="${entry%%=*}"
+        [[ -d "$dir/.git" ]] || continue
+        name="$(basename "$dir")"
+        ( cd "$dir" && gh variable set HQ_COMMIT --body "$sha" ) \
+            || die "error" "could not set HQ_COMMIT on $name"
+        msg "$GREEN" "pinned" "$name"
+        if (( rerun )); then
+            # Only after the variable is set: a rerun triggered first would read
+            # the old value and fail for the reason we just removed.
+            local run
+            run="$( cd "$dir" && gh run list --limit 1 --json databaseId -q '.[0].databaseId' )"
+            [[ -n "$run" ]] && ( cd "$dir" && gh run rerun "$run" >/dev/null 2>&1 ) \
+                && msg "$DIM" "rerun" "$name run $run"
+        fi
+    done
+    msg "$GREEN" "done" "every plugin now tests against this host commit"
+}
+
 cmd_env_diff() {
     require_hq_admin
     case "${1:-}" in "") ;; *) die_unknown flag "$1" env-diff ;; esac
@@ -951,9 +1035,11 @@ case "${1:-}" in
     manifest)   shift; cmd_manifest "$@" ;;
     sync)       shift; cmd_sync "$@" ;;
     dev)        shift; cmd_dev "$@" ;;
+    pin)        shift; cmd_pin "$@" ;;
     doctor)     shift; cmd_doctor "$@" ;;
     schema)     shift; cmd_schema "$@" ;;
     validate)   shift; cmd_validate "$@" ;;
+    life-sync)  shift; cmd_life_sync "$@" ;;
     create)     shift; cmd_create "$@" ;;
     deploy)     shift; cmd_deploy "$@" ;;
     env-apply)  shift; cmd_env_apply "$@" ;;
