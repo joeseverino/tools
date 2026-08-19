@@ -12,6 +12,14 @@
   calls through the shared Node adapter, preventing stale-session overwrites
   when paired with severino-vault-mcp's stale-plan guard.
 
+## [1.6.0](https://github.com/joeseverino/tools/compare/v1.5.0...v1.6.0) (2026-08-19)
+
+
+### Features
+
+* add hq life-sync ([#83](https://github.com/joeseverino/tools/issues/83)) ([2815c04](https://github.com/joeseverino/tools/commit/2815c0478fd1afe98e4630949d135f794910cdf2))
+* hq dev and hq env-diff ([7677a90](https://github.com/joeseverino/tools/commit/7677a90c784bd5101a4352e1256998ab924ced7a))
+
 ## [1.5.0](https://github.com/joeseverino/tools/compare/v1.4.0...v1.5.0) (2026-08-11)
 
 
