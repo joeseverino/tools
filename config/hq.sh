@@ -48,6 +48,7 @@ if [[ -z "${HQ_DEV_PLUGINS+x}" ]]; then
     HQ_DEV_PLUGINS=(
         "$CODE_HOME/Projects/severino-fitness=severino_fitness.plugin:plugin"
         "$CODE_HOME/Projects/severino-life-hq=severino_life_hq.plugin:plugin"
+        "$CODE_HOME/Projects/severino-finance-hq=severino_finance_hq.plugin:plugin"
     )
 fi
 
