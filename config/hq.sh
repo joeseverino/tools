@@ -48,6 +48,7 @@ if [[ -z "${HQ_DEV_PLUGINS+x}" ]]; then
     HQ_DEV_PLUGINS=(
         "$CODE_HOME/Projects/extension-one=extension_one.plugin:plugin"
         "$CODE_HOME/Projects/extension-two=extension_two.plugin:plugin"
+        "$CODE_HOME/Projects/extension-three=extension_three.plugin:plugin"
     )
 fi
 
