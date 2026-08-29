@@ -11,12 +11,18 @@ config/wp-static.sh
 # Optional local site workflow overrides — see config/site.sh.example.
 config/site.sh
 
+# Local HQ paths, addresses, and store coordinates — see config/hq.sh.example.
+config/hq.sh
+
 # User-local brief section emitters — see config/brief.sh.example.
 config/brief.sh
 
 # Automator .app bundles are user-specific and contain compiled stubs +
 # localization data. Adopters should build their own — see README.
 apps/
+
+# Local scratch under archive/; the tracked examples there are unaffected.
+archive/
 
 # doc-to-pdf bundles mermaid + markdown-it locally (offline render); keep the
 # lockfile, not the tree.
