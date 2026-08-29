@@ -51,14 +51,19 @@ SH
 
 hq_bin() { "$TOOLS_HOME/bin/hq" "$@"; }
 
-@test "hq sync sends manifest and topology in one MCP capability call" {
+# HQ derives its own infrastructure picture, so the manifest is all sync carries.
+# It used to send an authored topology too: HQ ignored it (HQSyncCommand has no
+# such field) and returned none, so the reporting step then subscripted null and
+# hq sync died printing its own summary -- after the write had already landed.
+@test "hq sync sends the manifest, and no topology, in one MCP capability call" {
     run hq_bin sync
 
     [ "$status" -eq 0 ]
     [ "$(jq -r .arguments.name "$HQ_MCP_LOG")" = "hq.sync" ]
     [ "$(jq -r '.arguments.payload.manifest[0].doc_id' "$HQ_MCP_LOG")" = "rb-one" ]
-    [ "$(jq -r '.arguments.payload.topology.version' "$HQ_MCP_LOG")" = "3" ]
+    [ "$(jq -r '.arguments.payload | has("topology")' "$HQ_MCP_LOG")" = "false" ]
     [[ "$output" == *"HQ is in sync"* ]]
+    [[ "$output" != *"Topology"* ]]
     [[ "$output" != *"SSH MUST NOT RUN"* ]]
 }
 

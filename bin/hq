@@ -14,11 +14,11 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" hq "$@"
 source "$TOOLS_HOME/lib/git.sh"
 
 describe_spec() {
-    desc_tool "hq" "Sync vault frontmatter to Severino HQ, plus routine HQ deployment ops."
+    desc_tool "hq" "Sync vault frontmatter to Severino HQ, plus routine HQ operational commands."
     desc_inventory "Integrations" 130
     desc_synopsis "hq <command> [args]"
     desc_effect read
-    desc_para "Severino HQ glue. Reads YAML frontmatter from the vault and upserts the HQ docs index. Also wraps the routine ssh + docker compose calls for managing the HQ deployment."
+    desc_para "Severino HQ glue. Reads YAML frontmatter from the vault and upserts the HQ docs index. Also wraps the routine ssh + docker compose calls for inspecting the HQ deployment. It does not deploy: landing on main is the deploy."
     # Tool-level examples: declared at global scope (before the first desc_cmd),
     # like global desc_opt/desc_pos — otherwise they'd attach to the last command.
     desc_example "hq sync"                    -- "most common — push vault → HQ"
@@ -28,7 +28,7 @@ describe_spec() {
     desc_cmd manifest  -- "Print the manifest JSON (frontmatter from every doc) to stdout — for inspection or piping elsewhere"
     desc_effect read
 
-    desc_cmd sync      -- "Sync the docs manifest and validated topology inventory into HQ; idempotent and safe to re-run"
+    desc_cmd sync      -- "Sync the docs manifest into HQ; idempotent and safe to re-run"
     desc_effect remote_write +network
     desc_opt --prune     -- "Delete orphan DocumentationRecord rows (doc_ids in HQ but not in the manifest), plus ContentItems linked only to them. Use after a doc_id rename or retirement"
     desc_opt --no-update -- "Only create new records; never update existing ones"
@@ -66,8 +66,10 @@ describe_spec() {
     desc_example "hq create project my-site --name \"My Site\" --category cloudflare --status published --url https://example.com"
     desc_example "hq create asset example-com --name \"example.com\" --category domain"
 
-    desc_cmd deploy    -- "Fallback: redeploy the immutable image from the last fully successful HQ CI run"
-    desc_effect deploy +network
+    desc_cmd deploy    -- "RETIRED — refuses. It shipped the host-only image and dropped every admitted extension off production. Landing on main IS the deploy"
+    desc_effect read
+    desc_cmd pin       -- "RETIRED — refuses. It set HQ_COMMIT on every plugin; that variable must not exist, and deleting it is the fix"
+    desc_effect read
 
     desc_cmd ship      -- "Commit + push a small HQ change. The push IS the deploy: it triggers the gated pipeline (build → scan → deploy on green)"
     desc_effect deploy +network
@@ -127,11 +129,6 @@ build_manifest() {
     # Dir list is the MCP's to derive (indexed_dirs + slim content dirs) — the
     # HQ_VAULT_DIRS second hand-kept copy is retired.
     svmc hq-manifest "$VAULT"
-}
-
-build_topology_inventory() {
-    require_manifest_mcp
-    svmc topology --emit inventory
 }
 
 hq_mcp_call() {
@@ -393,39 +390,34 @@ cmd_sync() {
 
     schema_drift_warn
 
-    local tmp topology_tmp
+    local tmp
     tmp="$(mktemp -t hq-manifest.XXXXXX.json)"
-    topology_tmp="$(mktemp -t hq-topology.XXXXXX.json)"
-    trap 'rm -f "${tmp:-}" "${topology_tmp:-}"' EXIT
+    trap 'rm -f "${tmp:-}"' EXIT
 
     build_manifest > "$tmp"
-    build_topology_inventory > "$topology_tmp"
 
     msg "$DIM" "sync" "vault → HQ"
-    local result_json stats_json topology_json
+    local result_json stats_json
     result_json="$(
         jq -cn \
             --slurpfile manifest "$tmp" \
-            --slurpfile topology "$topology_tmp" \
             --argjson update "$update" \
             --argjson prune "$prune" \
-            '{tool:"execute_capability",arguments:{name:"hq.sync",payload:{manifest:$manifest[0],topology:$topology[0],update_existing:$update,report_orphans:true,prune_orphans:$prune,confirm_prune:$prune}}}' \
+            '{tool:"execute_capability",arguments:{name:"hq.sync",payload:{manifest:$manifest[0],update_existing:$update,report_orphans:true,prune_orphans:$prune,confirm_prune:$prune}}}' \
             | hq_mcp_call
     )"
     if [[ "$(jq -r '.ok' <<<"$result_json")" != "true" ]]; then
         die "error" "$(jq -r '.error.message // "HQ sync failed"' <<<"$result_json")"
     fi
     stats_json="$(jq -c '.documentation.stats' <<<"$result_json")"
-    topology_json="$(jq -c '.topology' <<<"$result_json")"
 
-    python3 - "$tmp" "$stats_json" "$prune" "$topology_json" <<'PY'
+    python3 - "$tmp" "$stats_json" "$prune" <<'PY'
 import json
 import sys
 
-manifest_path, raw_stats, prune_flag, raw_topology = sys.argv[1:5]
+manifest_path, raw_stats, prune_flag = sys.argv[1:4]
 manifest = json.load(open(manifest_path, encoding="utf-8"))
 stats = json.loads(raw_stats)
-topology = json.loads(raw_topology)
 prune = prune_flag == "1"
 
 created = stats.get("created", 0)
@@ -470,11 +462,6 @@ if orphans:
             print(f"          {doc_id}")
 else:
     print("Cleanup   no orphans")
-
-print(
-    "Topology  schema v%s · %s"
-    % (topology["schema_version"], topology["checksum"][:12])
-)
 
 if missing or (orphans and not prune):
     print("Done      synced with cleanup needed")
@@ -760,34 +747,15 @@ cmd_life_sync() {
     msg "$GREEN" "synced" "life → severino-hq"
 }
 
+# hq deploy — retired. It predates composition.
+#
+# It resolved the last green ci.yml run and deployed severino-hq:sha-..., the
+# HOST-ONLY image, while production runs severino-hq/composition:... -- the host
+# plus every admitted extension. Running it took the extensions off production
+# and whole domains stopped existing, which is the failure composition was
+# introduced to end. It refuses rather than staying available to muscle memory.
 cmd_deploy() {
-    require_hq_admin
-    case "${1:-}" in
-        "") ;;
-        *) die_unknown flag "$1" deploy ;;
-    esac
-
-    command -v gh >/dev/null 2>&1 \
-        || die "error" "GitHub CLI (gh) is required to resolve the last green artifact"
-    local release_sha image
-    release_sha="$(
-        gh run list \
-            --repo joeseverino/severino-hq \
-            --workflow ci.yml \
-            --branch main \
-            --status success \
-            --limit 1 \
-            --json headSha \
-            --jq '.[0].headSha'
-    )"
-    [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]] \
-        || die "error" "could not resolve a successful immutable HQ release"
-    image="ghcr.io/joeseverino/severino-hq:sha-${release_sha:0:12}"
-
-    msg "$DIM" "deploying" "$HQ_SSH_HOST: $image (last green CI artifact)"
-    ssh "$HQ_SSH_HOST" \
-        "cd '$HQ_REMOTE_PATH' && ./scripts/deploy-image.sh '$image'"
-    msg "$GREEN" "deployed" "$image"
+    die "error" "hq deploy is retired: it ships the host-only image and drops every admitted extension off production. Landing on main IS the deploy; to rebuild by hand run the 'Compose and deploy extensions' workflow (workflow_dispatch)."
 }
 
 # env-diff / env-apply — prod's env renders from the 1Password "severino-hq
@@ -795,44 +763,15 @@ cmd_deploy() {
 # scripts/refresh-secrets.sh). Drift reporting is key-level only: values never
 # reach stdout. Value refresh is the hourly timer's job; env-apply just runs
 # the same unit on demand.
-# hq pin — point every plugin at the host commit they will actually be tested
-# against, then trigger. Doing this by hand is a race: a run started before the
-# variable moves is tested against the previous contract, fails for a reason
-# that no longer exists, and the log sends you chasing it. The order is the
-# whole point, so it belongs in one command.
+# hq pin — retired. It created the trap it existed to manage.
+#
+# It set HQ_COMMIT on every dev plugin, pinning the host source their test jobs
+# check out. A pin only ever goes stale, and every failure it causes reads as a
+# host bug. Unset, hq-ref falls back to main and a plugin tests against the host
+# as it actually is, which is the property the design depends on. Deleting the
+# variable is the fix, never moving it.
 cmd_pin() {
-    local rerun=0
-    while [ "$#" -gt 0 ]; do
-        case "$1" in
-            --rerun) rerun=1; shift ;;
-            *) die_unknown flag "$1" pin ;;
-        esac
-    done
-    command -v gh >/dev/null 2>&1 || die "error" "gh is required to set repository variables"
-
-    local sha
-    sha="$(git -C "$HQ_LOCAL_PATH" ls-remote origin main | cut -f1)"
-    [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || die "error" "could not resolve severino-hq main"
-    msg "$DIM" "host" "$sha"
-
-    local entry dir name
-    for entry in ${HQ_DEV_PLUGINS[@]+"${HQ_DEV_PLUGINS[@]}"}; do
-        dir="${entry%%=*}"
-        [[ -d "$dir/.git" ]] || continue
-        name="$(basename "$dir")"
-        ( cd "$dir" && gh variable set HQ_COMMIT --body "$sha" ) \
-            || die "error" "could not set HQ_COMMIT on $name"
-        msg "$GREEN" "pinned" "$name"
-        if (( rerun )); then
-            # Only after the variable is set: a rerun triggered first would read
-            # the old value and fail for the reason we just removed.
-            local run
-            run="$( cd "$dir" && gh run list --limit 1 --json databaseId -q '.[0].databaseId' )"
-            [[ -n "$run" ]] && ( cd "$dir" && gh run rerun "$run" >/dev/null 2>&1 ) \
-                && msg "$DIM" "rerun" "$name run $run"
-        fi
-    done
-    msg "$GREEN" "done" "every plugin now tests against this host commit"
+    die "error" "hq pin is retired: HQ_COMMIT must not exist. Unset, hq-ref falls back to main and each plugin tests against the host as it is. If a plugin's CI fails on something the host plainly has, delete the pin: gh variable delete HQ_COMMIT"
 }
 
 cmd_env_diff() {
