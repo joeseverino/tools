@@ -1,0 +1,296 @@
+#!/usr/bin/env bash
+# cbm [status|fix|prune] — health and recovery for the codebase-memory-mcp
+# daemon. CBM keeps its coordination state (socket, identity, cohort locks) in
+# /tmp, which macOS reaps nightly for files untouched for ~3 days, while its
+# "permanent" daemons never exit. Once the reaper eats the identity file the
+# live daemon is unverifiable but still holds the locks, so every new session
+# can neither adopt it nor replace it: `daemon.ipc.listen_failed` and a 30s
+# "CBM daemon could not start" on every MCP connect. `cbm fix` is the recovery.
+set -euo pipefail
+
+source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
+# check / check_warn / doctor_finish — the shared health-report plumbing.
+# shellcheck source=lib/doctor.sh
+source "$TOOLS_HOME/lib/doctor.sh"
+
+# The single source of truth for cbm's surface: lib/describe.sh renders
+# both this tool's -h text and its --describe JSON from this one declaration.
+describe_spec() {
+    desc_tool "cbm" "Health and recovery for the codebase-memory-mcp daemon."
+    desc_inventory "Diagnostics" 85
+    desc_leaf_commands
+    desc_synopsis "cbm [status] [--json] | cbm fix [--dry-run] | cbm prune [--days N]"
+    desc_effect read
+    desc_para "codebase-memory-mcp runs a long-lived daemon and keeps its coordination state — the IPC socket, the socket identity file, and the version-cohort locks — in a runtime directory under /tmp. macOS reaps /tmp files that have gone untouched for about three days, but the daemon itself is started permanent and never exits. When the reaper deletes the identity file out from under a running daemon, that daemon becomes unverifiable while still holding the cohort locks, so a new session can neither adopt it nor start a replacement. Every MCP connect then fails with a 30-second 'CBM daemon could not start', and index workers refuse to run with 'a pre-coordination or unverified CBM generation is active'."
+    desc_para "Bare 'cbm' is 'cbm status'. Status probes the real MCP handshake rather than trusting the process list, because the failure mode is a daemon that is alive, listening, and still unusable. It also warns while the coordination files under /tmp are merely getting old, so the fix stays a five-second reset instead of a debugging session after the next reap. CBM legitimately runs a daemon out of both its /tmp and its cache runtime directory, so neither a daemon count nor a directory count is treated as a fault."
+    desc_env CBM_BIN      -- "codebase-memory-mcp binary (default: the one on PATH)"
+    desc_env CBM_CACHE_DIR -- "CBM cache root (default \$XDG_CACHE_HOME/codebase-memory-mcp)"
+    desc_env CBM_TMP_DIR  -- "Reaper-exposed runtime root (default /tmp)"
+    desc_env CBM_PGREP_BIN -- "Process-lookup binary (default pgrep; the test seam)"
+    desc_env CBM_LOG_WARN_MB -- "Warn above this much index-worker log (default 200)"
+    desc_example "cbm" -- "is CBM actually usable right now, and why not"
+    desc_example "cbm fix" -- "kill wedged daemons, clear stale runtime state, verify"
+    desc_example "cbm fix --dry-run" -- "show what recovery would touch, change nothing"
+    desc_example "cbm prune --days 7" -- "delete index-worker logs older than a week"
+
+    desc_cmd status -- "Whether the MCP handshake works, and every reason it might not"
+    desc_effect read
+    desc_opt --json -- "Machine-readable output"
+    desc_opt --no-probe -- "Skip the MCP handshake; report local state only"
+    desc_opt --timeout SECS -- "Seconds to wait for the handshake (default 40)"
+
+    desc_cmd fix -- "Kill wedged daemons, clear stale runtime state, verify the handshake"
+    desc_effect local_write
+    desc_opt --dry-run -- "Report what would be killed and removed without doing it"
+
+    desc_cmd prune -- "Delete old index-worker logs from the CBM cache"
+    desc_effect local_write
+    desc_opt --days N -- "Keep logs newer than N days (default 14)"
+}
+
+desc_help_intercept "$@"
+
+CBM_BIN="${CBM_BIN:-codebase-memory-mcp}"
+CBM_CACHE_DIR="${CBM_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/codebase-memory-mcp}"
+CBM_TMP_DIR="${CBM_TMP_DIR:-/tmp}"
+CBM_LOG_DIR="$CBM_CACHE_DIR/logs"
+
+# The handshake CBM must answer to be usable at all.
+CBM_INIT_RPC='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"cbm-doctor","version":"1"}}}'
+
+# Runtime dirs CBM coordinates through, in both locations it has used. The
+# /tmp one is the reaper-exposed copy; the cache one survives the reaper.
+cbm_runtime_dirs() {
+    local d
+    for d in "$CBM_TMP_DIR/cbm-daemon-$(id -u)" \
+             "$CBM_CACHE_DIR/runtime/cbm-daemon-$(id -u)" \
+             "$CBM_TMP_DIR"/cbm-recovery-*/cbm-daemon-* ; do
+        [[ -d $d ]] && printf '%s\n' "$d"
+    done
+    return 0
+}
+
+# Process lookup goes through $CBM_PGREP_BIN (the test seam, like $GH_BIN and
+# $KEY_SECURITY_BIN elsewhere) so bats can drive `fix` against a fixture
+# process list instead of the machine's real daemons. Never call bare pgrep.
+cbm_pgrep() { "${CBM_PGREP_BIN:-pgrep}" "$@" 2>/dev/null || true; }
+
+# Every live CBM process except this script, newest first. Deliberately
+# includes the per-session shims: a wedged generation is only cleared when
+# every process holding it is gone.
+cbm_pids() {
+    cbm_pgrep -f 'codebase-memory-mcp' | grep -vx "$$" || true
+}
+
+# Just the long-lived daemons (the ones that hold the cohort locks).
+cbm_daemon_pids() {
+    cbm_pgrep -f 'codebase-memory-mcp --cbm-daemon-internal'
+}
+
+# A socket that has lost its identity file — the state that makes a live daemon
+# unverifiable and unreplaceable. CBM runs a daemon out of both runtime dirs by
+# design, so a daemon or directory count is not a fault signal; this is.
+cbm_orphaned_sockets() {
+    local dir sock
+    while IFS= read -r dir; do
+        for sock in "$dir"/*.sock; do
+            [[ -e $sock ]] || continue
+            [[ -e "$sock.identity" ]] || printf '%s\n' "$sock"
+        done
+    done < <(cbm_runtime_dirs)
+    return 0
+}
+
+# Identity files under /tmp nearing the reaper's ~3-day untouched threshold —
+# the warning that fires before the wedge rather than after it.
+CBM_REAPER_WARN_DAYS=2
+CBM_LOG_WARN_MB="${CBM_LOG_WARN_MB:-200}"
+cbm_reaper_exposed() {
+    find "$CBM_TMP_DIR"/cbm-daemon-* -name '*.sock.identity' \
+        -mtime "+$CBM_REAPER_WARN_DAYS" 2>/dev/null || true
+}
+
+# cbm_probe <timeout-secs> — run the real MCP handshake, bounded. Echoes
+# "ok", "timeout", or "fail"; never inherits the caller's errexit.
+cbm_probe() {
+    local secs="$1" out pid waited=0 verdict="fail"
+    command -v "$CBM_BIN" >/dev/null 2>&1 || { printf 'missing'; return 0; }
+    out="$(mktemp)"
+    ( printf '%s\n' "$CBM_INIT_RPC" | "$CBM_BIN" >"$out" 2>/dev/null ) &
+    pid=$!
+    while kill -0 "$pid" 2>/dev/null && (( waited < secs )); do
+        sleep 1; waited=$(( waited + 1 ))
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null || true
+        verdict="timeout"
+    elif grep -q '"result"' "$out" 2>/dev/null; then
+        verdict="ok"
+    fi
+    wait "$pid" 2>/dev/null || true
+    rm -f "$out"
+    printf '%s' "$verdict"
+}
+
+cbm_worker_logs() {
+    [[ -d $CBM_LOG_DIR ]] || return 0
+    find "$CBM_LOG_DIR" -type f -name '.worker-log-*' "$@" 2>/dev/null || true
+}
+
+cmd_status() {
+    local json=0 probe=1 timeout=40
+    while (( $# )); do
+        case "$1" in
+            --json)     json=1 ;;
+            --no-probe) probe=0 ;;
+            --timeout)  timeout="${2:?--timeout needs a value}"; shift ;;
+            *)          die_unknown option "$1" status ;;
+        esac
+        shift
+    done
+
+    local handshake="skipped"
+    (( probe )) && handshake="$(cbm_probe "$timeout")"
+
+    local daemons orphans exposed logs log_bytes=0
+    daemons="$(cbm_daemon_pids | wc -l | tr -d ' ')"
+    orphans="$(cbm_orphaned_sockets | wc -l | tr -d ' ')"
+    exposed="$(cbm_reaper_exposed | wc -l | tr -d ' ')"
+    logs="$(cbm_worker_logs | wc -l | tr -d ' ')"
+    (( logs )) && log_bytes="$(cbm_worker_logs -exec stat -f '%z' {} + | awk '{s+=$1} END {print s+0}')"
+
+    local fail=0
+    (( json )) && DOCTOR_JSON=1
+
+    if [[ $handshake == skipped ]]; then
+        check_warn "MCP handshake" "not probed (--no-probe)"
+    else
+        check "MCP handshake" "$([[ $handshake == ok ]] && echo 1 || echo 0)" \
+            "$handshake, $daemons daemon(s)" || fail=1
+    fi
+    check "socket identity intact" "$(( orphans == 0 ? 1 : 0 ))" \
+        "$orphans socket(s) missing their .identity" || fail=1
+    (( exposed )) && check_warn "reaper exposure" \
+        "$exposed identity file(s) untouched >${CBM_REAPER_WARN_DAYS}d in $CBM_TMP_DIR — run cbm fix before it wedges"
+    # Bytes, not file count: a watched repo keeps thousands of fresh worker logs
+    # that prune cannot touch, so a count threshold would warn on every run.
+    (( log_bytes > CBM_LOG_WARN_MB * 1048576 )) && check_warn "index-worker logs" \
+        "$(( log_bytes / 1048576 ))MB across $logs files — cbm prune"
+
+    if (( json )); then
+        doctor_finish "$fail"
+        return $?
+    fi
+
+    if (( fail )); then
+        echo
+        msg "$YELLOW" "recover" "cbm fix"
+    fi
+    doctor_finish "$fail"
+}
+
+cmd_fix() {
+    local dry=0
+    while (( $# )); do
+        case "$1" in
+            --dry-run) dry=1 ;;
+            *)         die_unknown option "$1" fix ;;
+        esac
+        shift
+    done
+
+    local pids dirs killed=0 removed=0
+    pids="$(cbm_pids)"
+    dirs="$(cbm_runtime_dirs)"
+
+    local verb="recovering"
+    (( dry )) && verb="would recover"
+    header "$verb" "$(printf '%s\n' "$pids" | grep -c . || true)" "PID"
+
+    local pid dir
+    while IFS= read -r pid; do
+        [[ -n $pid ]] || continue
+        if (( dry )); then
+            msg "$YELLOW" "would kill" "pid $pid"
+        else
+            if kill "$pid" 2>/dev/null; then
+                msg "$GREEN" "killed" "pid $pid"
+            else
+                msg "$YELLOW" "gone" "pid $pid"
+            fi
+        fi
+        killed=$(( killed + 1 ))
+    done <<< "$pids"
+
+    (( dry )) || sleep 2
+
+    while IFS= read -r dir; do
+        [[ -n $dir ]] || continue
+        if (( dry )); then
+            msg "$YELLOW" "would clear" "$dir"
+        else
+            rm -rf "$dir" && msg "$GREEN" "cleared" "$dir"
+        fi
+        removed=$(( removed + 1 ))
+    done <<< "$dirs"
+
+    if (( dry )); then
+        echo
+        msg "$YELLOW" "dry-run" "$killed process(es), $removed runtime dir(s) — nothing changed"
+        echo
+        return 0
+    fi
+
+    local handshake
+    handshake="$(cbm_probe 40)"
+    echo
+    if [[ $handshake == ok ]]; then
+        msg "$GREEN" "verified" "MCP handshake succeeds — restart your editor session to reconnect"
+        echo
+        return 0
+    fi
+    msg "$RED" "failed" "handshake still $handshake — check $CBM_LOG_DIR/cbm-daemon.log"
+    echo
+    return 1
+}
+
+cmd_prune() {
+    local days=14
+    while (( $# )); do
+        case "$1" in
+            --days) days="${2:?--days needs a value}"; shift ;;
+            *)      die_unknown option "$1" prune ;;
+        esac
+        shift
+    done
+
+    [[ -d $CBM_LOG_DIR ]] || die "error" "no CBM log directory: $CBM_LOG_DIR"
+
+    local stale count bytes=0
+    stale="$(cbm_worker_logs -mtime "+$days")"
+    count="$(printf '%s\n' "$stale" | grep -c . || true)"
+
+    if (( count == 0 )); then
+        header "pruned" 0 "log"
+        msg "$GREEN" "clean" "no index-worker logs older than ${days}d"
+        echo
+        return 0
+    fi
+
+    bytes="$(printf '%s\n' "$stale" | tr '\n' '\0' | xargs -0 stat -f '%z' 2>/dev/null | awk '{s+=$1} END {print s+0}')"
+    printf '%s\n' "$stale" | tr '\n' '\0' | xargs -0 rm -f 2>/dev/null || true
+
+    header "pruned" "$count" "log"
+    msg "$GREEN" "reclaimed" "$(( bytes / 1048576 ))MB from $CBM_LOG_DIR"
+    echo
+}
+
+cmd="${1:-status}"
+[[ $# -gt 0 ]] && shift
+
+case "$cmd" in
+    status) cmd_status "$@" ;;
+    fix)    cmd_fix "$@" ;;
+    prune)  cmd_prune "$@" ;;
+    *)      die_unknown command "$cmd" ;;
+esac
