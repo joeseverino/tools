@@ -4,7 +4,7 @@ set -euo pipefail
 
 source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 
-ADGUARD_IP="${ADGUARD_IP:-192.168.1.233}"
+ADGUARD_IP="${ADGUARD_IP:-}"   # yours, via env or -a
 DOMAIN="google.com"
 RUNS=20
 BASELINE="AdGuard LAN"
@@ -18,10 +18,10 @@ describe_spec() {
     desc_effect read +network
     desc_synopsis "dns-test [-d domain] [-n runs] [-a adguard_ip] [-b baseline] [-h]"
     desc_para "Measures DNS latency across System DNS, a LAN AdGuard resolver, Cloudflare 1.1.1.1, and Cloudflare DoH. Reports avg/min/p50/p95/max and the delta of each path against a chosen baseline."
-    desc_para "The AdGuard IP defaults to an example LAN address; set ADGUARD_IP in your environment (or pass -a) to point at your own resolver."
+    desc_para "The LAN resolver has no default — set ADGUARD_IP in your environment or pass -a to point at your own. Everything else measures the same way on any machine."
     desc_opt -d domain -- "Domain to query (default: $DOMAIN)"
     desc_opt -n runs   -- "Queries per path (default: $RUNS)"
-    desc_opt -a ip     -- "AdGuard LAN IP (default: $ADGUARD_IP, env ADGUARD_IP)"
+    desc_opt -a ip     -- "AdGuard LAN resolver IP (required; env ADGUARD_IP)"
     desc_opt -b label  -- "Path label to use as delta baseline (default: \"$BASELINE\")"
     desc_env ADGUARD_IP -- "AdGuard LAN resolver IP (overridden by -a)"
 }
@@ -48,6 +48,11 @@ done
 for cmd in dig curl awk sort; do
     command -v "$cmd" >/dev/null || die "error" "missing required command: $cmd"
 done
+
+# An empty server makes sample_dig drop the @ argument, which would measure
+# system DNS twice under two labels.
+[[ -n $ADGUARD_IP ]] \
+    || die "usage" "set ADGUARD_IP (or pass -a <ip>) to the LAN resolver to compare against" 2
 
 if ! dig @"$ADGUARD_IP" "$DOMAIN" +tries=1 +time=2 +short >/dev/null 2>&1; then
     echo

@@ -1,13 +1,14 @@
 # shellcheck shell=bash
-# config/adguard.sh — AdGuard Home DNS-rewrite drift checker configuration
+# config/adguard.sh.example — AdGuard Home DNS-rewrite drift checker template
 #
+# cp config/adguard.sh.example config/adguard.sh, then edit for your host.
 # Sourced by `adguard`. Each variable can be overridden per-invocation.
 
 : "${NOTES_HOME:?set in ~/.zshrc}"
 
-# AdGuard Home base URL — reachable over LAN or Tailscale; the API lives under
-# /control on this host (homelab-server VM, web UI on port 3001).
-: "${ADGUARD_URL:=http://192.168.1.233:3001}"
+# AdGuard Home base URL; the API lives under /control. Admin port is 3000
+# unless you changed it.
+: "${ADGUARD_URL:=http://adguard.lan:3000}"
 
 # Vault doc holding the machine-readable mirror, and the heading whose fenced
 # ```json block `diff`/`pull` read and rewrite. Prose tables stay for humans.
