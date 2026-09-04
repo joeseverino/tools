@@ -1,13 +1,13 @@
 # shellcheck shell=bash
-# config/nginx.sh — Nginx Proxy Manager proxy-host drift checker configuration
+# config/nginx.sh.example — Nginx Proxy Manager proxy-host drift checker template
 #
+# cp config/nginx.sh.example config/nginx.sh, then edit for your host.
 # Sourced by `nginx`. Each variable can be overridden per-invocation.
 
 : "${NOTES_HOME:?set in ~/.zshrc}"
 
-# Nginx Proxy Manager API base — reachable over LAN or Tailscale; the admin API
-# lives under /api on this host (homelab-server VM, admin UI on port 81).
-: "${NGINX_URL:=http://192.168.1.233:81/api}"
+# Nginx Proxy Manager API base; NPM serves its admin UI and API on port 81.
+: "${NGINX_URL:=http://proxy.lan:81/api}"
 
 # Vault doc holding the machine-readable mirror, and the heading whose fenced
 # ```json block `diff`/`pull` read and rewrite. The prose table in the same doc

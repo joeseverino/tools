@@ -50,13 +50,14 @@ tools/
     backup        # Mirror the items in config/backup.sh into $BACKUPS_HOME.
     # Diagnostics
     dns-test      # Compare DNS resolver latency across paths.
+    cbm           # Health and recovery for the codebase-memory-mcp daemon.
     # Drift guards
     ts-acl        # Fetch the live Tailscale ACL policy and diff it against the vault cache.
     cf-dns        # Fetch the live Cloudflare DNS records and diff them against the vault cache.
     adguard       # Fetch the live AdGuard Home DNS rewrites and diff them against the vault cache.
     nginx         # Fetch the live Nginx Proxy Manager proxy hosts and diff them against the vault cache.
     # Integrations
-    hq            # Sync vault frontmatter to Severino HQ, plus routine HQ deployment ops.
+    hq            # Sync vault frontmatter to Severino HQ, plus routine HQ operational commands.
     site          # Public jseverino.com Astro site workflow.
     brand         # Render Joe's brand kits via the branding-engine.
     # Authoring
@@ -396,7 +397,7 @@ Compare DNS resolver latency across paths.
 
 Measures DNS latency across System DNS, a LAN AdGuard resolver, Cloudflare 1.1.1.1, and Cloudflare DoH. Reports avg/min/p50/p95/max and the delta of each path against a chosen baseline.
 
-The AdGuard IP defaults to an example LAN address; set ADGUARD_IP in your environment (or pass -a) to point at your own resolver.
+The LAN resolver has no default — set ADGUARD_IP in your environment or pass -a to point at your own. Everything else measures the same way on any machine.
 
 Usage: `dns-test`
 
@@ -404,10 +405,33 @@ Usage: `dns-test`
 |---|---|
 | `-d <domain>` | Domain to query (default: google.com) |
 | `-n <runs>` | Queries per path (default: 20) |
-| `-a <ip>` | AdGuard LAN IP (default: 192.168.1.233, env ADGUARD_IP) |
+| `-a <ip>` | AdGuard LAN resolver IP (required; env ADGUARD_IP) |
 | `-b <label>` | Path label to use as delta baseline (default: "AdGuard LAN") |
 
 Effect: `read + network`
+
+#### `cbm`
+
+Health and recovery for the codebase-memory-mcp daemon.
+
+codebase-memory-mcp runs a long-lived daemon and keeps its coordination state — the IPC socket, the socket identity file, and the version-cohort locks — in a runtime directory under /tmp. macOS reaps /tmp files that have gone untouched for about three days, but the daemon itself is started permanent and never exits. When the reaper deletes the identity file out from under a running daemon, that daemon becomes unverifiable while still holding the cohort locks, so a new session can neither adopt it nor start a replacement. Every MCP connect then fails with a 30-second 'CBM daemon could not start', and index workers refuse to run with 'a pre-coordination or unverified CBM generation is active'.
+
+Bare 'cbm' is 'cbm status'. Status probes the real MCP handshake rather than trusting the process list, because the failure mode is a daemon that is alive, listening, and still unusable. It also warns while the coordination files under /tmp are merely getting old, so the fix stays a five-second reset instead of a debugging session after the next reap. CBM legitimately runs a daemon out of both its /tmp and its cache runtime directory, so neither a daemon count nor a directory count is treated as a fault.
+
+| Invocation | Arguments / options | Effect | Summary |
+|---|---|---|---|
+| `cbm status` | `--json`<br>`--no-probe`<br>`--timeout <SECS>` | `read` | Whether the MCP handshake works, and every reason it might not |
+| `cbm fix` | `--dry-run` | `local_write` | Kill wedged daemons, clear stale runtime state, verify the handshake |
+| `cbm prune` | `--days <N>` | `local_write` | Delete old index-worker logs from the CBM cache |
+
+**Examples**
+
+```sh
+cbm  # is CBM actually usable right now, and why not
+cbm fix  # kill wedged daemons, clear stale runtime state, verify
+cbm fix --dry-run  # show what recovery would touch, change nothing
+cbm prune --days 7  # delete index-worker logs older than a week
+```
 
 #### `ts-acl`
 
@@ -461,19 +485,22 @@ forward_port / enabled, sorted by domain.
 
 #### `hq`
 
-Sync vault frontmatter to Severino HQ, plus routine HQ deployment ops.
+Sync vault frontmatter to Severino HQ, plus routine HQ operational commands.
 
-Severino HQ glue. Reads YAML frontmatter from the vault and upserts the HQ docs index. Also wraps the routine ssh + docker compose calls for managing the HQ deployment.
+Severino HQ glue. Reads YAML frontmatter from the vault and upserts the HQ docs index. Also wraps the routine ssh + docker compose calls for inspecting the HQ deployment. It does not deploy: landing on main is the deploy.
 
 | Invocation | Arguments / options | Effect | Summary |
 |---|---|---|---|
 | `hq manifest` | — | `read` | Print the manifest JSON (frontmatter from every doc) to stdout — for inspection or piping elsewhere |
-| `hq sync` | `--prune`<br>`--no-update` | `remote_write + network` | Sync the docs manifest and validated topology inventory into HQ; idempotent and safe to re-run |
-| `hq doctor` | — | `read` | Report vault docs missing or with invalid frontmatter, and whether HQ's last-synced manifest is stale |
+| `hq sync` | `--prune`<br>`--no-update` | `remote_write + network` | Sync the docs manifest into HQ; idempotent and safe to re-run |
+| `hq dev [addr]` | `[addr]`<br>`--fresh` | `local_write + network` | Run the composed stack locally: the host plus every private plugin checkout found, on one interpreter |
+| `hq doctor` | `--env` | `read` | Report vault docs missing or with invalid frontmatter, and whether HQ's last-synced manifest is stale |
 | `hq schema` | `--check` | `local_write` | Regenerate HQ's docs_index/schema.json from the installed MCP (the canonical frontmatter contract) |
 | `hq validate` | — | `read + network` | Report HQ registry entries (Projects/Assets) that no vault doc references. Read-only |
+| `hq life-sync` | — | `remote_write + network` | Emit the Life vault projection on this Mac and install it on HQ (renewals, goals, tasks, claims, vehicles) |
 | `hq create <project|asset> <slug>` | `<project\|asset>`<br>`<slug>` | `remote_write + network` | Create or update a Project or Asset in HQ (idempotent upsert by slug) |
-| `hq deploy` | — | `deploy + network` | Fallback: redeploy the immutable image from the last fully successful HQ CI run |
+| `hq deploy` | — | `read` | RETIRED — refuses. It shipped the host-only image and dropped every admitted extension off production. Landing on main IS the deploy |
+| `hq pin` | — | `read` | RETIRED — refuses. It set HQ_COMMIT on every plugin; that variable must not exist, and deleting it is the fix |
 | `hq ship` | `-m, --message <TEXT>` | `deploy + network` | Commit + push a small HQ change. The push IS the deploy: it triggers the gated pipeline (build → scan → deploy on green) |
 | `hq env-diff` | — | `read + network` | Key-level drift between the 1Password 'severino-hq env' item (the source of truth) and the env rendered on prod. Key names only — values never print |
 | `hq env-apply` | — | `deploy + network` | Apply 1Password env changes to prod now: runs severino-hq-secrets.service (renders + restarts only if something changed; the hourly timer does this anyway) |
@@ -483,6 +510,28 @@ Severino HQ glue. Reads YAML frontmatter from the vault and upserts the HQ docs 
 | `hq shell` | — | `remote_write + network + interactive` | ssh -t into the HQ Django shell (poke the ORM) |
 | `hq superuser` | — | `remote_write + network + interactive` | ssh -t into HQ and run createsuperuser interactively |
 | `hq export [year] [md|json]` | `[year]`<br>`[md\|json]` | `local_write + network` | Download the year summary to ./ and print the path |
+
+**`hq dev` details**
+
+Data-meaning settings (time zone, fiscal year start, review interval) are inherited from the production 1Password env rather than defaulted — a dev/prod time zone difference does not error, it silently reinterprets every timestamp an import writes.
+
+**Examples**
+
+```sh
+hq dev  # serve the composed stack on 0.0.0.0:8000
+hq dev --fresh  # start from an empty scratch database
+hq dev 127.0.0.1:8001  # second instance, loopback only
+```
+
+**`hq life-sync` details**
+
+The Mac is the only machine that can read the vault, so the snapshot originates here. HQ reconciles by doc_id and prunes anything the document omits — so an empty or malformed snapshot is refused locally rather than sent, because sending it would delete the records it failed to mention.
+
+**Examples**
+
+```sh
+hq life-sync  # refresh HQ's Life records from the vault
+```
 
 **`hq create` details**
 
@@ -1430,8 +1479,9 @@ in that doc stay for humans. Same accept-drift loop as `cf-dns`:
 
 The logical fields `adguard.username` and `adguard.password` resolve through
 the shared 1Password registry to the `AdGuard Home` item in Infrastructure.
-`$ADGUARD_URL` defaults to `http://192.168.1.233:3001` (reachable over LAN or
-Tailscale). Needs `curl`, `jq`, and an approved 1Password session.
+`$ADGUARD_URL` comes from `config/adguard.sh` (copy it from
+`config/adguard.sh.example`). Needs `curl`, `jq`, and an approved 1Password
+session.
 
 ### nginx
 
@@ -1450,7 +1500,7 @@ NPM has no long-lived API tokens, so `nginx` exchanges the web-UI login for a
 short-lived Bearer per call (`POST $NGINX_URL/tokens`). The logical fields
 `nginx.username` and `nginx.password` resolve through the shared 1Password
 registry to the `Nginx Proxy Manager` item in Infrastructure. `$NGINX_URL`
-defaults to `http://192.168.1.233:81/api` (reachable over LAN or Tailscale).
+comes from `config/nginx.sh` (copy it from `config/nginx.sh.example`).
 Needs `curl`, `jq`, and an approved 1Password session.
 
 ### remember

@@ -17,6 +17,10 @@ config/hq.sh
 # Local secret-reference registry — see config/secrets.json.example.
 config/secrets.json
 
+# Drift-guard endpoints on your own network — see the .example templates.
+config/adguard.sh
+config/nginx.sh
+
 # User-local brief section emitters — see config/brief.sh.example.
 config/brief.sh
 
@@ -34,3 +38,9 @@ archive/
 # iCloud-skipped via .nosync; keep the lockfile, not the tree.
 /node_modules
 /node_modules.nosync/
+
+# Python venvs and caches for lib/<tool>/ projects; keep uv.lock, not the tree.
+.venv/
+.venv.nosync/
+__pycache__/
+.pytest_cache/
