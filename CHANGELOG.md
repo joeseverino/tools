@@ -12,6 +12,93 @@
   calls through the shared Node adapter, preventing stale-session overwrites
   when paired with severino-vault-mcp's stale-plan guard.
 
+## 1.0.0 (2026-09-05)
+
+
+### Features
+
+* add cbm, local drift-guard config templates, and consolidated dependency bumps ([#94](https://github.com/joeseverino/tools/issues/94)) ([2c089ac](https://github.com/joeseverino/tools/commit/2c089acd0088c1b3f49ac57cf6572844fede4f74))
+* add document provenance to PDFs ([7094c25](https://github.com/joeseverino/tools/commit/7094c25b2af42ceed882574e6b916a00e294579e))
+* add hq life-sync ([#83](https://github.com/joeseverino/tools/issues/83)) ([a1f943c](https://github.com/joeseverino/tools/commit/a1f943cc67982ecd666ff7394cd8660b1dc676c6))
+* add repos TUI workflow dashboard ([090d3ae](https://github.com/joeseverino/tools/commit/090d3ae5f4ba5931c70ceb33b8d07ea6828291c3))
+* add repos TUI workflow dashboard ([b1be593](https://github.com/joeseverino/tools/commit/b1be593a750ecb8b2f1b92d3b40329fe1b96f63d))
+* add resync and ship CI/PR management (--check, --watch, PR sync) ([1c3d4bf](https://github.com/joeseverino/tools/commit/1c3d4bf9a58fcbd61f01de24de465508cf17d06e))
+* add resync and ship CI/PR management (--check, --watch, PR sync) ([82afe9c](https://github.com/joeseverino/tools/commit/82afe9c1c773ff58fe5a66ff160813a3c3ac0a12))
+* apply brand tokens to Mermaid ([f425ab3](https://github.com/joeseverino/tools/commit/f425ab3205d5f78f656bc9d55fcda7b93a877bd0))
+* branch-safety engine — start verb, stale recovery, one branch-state ladder ([#37](https://github.com/joeseverino/tools/issues/37)) ([8bb722d](https://github.com/joeseverino/tools/commit/8bb722de903fab8cbe4c2420114b4210c0d93c1f))
+* brand doc-to-pdf artifacts ([812e550](https://github.com/joeseverino/tools/commit/812e550b2c892eea8a290e16e49a8b9afceb3d80))
+* **brand:** add `brand figure` for designed graphics ([238d5dd](https://github.com/joeseverino/tools/commit/238d5dd47518f7f6259518e0ebf87939296e3c8f))
+* brief surfaces the backlog (open + stale debt) from the vault brief ([#40](https://github.com/joeseverino/tools/issues/40)) ([869f22c](https://github.com/joeseverino/tools/commit/869f22c81612774434efcd0d4afb576e18621ad9))
+* command-surface SOT — one spec, one intercept, derived everywhere ([796affe](https://github.com/joeseverino/tools/commit/796affe45ddfd0c25a059593145bc792034bdceb))
+* **cordon:** pin cordon-spec from npm — the schema check verifies everywhere ([#62](https://github.com/joeseverino/tools/issues/62)) ([151c3ba](https://github.com/joeseverino/tools/commit/151c3ba01b5baff331dd2c3873491a78f0b956e3))
+* describe v3 — per-command effect (blast radius) + scoped command lookup ([ac52bde](https://github.com/joeseverino/tools/commit/ac52bde4fb6222542193241958d8cf6ba129c2a8))
+* doc-to-pdf GitHub links + brand figure graphics ([9979cad](https://github.com/joeseverino/tools/commit/9979cad8b8722b9e2c2b2ce1b3a4768996347e48))
+* **doc-to-pdf:** rewrite relative links to absolute GitHub URLs ([ca127ea](https://github.com/joeseverino/tools/commit/ca127eae398cd7e583c185ea25393bdabe497e4e))
+* doctor --all, section-scoped mirror writer, sync-state, cache fixes ([85acc15](https://github.com/joeseverino/tools/commit/85acc151fb92fe1c87bd48cd2385d975ab0e0b5f))
+* **drift:** json-cache data-store model via the MCP; retire legacy block path ([9522ebe](https://github.com/joeseverino/tools/commit/9522ebe1fcceb4b1910d16df0db48a70b3804ff7))
+* **drift:** json-file data-store model alongside legacy blocks ([43b3c63](https://github.com/joeseverino/tools/commit/43b3c63021e344525d4fbddf31b0fc3a54e65345))
+* **drift:** migrate nginx, ts-acl, cf-dns to the json-file data store ([99d0148](https://github.com/joeseverino/tools/commit/99d0148cbff1614b19acf1fb64fe23edd42c0a6d))
+* emit-once command-surface contract (tools describe) ([510a2d7](https://github.com/joeseverino/tools/commit/510a2d7f141a157ddcdecc106b1817397112c834))
+* establish a reusable tools SDK ([#69](https://github.com/joeseverino/tools/issues/69)) ([1fb429b](https://github.com/joeseverino/tools/commit/1fb429b4d01b74c9c865e186bd9e0fd253a56bc8))
+* establish contract-driven Tools control plane ([#80](https://github.com/joeseverino/tools/issues/80)) ([6b0dcc3](https://github.com/joeseverino/tools/commit/6b0dcc338b69ceae8f475b3a24d7fd6e89c398f1))
+* extract shared pdf-engine; fix brand-font drift in doc-to-pdf and diagram ([#72](https://github.com/joeseverino/tools/issues/72)) ([16e15ea](https://github.com/joeseverino/tools/commit/16e15eacc3277f673a51c4868ec9187dd74c50cd))
+* gate-preview — a cordon change's fleet blast radius before merge ([#56](https://github.com/joeseverino/tools/issues/56)) ([62e6838](https://github.com/joeseverino/tools/commit/62e6838a50a64e230e8cf9bc1c73fb093c615719))
+* guard the vendored cordon schema against drift ([abe6c8a](https://github.com/joeseverino/tools/commit/abe6c8ac2df91787060b8b58b8e959dc157beb33))
+* hq dev and hq env-diff ([886e2c8](https://github.com/joeseverino/tools/commit/886e2c8d368946306b9f98516b8a3daf0cca0dd0))
+* **hq:** env-diff/env-apply — prod env renders from 1Password via severino-hq-secrets.service ([#74](https://github.com/joeseverino/tools/issues/74)) ([c97ac76](https://github.com/joeseverino/tools/commit/c97ac76aae645df67c29aca03c4e625a830410e4))
+* **hq:** make Tools a schema-driven HQ MCP client ([#77](https://github.com/joeseverino/tools/issues/77)) ([53dd516](https://github.com/joeseverino/tools/commit/53dd516f0e4f940c6bb92490b980c6d1cfd0bb42))
+* mark intentional local repos in fleet status ([d724bfb](https://github.com/joeseverino/tools/commit/d724bfb183c64821436e2beca81c0abd3bf0d86f))
+* mark intentional local repos in fleet status ([ae9ca2d](https://github.com/joeseverino/tools/commit/ae9ca2d63b51f61caa2d17c916be9af092f98eae))
+* one fleet classification consumed by repos tui and brief (emit-once) ([8577cd7](https://github.com/joeseverino/tools/commit/8577cd7cef1f33563249c53e5e4d4b56b201938f))
+* refine branded diagram theme (layered cards, anchor pivot, 3x) ([33a2007](https://github.com/joeseverino/tools/commit/33a2007e323ee4739896a8fbbe7c212400950ee2))
+* **repo:** fleet entry as one verb — new bootstraps from cordon-starter, register backfills the vault + HQ registry ([#68](https://github.com/joeseverino/tools/issues/68)) ([c18eb5a](https://github.com/joeseverino/tools/commit/c18eb5afc1dac01a5b7105cba17111eda9fe8075))
+* require explicit command effects ([aecb0ef](https://github.com/joeseverino/tools/commit/aecb0ef7ac8d1cf727acac7b9ef338ee8e690b70))
+* runtime deploy gate + validate sibling describe contracts ([#7](https://github.com/joeseverino/tools/issues/7)) ([5ba0acb](https://github.com/joeseverino/tools/commit/5ba0acbc3fd4d5247ce5d2d507a8e8a720a8f0d7))
+* **secrets:** shared 1Password-backed secrets layer for the drift guards ([#76](https://github.com/joeseverino/tools/issues/76)) ([556cffb](https://github.com/joeseverino/tools/commit/556cffb2f40a029ea108acdd6e0efcad4f15d338))
+* ship-flow gate, fleet contracts, and shared drift/mcp seams ([#43](https://github.com/joeseverino/tools/issues/43)) ([2f88745](https://github.com/joeseverino/tools/commit/2f887454d6841126dc5bf32089a0360f3644661d))
+* site CLI + describe cohesion (validate-writeup, reinstall-mcp --yes, federate obsidian contract) ([4469646](https://github.com/joeseverino/tools/commit/44696469c360f81c7c67d49ce05e97cd210f8329))
+* site CLI + describe cohesion (validate-writeup, reinstall-mcp --yes, federate obsidian contract) ([3e70254](https://github.com/joeseverino/tools/commit/3e70254199bddbab75aaf727d4b7fdb409f5e18d))
+* site CLI + describe cohesion (validate-writeup, reinstall-mcp --yes, federate obsidian contract) ([759d80b](https://github.com/joeseverino/tools/commit/759d80ba50864f92fa09802e71040785a2816f45))
+* site CLI + describe cohesion (validate-writeup, reinstall-mcp --yes, federate obsidian contract) ([d441eed](https://github.com/joeseverino/tools/commit/d441eedb36e83c217896d69034468fbb975e307d))
+* site manage TUI with bats + PTY test coverage ([4f1e7c9](https://github.com/joeseverino/tools/commit/4f1e7c991b3a51f3aa7007b27c43434820159cc4))
+* **site:** add site dev --drafts for local draft preview, document in README ([06f3836](https://github.com/joeseverino/tools/commit/06f38364aaea58220b9bc48887b63cab8af8e65d))
+* **site:** auto-commit on publish-all, add og command, document in README ([c4a89be](https://github.com/joeseverino/tools/commit/c4a89be6551b19f4de02eacd0834c063110f4669))
+* **site:** name published/edited/removed slugs in publish-all commit ([beb6ff0](https://github.com/joeseverino/tools/commit/beb6ff03261978d2fbbaa1066c35f04813d47c56))
+* **site:** PR-based publish flow + `site land` ([b33513c](https://github.com/joeseverino/tools/commit/b33513c8a17c3c10e51d897967112d6d86f8b93c))
+* **site:** PR-based publish flow + `site land` ([3561e50](https://github.com/joeseverino/tools/commit/3561e509271f26ebb74b2635ebe9cf01a16b8475))
+* standardize branded diagram rendering ([9578e68](https://github.com/joeseverino/tools/commit/9578e68a11d7d7261576ca5e416f43b389daf06e))
+* streamline site delivery workflows ([#71](https://github.com/joeseverino/tools/issues/71)) ([c0fe6bd](https://github.com/joeseverino/tools/commit/c0fe6bd5e1bb670e53de3f9ca739a25a36c413f0))
+* tools describe --tui + focused per-command help from one spec ([c1ad3ab](https://github.com/joeseverino/tools/commit/c1ad3ab855795edb23064b49e07904bfe8642b3e))
+* **tools:** bump-engine + engine lock parity doctor check ([#54](https://github.com/joeseverino/tools/issues/54)) ([0b8413c](https://github.com/joeseverino/tools/commit/0b8413ccd9b4472a76899defaac78c039d61a2a1))
+* unify branded document rendering ([a0cc13f](https://github.com/joeseverino/tools/commit/a0cc13f68c17681353817ad9f64aa66c12df9db4))
+* **vault:** add 'vault daily' — populate the daily note's brief region ([#44](https://github.com/joeseverino/tools/issues/44)) ([801f18e](https://github.com/joeseverino/tools/commit/801f18e11568ac0285e82fe551984d90df4e58a9))
+* **vault:** daily note lists the actual open work, not just counts ([#46](https://github.com/joeseverino/tools/issues/46)) ([6618304](https://github.com/joeseverino/tools/commit/6618304f35ed1489788c412127821a9ea30bfb0d))
+* **vault:** daily note logs what you DID, not pending work ([#47](https://github.com/joeseverino/tools/issues/47)) ([300f61d](https://github.com/joeseverino/tools/commit/300f61dfe5ec67072f00cf39f40f8099c0113c5e))
+* workspace loop — land verb, brief/repos cockpits, one PR-state owner ([5fbefff](https://github.com/joeseverino/tools/commit/5fbefff78b4d359658d161a9e8d306fd2c6c1761))
+* workspace loop (land + brief/repos cockpits) + brand Cordon delegate ([71c91a9](https://github.com/joeseverino/tools/commit/71c91a96012613f56d2bf656fcffc705443fccc6))
+
+
+### Bug Fixes
+
+* -h/--describe must work without env (the contract); harden tests ([d388891](https://github.com/joeseverino/tools/commit/d38889184f5e0dca197f31b8c56bbd4dcf43837a))
+* **common:** route die() to stderr; drop the per-call &gt;&2 workarounds ([#45](https://github.com/joeseverino/tools/issues/45)) ([8add6ce](https://github.com/joeseverino/tools/commit/8add6ce45012f85dd1b74ed80307352c3ecf7798))
+* disable the catalog bats run — tools check --ci is the one bats gate ([#57](https://github.com/joeseverino/tools/issues/57)) ([86eee8a](https://github.com/joeseverino/tools/commit/86eee8a31e6f999ca650e1a1aa0fdde3399237cd))
+* doc-to-pdf -h/--describe work without node_modules (lazy markdown-it) ([7a5507b](https://github.com/joeseverino/tools/commit/7a5507b8ca7a5dcb1c2b6123ed090f10f8ae4b45))
+* **git:** a start-cut branch is current, not zombie — ship commits on it ([#58](https://github.com/joeseverino/tools/issues/58)) ([d70ba0c](https://github.com/joeseverino/tools/commit/d70ba0c0c9bf8833b4744f0efcf2c6f8e01b8448))
+* guard sdk core seams, port seam rationale, bootstrap remember first write ([#70](https://github.com/joeseverino/tools/issues/70)) ([7ef09e4](https://github.com/joeseverino/tools/commit/7ef09e4509423b1704df5992e7ac60370d6277c9))
+* **hq:** include 07 Backlog so cross-cutting tasks reach HQ ([#52](https://github.com/joeseverino/tools/issues/52)) ([9f9070f](https://github.com/joeseverino/tools/commit/9f9070f2c551a33abfbd4dc2cb2f216c626906fb))
+* **land:** don't count failed merges as landed in the summary ([#75](https://github.com/joeseverino/tools/issues/75)) ([5e8895a](https://github.com/joeseverino/tools/commit/5e8895ac18fc8355fd6f6d681235b5496d1d0cef))
+* **ship:** a skip is not a ship — honest tally, and push failures speak ([#60](https://github.com/joeseverino/tools/issues/60)) ([21e56f9](https://github.com/joeseverino/tools/commit/21e56f9ea345969f47cb2b076d1bd4d1f9d53134))
+* white anchor text on htmlLabels:false (SVG text fill, not just color) ([690e24b](https://github.com/joeseverino/tools/commit/690e24b8543aaaea5a5cfb834bdaac8e322c8f14))
+* white anchor text on htmlLabels:false diagrams ([524fbba](https://github.com/joeseverino/tools/commit/524fbba3efb82a70818a468231537484e2aa3af6))
+* **workspace:** resync clears squash-merged current branch; exact-name scope; reaper ([#39](https://github.com/joeseverino/tools/issues/39)) ([fdc056c](https://github.com/joeseverino/tools/commit/fdc056c4155a2fc3f363feabbc970824825d24a5))
+
+
+### Performance Improvements
+
+* **repos:** one git_repo_snapshot call replaces 6 plumbing calls/repo ([#50](https://github.com/joeseverino/tools/issues/50)) ([01d89c5](https://github.com/joeseverino/tools/commit/01d89c539d60888df3c2636bf2f32bbf95761cbf))
+* **repos:** parallel scan + scoped filter; in-TUI diff overlay; raw-mode fix ([#42](https://github.com/joeseverino/tools/issues/42)) ([3887f69](https://github.com/joeseverino/tools/commit/3887f69d6ec96da5f64aa339c27ae10f31c0a7a7))
+
 ## [1.5.0](https://github.com/joeseverino/tools/compare/v1.4.0...v1.5.0) (2026-08-11)
 
 
