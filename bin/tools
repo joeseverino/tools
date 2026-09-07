@@ -151,9 +151,13 @@ cmd_status() {
         fi
     fi
 
-    local pub_ok=0 key_ok=0
+    # The private key is vault-backed, so "present" means reachable from some
+    # source — not a file on disk. Checking the path would report the healthy
+    # end state (no key beside the public half) as a failure.
+    local pub_ok=0 key_ok=0 key_from
+    key_from="$(key_source)"
     [[ -f "${AGE_PUBKEY:-}" ]] && pub_ok=1
-    [[ -f "${AGE_KEY:-}"    ]] && key_ok=1
+    [[ "$key_from" != "none" ]] && key_ok=1
 
     if (( json )); then
         printf '{"ok":true,"vault":{"ok":%s,"tree":"%s","remote":"%s","path":"%s"},' \
@@ -202,7 +206,11 @@ cmd_status() {
     fi
 
     if (( pub_ok && key_ok )); then
-        msg "$GREEN" "keys" "pub + private present"
+        if [[ "$key_from" == "1password" ]]; then
+            msg "$GREEN" "keys" "pub present, private in 1Password"
+        else
+            msg "$YELLOW" "keys" "pub present, private on disk ${DIM}($AGE_KEY — the vault copy is the key of record)${RESET}"
+        fi
     else
         local detail=""
         (( pub_ok )) || detail+="missing pub "
@@ -260,7 +268,14 @@ cmd_doctor() {
     check_path d "VAULT directory" "${VAULT:-}"
     check_path d "INBOX_DIR"       "${INBOX_DIR:-}"
     check_path f "AGE_PUBKEY"      "${AGE_PUBKEY:-}"
-    check_path f "AGE_KEY"         "${AGE_KEY:-}"
+    # AGE_KEY is the fallback path, not a requirement — the identity normally
+    # resolves from the vault, and no file on disk is the healthy state. Report
+    # the resolved source rather than checking for the file.
+    case "$(key_source)" in
+        1password) check "age identity" 1 "1Password via ${AGE_KEY_ID:-AGE_KEY_REF}" || fail=1 ;;
+        file)      check "age identity" 1 "on disk: $AGE_KEY" || fail=1 ;;
+        *)         check "age identity" 0 "no vault reference, no file at ${AGE_KEY:-unset}" || fail=1 ;;
+    esac
 
     # External deps
     for cmd in age git rsync; do
@@ -1025,6 +1040,17 @@ cmd_watch() {
 
 cmd_key() {
     [[ -n "${AGE_KEY:-}" ]] || die "error" "AGE_KEY not set (KEYS_HOME missing?)"
+    # cache/test operate on a passphrase for the on-disk key. With a vault-backed
+    # identity there is no passphrase to cache — say so instead of failing the
+    # validate against a file that is correctly absent.
+    case "${1:-status}" in
+        cache|test)
+            if [[ ! -f "$AGE_KEY" ]]; then
+                die "error" \
+                    "no on-disk key at $AGE_KEY — the identity is vault-backed, so there is no passphrase to $1 (see: tools key status)"
+            fi
+            ;;
+    esac
     case "${1:-status}" in
         cache)
             local pass
@@ -1050,11 +1076,22 @@ cmd_key() {
             ;;
         status)
             echo
-            if key_has; then
-                msg "$GREEN" "key" "passphrase cached ${DIM}(decrypt runs silently)${RESET}"
-            else
-                msg "$YELLOW" "key" "no cached passphrase ${DIM}(run: tools key cache)${RESET}"
-            fi
+            case "$(key_source)" in
+                1password)
+                    msg "$GREEN" "key" "vault-backed ${DIM}(1Password via ${AGE_KEY_ID:-AGE_KEY_REF}; no passphrase needed)${RESET}"
+                    ;;
+                file)
+                    msg "$YELLOW" "key" "on disk ${DIM}($AGE_KEY)${RESET}"
+                    if key_has; then
+                        msg "$GREEN" "key" "passphrase cached ${DIM}(decrypt runs silently)${RESET}"
+                    else
+                        msg "$YELLOW" "key" "no cached passphrase ${DIM}(run: tools key cache)${RESET}"
+                    fi
+                    ;;
+                *)
+                    msg "$RED" "key" "no identity from any source"
+                    ;;
+            esac
             echo
             ;;
         test)
