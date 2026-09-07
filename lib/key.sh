@@ -1,13 +1,30 @@
 # shellcheck shell=bash
 # shellcheck disable=SC2034  # AGE_IDENTITY is set here, read by callers (decrypt)
-# key.sh — SSH passphrase cache (macOS Keychain) + age private-key unlock.
-# Sourced by tools that need keychain access (decrypt, tools key).
+# key.sh — age private-key unlock: 1Password first, on-disk key as fallback.
+# Sourced by tools that need the private identity (decrypt, tools key).
 #
-# Storage: /usr/bin/security generic-password under service "age-key-passphrase".
-# Access: -A (any app), same model git-credential-osxkeychain uses. The threat
-# model is "anyone running as you can read it" — identical to a 600 file.
+# The key of record lives in 1Password, not on disk. unlock_age_key reads it
+# through the logical secret registry, writes it to a mode-600 temp file for
+# the life of the process, and leaves removal to the caller's trap. Nothing
+# here ever echoes key material.
+#
+# The Keychain passphrase cache below is the fallback path only — it unlocks a
+# passphrase-protected on-disk key on a machine with no `op`, and it is what
+# the bats suite exercises. With a vault-backed key it never runs, because
+# 1Password exports the identity already unlocked.
+#
+# Keychain storage: /usr/bin/security generic-password under service
+# "age-key-passphrase". Access: -A (any app), same model
+# git-credential-osxkeychain uses. Threat model is "anyone running as you can
+# read it" — identical to a 600 file, which is precisely why the key itself
+# belongs in the vault rather than beside it.
 #
 # Functions:
+#   age_key_ref           Echo the secret reference for the private key, or "".
+#   key_source            Where the identity will come from:
+#                         "1password" | "file" | "none".
+#   key_materialize_ref   Write the vault copy to a mode-600 temp file and set
+#                         $UNLOCKED_KEY. 0 ok, 1 no reference / no op / failed.
 #   key_has               True if a cached passphrase exists.
 #   key_get               Echo the cached passphrase (empty if none).
 #   key_store <pass>      Store/replace the cached passphrase.
@@ -17,11 +34,14 @@
 #   is_ssh_passphrased <file>
 #                         True if file is a passphrase-protected OpenSSH key.
 #   unlock_age_key [no_cache]
-#                         Resolve $AGE_KEY to a usable identity file. On success
-#                         sets $AGE_IDENTITY (and $UNLOCKED_KEY when a temp copy
-#                         was made — the caller must remove it via trap).
+#                         Resolve a usable identity file. On success sets
+#                         $AGE_IDENTITY (and $UNLOCKED_KEY when a temp copy was
+#                         made — the caller must remove it via trap).
 #                         Returns 0 ok, 1 no passphrase, 2 wrong passphrase,
-#                         3 $AGE_KEY missing.
+#                         3 no key from any source.
+
+# shellcheck source=lib/sdk/secrets.sh
+source "${TOOLS_HOME:?}/lib/sdk/secrets.sh"
 
 KEY_SERVICE="age-key-passphrase"
 KEY_ACCOUNT="${USER}"
@@ -32,6 +52,46 @@ KEY_SECURITY_BIN="${KEY_SECURITY_BIN:-/usr/bin/security}"
 
 UNLOCKED_KEY=""
 AGE_IDENTITY=""
+
+# AGE_KEY_REF pins a reference when set — including when set empty, which is
+# how the suite and a recovery shell say "no vault, use the file". Only when it
+# is entirely unset do we look AGE_KEY_ID up in the registry. Hence ${VAR+set}
+# rather than a default expansion: the empty case has to be distinguishable.
+age_key_ref() {
+    if [[ ${AGE_KEY_REF+set} ]]; then
+        printf '%s' "$AGE_KEY_REF"
+        return 0
+    fi
+    [[ -n "${AGE_KEY_ID:-}" ]] || return 0
+    secret_ref_opt "$AGE_KEY_ID" 2>/dev/null || true
+}
+
+key_source() {
+    if [[ -n "$(age_key_ref)" ]] && command -v op >/dev/null 2>&1; then
+        printf '1password'
+    elif [[ -f "${AGE_KEY:-}" ]]; then
+        printf 'file'
+    else
+        printf 'none'
+    fi
+}
+
+key_materialize_ref() {
+    local ref tmp
+    ref="$(age_key_ref)"
+    [[ -n "$ref" ]] || return 1
+    command -v op >/dev/null 2>&1 || return 1
+    tmp=$(mktemp -t age-key.XXXXXX) || return 1
+    chmod 600 "$tmp"
+    # Plain `op read`, not --no-newline: an OpenSSH private key without its
+    # trailing newline is malformed and age rejects it as "no identities found".
+    if ! op read "$ref" >"$tmp" 2>/dev/null || [[ ! -s "$tmp" ]]; then
+        rm -f "$tmp"
+        return 1
+    fi
+    UNLOCKED_KEY="$tmp"
+    return 0
+}
 
 key_has() {
     "$KEY_SECURITY_BIN" find-generic-password \
@@ -91,13 +151,28 @@ key_validate() {
 }
 
 unlock_age_key() {
-    local no_cache="${1-}"
+    local no_cache="${1-}" source_key=""
     AGE_IDENTITY=""
-    [[ -f "${AGE_KEY:-}" ]] || return 3
-    if ! is_ssh_passphrased "$AGE_KEY"; then
-        AGE_IDENTITY="$AGE_KEY"
+
+    # 1Password is the key of record; the on-disk path is the fallback. A vault
+    # read that fails (op absent, app locked, no reference) falls through to the
+    # file rather than dying, so a recovery shell still works — and once the
+    # file is gone, "no key from any source" is the honest error.
+    if key_materialize_ref; then
+        source_key="$UNLOCKED_KEY"
+    elif [[ -f "${AGE_KEY:-}" ]]; then
+        source_key="$AGE_KEY"
+    else
+        return 3
+    fi
+
+    # 1Password exports identities already unlocked, so the vault path normally
+    # stops here. A passphrased source — the on-disk key — falls through.
+    if ! is_ssh_passphrased "$source_key"; then
+        AGE_IDENTITY="$source_key"
         return 0
     fi
+
     local pass=""
     if [[ -z "$no_cache" ]]; then
         pass="$(key_get || true)"
@@ -106,9 +181,14 @@ unlock_age_key() {
         pass="$(key_prompt)"
         [[ -n "$pass" ]] || return 1
     fi
-    UNLOCKED_KEY=$(mktemp -t age-key.XXXXXX)
-    chmod 600 "$UNLOCKED_KEY"
-    cp "$AGE_KEY" "$UNLOCKED_KEY"
+
+    # Strip the passphrase on a private copy; never rewrite the source in place.
+    # When the source is already our own temp copy there is nothing to copy.
+    if [[ "$source_key" != "$UNLOCKED_KEY" ]]; then
+        UNLOCKED_KEY=$(mktemp -t age-key.XXXXXX)
+        chmod 600 "$UNLOCKED_KEY"
+        cp "$source_key" "$UNLOCKED_KEY"
+    fi
     if ! ssh-keygen -p -P "$pass" -N "" -f "$UNLOCKED_KEY" >/dev/null 2>&1; then
         rm -f "$UNLOCKED_KEY"
         UNLOCKED_KEY=""

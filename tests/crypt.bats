@@ -143,3 +143,52 @@ STUB
     [[ "$output" == *"no passphrase provided"* ]]
     [ ! -f "$SECURITY_LOG" ]
 }
+
+# ---------- vault-backed identity (the private key is not on disk) ----------
+
+@test "decrypt reads the private key from 1Password when a reference resolves" {
+    setup_crypt_vault
+    [ ! -f "$KEYS_HOME/file_key/file_key" ]
+
+    encrypt_bin note.md
+    run decrypt_bin note.md.age
+    [ "$status" -eq 0 ]
+    [ "$(cat note.md)" = "the quick brown fox" ]
+}
+
+@test "the materialized key is unlinked when decrypt exits" {
+    setup_crypt_vault
+    encrypt_bin note.md
+    run decrypt_bin note.md.age
+    [ "$status" -eq 0 ]
+    # mktemp -t age-key.XXXXXX lands in $TMPDIR; nothing may survive the run.
+    run find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'age-key.*' -newer note.md.age
+    [ -z "$output" ]
+}
+
+@test "decrypt fails cleanly when neither the vault nor a file yields a key" {
+    setup_crypt_vault
+    # A stub op that refuses, standing in for a locked or absent 1Password.
+    printf '#!/usr/bin/env bash\nexit 1\n' > "$BATS_TEST_TMPDIR/op-stub/op"
+    chmod +x "$BATS_TEST_TMPDIR/op-stub/op"
+
+    encrypt_bin note.md
+    run decrypt_bin note.md.age
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"no private key"* ]]
+}
+
+@test "AGE_KEY_REF= forces the on-disk key even when op is available" {
+    setup_crypt_vault
+    # Restore a real on-disk pair and pin "no reference": the stub op is still
+    # first on PATH, so a pass here proves the pin is honored, not that op is
+    # simply missing.
+    ssh-keygen -q -t ed25519 -N "" -C "tools-test-disk" \
+        -f "$KEYS_HOME/file_key/file_key"
+    export AGE_KEY_REF=""
+
+    encrypt_bin note.md
+    run decrypt_bin note.md.age
+    [ "$status" -eq 0 ]
+    [ "$(cat note.md)" = "the quick brown fox" ]
+}

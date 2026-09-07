@@ -62,6 +62,14 @@ Shell consumers use `secret_read <logical-id>` from `lib/sdk/secrets.sh`; the
 versioned `schemas/secrets-v1.json` contract validates the registry before any
 provider call. Callers never know a vault name, item name, or provider URI.
 
+`secret_read` and `secret_ref` die on a missing registry or unknown id, which is
+right when the secret is the only way to proceed. A caller that holds a real
+fallback uses `secret_ref_opt <logical-id>` instead: it echoes the reference or
+returns 1, so a machine that never provisioned a registry — CI, a fresh clone,
+the bats suite — degrades to the fallback rather than aborting. `decrypt` reads
+its age identity this way, preferring the vault and keeping the on-disk key as
+the recovery path.
+
 ## Capability registry
 
 `config/capabilities.json` declares repository capabilities once: describe and
