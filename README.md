@@ -364,8 +364,7 @@ Severino HQ glue. Reads YAML frontmatter from the vault and upserts the HQ docs 
 |---|---|---|---|
 | `hq manifest` | — | `read` | Print the manifest JSON (frontmatter from every doc) to stdout — for inspection or piping elsewhere |
 | `hq sync` | `--prune`<br>`--no-update` | `remote_write + network` | Sync the docs manifest into HQ; idempotent and safe to re-run |
-| `hq dev [addr]` | `[addr]`<br>`--fresh` | `local_write + network` | Run the composed stack locally: the host plus every private plugin checkout found, on one interpreter |
-| `hq doctor` | `--env` | `read` | Report vault docs missing or with invalid frontmatter, and whether HQ's last-synced manifest is stale |
+| `hq doctor` | — | `read` | Report vault docs missing or with invalid frontmatter, and whether HQ's last-synced manifest is stale |
 | `hq schema` | `--check` | `local_write` | Regenerate HQ's docs_index/schema.json from the installed MCP (the canonical frontmatter contract) |
 | `hq validate` | — | `read + network` | Report HQ registry entries (Projects/Assets) that no vault doc references. Read-only |
 | `hq life-sync` | — | `remote_write + network` | Emit the Life vault projection on this Mac and install it on HQ (renewals, goals, tasks, claims, vehicles) |
@@ -381,18 +380,6 @@ Severino HQ glue. Reads YAML frontmatter from the vault and upserts the HQ docs 
 | `hq shell` | — | `remote_write + network + interactive` | ssh -t into the HQ Django shell (poke the ORM) |
 | `hq superuser` | — | `remote_write + network + interactive` | ssh -t into HQ and run createsuperuser interactively |
 | `hq export [year] [md|json]` | `[year]`<br>`[md\|json]` | `local_write + network` | Download the year summary to ./ and print the path |
-
-**`hq dev` details**
-
-Data-meaning settings (time zone, fiscal year start, review interval) are inherited from the production 1Password env rather than defaulted — a dev/prod time zone difference does not error, it silently reinterprets every timestamp an import writes.
-
-**Examples**
-
-```sh
-hq dev  # serve the composed stack on 0.0.0.0:8000
-hq dev --fresh  # start from an empty scratch database
-hq dev 127.0.0.1:8001  # second instance, loopback only
-```
 
 **`hq life-sync` details**
 
