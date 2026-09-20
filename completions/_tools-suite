@@ -223,7 +223,6 @@ _tools_suite_contract() {
       commands=(
         'manifest:Print the manifest JSON (frontmatter from every doc) to stdout — for inspection or piping elsewhere'
         'sync:Sync the docs manifest into HQ; idempotent and safe to re-run'
-        'dev:Run the composed stack locally: the host plus every private plugin checkout found, on one interpreter'
         'doctor:Report vault docs missing or with invalid frontmatter, and whether HQ'\''s last-synced manifest is stale'
         'schema:Regenerate HQ'\''s docs_index/schema.json from the installed MCP (the canonical frontmatter contract)'
         'validate:Report HQ registry entries (Projects/Assets) that no vault doc references. Read-only'
@@ -249,8 +248,6 @@ _tools_suite_contract() {
         args)
           case "${words[2]}" in
             sync) _arguments '--prune[Delete orphan DocumentationRecord rows (doc_ids in HQ but not in the manifest), plus ContentItems linked only to them. Use after a doc_id rename or retirement]' '--no-update[Only create new records; never update existing ones]' ;;
-            dev) _arguments '1:Bind address (default $HQ_DEV_BIND). Binds all interfaces because dev-hq.jseverino.com proxies to this Mac:' '--fresh[Delete the scratch database first, so the boot starts from empty and re-migrates]' ;;
-            doctor) _arguments '--env[Instead: compare the settings that change what data MEANS (time zone, USE_TZ, reporting windows) between the resolved dev env and production. Exit 1 on a difference. Needs the 1Password CLI; prints these named non-secret settings only]' ;;
             schema) _arguments '--check[Verify the HQ schema.json and the vault schema doc match the MCP; exit 1 on drift without writing (CI / pre-deploy gate)]' ;;
             create) _arguments '1:What to create:(project asset)' '2:Registry slug (the create_project / create_asset key):' ;;
             ship) _arguments '{-m,--message}[Commit message for the HQ repo change (required)]:text:' ;;
