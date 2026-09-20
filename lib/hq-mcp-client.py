@@ -64,10 +64,33 @@ def endpoint(config: dict[str, object]) -> str:
     return url
 
 
+def has_credential(value: object) -> bool:
+    """Whether an Authorization value actually carries a credential.
+
+    A scheme with nothing after it -- "Bearer " -- is a string, and a plain
+    isinstance check accepts it. It then travels all the way into the HTTP client
+    before failing as a malformed header, which reports the symptom rather than
+    the cause and reads like a bug in the transport.
+
+    This happens whenever a credential source returns empty instead of failing:
+    an unset variable, or a helper whose own lookup did not complete. Catching it
+    here turns an obscure header error into a sentence naming what is missing.
+    """
+
+    if not isinstance(value, str):
+        return False
+    scheme, _, credential = value.strip().partition(" ")
+    return bool(scheme) and bool(credential.strip())
+
+
 def auth_headers(config: dict[str, object]) -> dict[str, str]:
-    token = os.environ.get("HQ_MCP_TOKEN") or os.environ.get("SEVERINO_MCP_TOKEN")
-    if token:
-        return {"Authorization": f"Bearer {token}"}
+    for name in ("HQ_MCP_TOKEN", "SEVERINO_MCP_TOKEN"):
+        token = (os.environ.get(name) or "").strip()
+        if token:
+            return {"Authorization": f"Bearer {token}"}
+        if os.environ.get(name) is not None:
+            fail(f"{name} is set but empty")
+
     helper_value = os.environ.get("HQ_MCP_AUTH_HELPER") or config.get("auth_helper")
     helper = Path(str(helper_value or DEFAULT_AUTH_HELPER)).expanduser()
     try:
@@ -80,8 +103,15 @@ def auth_headers(config: dict[str, object]) -> dict[str, str]:
         headers = json.loads(result.stdout)
     except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as exc:
         fail(f"could not obtain MCP credentials from {helper}: {exc}")
-    if not isinstance(headers, dict) or not isinstance(headers.get("Authorization"), str):
+    if not isinstance(headers, dict) or "Authorization" not in headers:
         fail(f"auth helper {helper} did not return an Authorization header")
+    if not has_credential(headers.get("Authorization")):
+        fail(
+            f"auth helper {helper} returned an Authorization header with no "
+            "credential. It usually means the helper's own lookup did not "
+            "complete -- an unapproved or dismissed authorization prompt is the "
+            "common cause. Approve it and retry."
+        )
     return {str(key): str(value) for key, value in headers.items()}
 
 
