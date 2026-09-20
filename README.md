@@ -270,7 +270,7 @@ encrypt -- -starts-with-dash.md
 
 Age-decrypt .age files with your private key; restore originals.
 
-Decrypts .age files using your default age private key. If the key is an SSH key with a passphrase, decrypt unlocks it transparently using the passphrase cached via 'tools key cache' — one prompt up front, silent forever after. With no cached passphrase, it prompts (terminal or osascript dialog, whichever is appropriate).
+Decrypts .age files using your age private key. The key lives in 1Password, not on disk: decrypt reads it at unlock time, materializes it mode 600 for the life of the run, and unlinks it on exit. On a machine with no vault access it falls back to the on-disk key at AGE_KEY, unlocking a passphrase-protected one from the cache set by 'tools key cache' (or prompting).
 
 Usage: `decrypt <file>...`
 

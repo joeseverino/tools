@@ -10,14 +10,16 @@ describe_spec() {
     desc_inventory "Cryptography" 30
     desc_effect local_write +interactive
     desc_synopsis "decrypt [options] <file.age>..."
-    desc_para "Decrypts .age files using your default age private key. If the key is an SSH key with a passphrase, decrypt unlocks it transparently using the passphrase cached via 'tools key cache' — one prompt up front, silent forever after. With no cached passphrase, it prompts (terminal or osascript dialog, whichever is appropriate)."
+    desc_para "Decrypts .age files using your age private key. The key lives in 1Password, not on disk: decrypt reads it at unlock time, materializes it mode 600 for the life of the run, and unlinks it on exit. On a machine with no vault access it falls back to the on-disk key at AGE_KEY, unlocking a passphrase-protected one from the cache set by 'tools key cache' (or prompting)."
     desc_opt -f --force            -- "Overwrite existing decrypted output files"
     desc_opt -k --key PATH +repeat -- "Add another identity to try (repeatable). Bypasses the cached passphrase / unlock path for that key."
     desc_opt -p --stdout           -- "Write decrypted bytes to stdout, not a file. Silent on success; status/errors go to stderr (e.g. decrypt -p secret.age | less)."
     desc_opt --no-cache            -- "Don't use the cached passphrase even if one exists. Lets age prompt directly (terminal only)."
     desc_pos file +variadic        -- "The .age file(s) to decrypt"
     desc_env KEYS_HOME             -- "Read from ~/.zshrc; resolves AGE_KEY"
-    desc_env AGE_KEY               -- "Per-invocation override for the private key path"
+    desc_env AGE_KEY_ID            -- "Logical secret id resolved via config/secrets.json (default: crypt.file_key)"
+    desc_env AGE_KEY_REF           -- "Pin an op:// reference directly; set empty to force the on-disk key"
+    desc_env AGE_KEY               -- "Per-invocation override for the on-disk fallback key path"
     desc_example "decrypt notes.md.age"
     desc_example "decrypt -k ~/keys/oldkey notes.md.age"
     desc_example "decrypt -f *.age"
@@ -46,7 +48,8 @@ done
 
 [[ $# -ge 1 ]] || die "usage" "decrypt <file.age>... (try -h)" 2
 command -v age >/dev/null || die "error" "age not installed (brew install age)"
-[[ -f "$AGE_KEY" ]] || die "error" "no default private key at: $AGE_KEY"
+[[ "$(key_source)" != "none" ]] || die "error" \
+    "no private key: register $AGE_KEY_ID in config/secrets.json, or place one at $AGE_KEY"
 (( ${#EXTRA_KEYS[@]} == 0 )) || require_files "additional key" "${EXTRA_KEYS[@]}"
 
 # Plain if — `[[ ]] && rm` would fail as the trap's last command when no

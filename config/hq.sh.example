@@ -49,43 +49,25 @@
 # so a machine holding only some of them still boots. Empty by default: the
 # host composes and runs on its own, and an adopter has none of these.
 #
-#   HQ_DEV_PLUGINS=(
-#       "$CODE_HOME/Projects/<extension>=<extension_module>.plugin:plugin"
-#   )
-if [[ -z "${HQ_DEV_PLUGINS+x}" ]]; then
-    HQ_DEV_PLUGINS=()
 fi
 
 # The interpreter that has HQ's runtime installed. Each extension's
 # scripts/check.sh installs the host's pinned requirements.txt into its own
 # venv; point this at whichever one carries the full set, or at the host's.
-: "${HQ_DEV_PYTHON:=$HQ_LOCAL_PATH/.venv/bin/python}"
-
 # Bind address for the dev server. Loopback by default. If a proxy fronts this
 # machine, bind the interface it reaches instead — a loopback bind answers the
 # proxy with connection refused, not a Django error, which is slow to diagnose.
-: "${HQ_DEV_BIND:=127.0.0.1:8000}"
-
 # CIDR of the proxy allowed to set forwarded headers, when one fronts dev.
-: "${HQ_DEV_TRUSTED_PROXIES:=}"
-
 # Hostnames and origins the dev server answers to. Add the proxied name here
 # when one fronts this machine — e.g. dev-hq.example.com.
-: "${HQ_DEV_HOSTS:=localhost,127.0.0.1}"
-: "${HQ_DEV_ORIGINS:=}"
-
 # Scratch database, deliberately outside the HQ checkout: the repo's own
 # data/severino.sqlite3 is what a hand-run `manage.py` grabs by default, and a
 # dev boot must never be one typo away from writing real records.
-: "${HQ_DEV_DB:=${XDG_STATE_HOME:-$HOME/.local/state}/severino-tools/hq-dev.sqlite3}"
-
 # Declaring public DNS is gated in production, because a mistake there is
 # immediately everybody's problem. On dev the gate only stops the declaration
 # being written to a scratch database: HQ never calls the DNS provider itself,
 # and the controller that does is not running here. Left off, the Domains pages
 # render read-only and nothing can be exercised.
-: "${HQ_DEV_PUBLIC_DNS:=1}"
-
 # Env keys that change what stored data MEANS rather than how it is served. A
 # dev/prod difference here does not error — it silently reinterprets timestamps
 # and reporting windows, which is how a bad import survives review. `hq dev`

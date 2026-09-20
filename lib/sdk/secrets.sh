@@ -24,6 +24,18 @@ secret_ref() {
     printf '%s' "$ref"
 }
 
+# secret_ref_opt <id> — soft secret_ref. Echoes the reference when the registry
+# exists, validates, and carries <id>; otherwise echoes nothing and returns 1.
+# For callers that hold a working fallback and must not die on a machine where
+# the registry was never provisioned (CI, a fresh clone, the bats suite).
+secret_ref_opt() {
+    local id="$1"
+    [[ -f "$TOOLS_SECRETS_REGISTRY" ]] || return 1
+    secrets_registry_check || return 1
+    jq -er --arg id "$id" '.secrets[$id] // empty' \
+        "$TOOLS_SECRETS_REGISTRY" 2>/dev/null || return 1
+}
+
 secret_read() {
     local id="$1" ref
     command -v op >/dev/null 2>&1 \
