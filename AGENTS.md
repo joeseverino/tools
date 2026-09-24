@@ -275,7 +275,9 @@ hand-maintain enum lists anywhere downstream.
 
 **No hand-rolled logic in `bin/hq`:** `hq doctor` reports the vault↔HQ gap via
 `svmc hq-manifest --report` (not a re-walk), and `hq validate` calls HQ's
-authenticated `audit_registry` MCP tool (not an inline ORM script over SSH).
+`audit_registry` tool through `lib/hq-call` -- the operator's transport to HQ's
+MCP tool surface over the host shell, never a shared token (and never an inline
+ORM script).
 Keep the contract/logic in the owning MCP or HQ application service; `bin/hq`
 just transports and formats emitted JSON.
 

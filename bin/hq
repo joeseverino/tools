@@ -111,7 +111,8 @@ describe_spec() {
     desc_env HQ_REMOTE_PATH -- "HQ checkout path on the server"
     desc_env HQ_LOCAL_PATH -- "Local HQ checkout"
     desc_env HQ_URL        -- "Public URL of HQ"
-    desc_env HQ_MCP_CLIENT_CONFIG -- "Non-secret HQ MCP endpoint/auth-helper profile"
+    desc_env HQ_CALL       -- "Operator transport to HQ's tools (default: lib/hq-call over HQ_SSH_HOST)"
+    desc_env HQ_CONTAINER  -- "HQ container on HQ_SSH_HOST (default: severino-hq)"
 }
 
 require_manifest_mcp() {
@@ -131,9 +132,13 @@ build_manifest() {
     svmc hq-manifest "$VAULT"
 }
 
-hq_mcp_call() {
-    [[ -x "$HQ_MCP_CLIENT" ]] || die "error" "HQ MCP client is unavailable: $HQ_MCP_CLIENT"
-    "$HQ_MCP_CLIENT"
+# One HQ tool call as the operator. The request and result are HQ's MCP tool
+# contract; the transport is the host shell, authenticated by the operator's own
+# SSH certificate and agent rather than a shared token.
+hq_call() {
+    local call="${HQ_CALL:-$TOOLS_HOME/lib/hq-call}"
+    [[ -x "$call" ]] || die "error" "HQ call transport is unavailable: $call"
+    "$call"
 }
 
 require_hq_admin() {
@@ -404,7 +409,7 @@ cmd_sync() {
             --argjson update "$update" \
             --argjson prune "$prune" \
             '{tool:"execute_capability",arguments:{name:"hq.sync",payload:{manifest:$manifest[0],update_existing:$update,report_orphans:true,prune_orphans:$prune,confirm_prune:$prune}}}' \
-            | hq_mcp_call
+            | hq_call
     )"
     if [[ "$(jq -r '.ok' <<<"$result_json")" != "true" ]]; then
         die "error" "$(jq -r '.error.message // "HQ sync failed"' <<<"$result_json")"
@@ -632,7 +637,7 @@ sys.exit(1)
 
 cmd_validate() {
     msg "$DIM" "validate" "HQ registry ↔ vault docs"
-    jq -cn '{tool:"audit_registry",arguments:{}}' | hq_mcp_call | python3 -c '
+    jq -cn '{tool:"audit_registry",arguments:{}}' | hq_call | python3 -c '
 import json, sys
 r = json.load(sys.stdin)
 projects = r["orphan_projects"]
@@ -662,7 +667,7 @@ cmd_create() {
     esac
 
     if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-        jq -cn '{tool:"describe_capabilities",arguments:{}}' | hq_mcp_call \
+        jq -cn '{tool:"describe_capabilities",arguments:{}}' | hq_call \
             | python3 -c '
 import json, sys
 kind = sys.argv[1]
@@ -699,7 +704,7 @@ for field, spec in schema.get("properties", {}).items():
 
     local slug="$1" result
     msg "$DIM" "hq" "$kind.upsert $slug"
-    result="$(python3 "$TOOLS_HOME/lib/hq-create-request.py" "$kind" "$@" | hq_mcp_call)"
+    result="$(python3 "$TOOLS_HOME/lib/hq-create-request.py" "$kind" "$@" | hq_call)"
     if [[ "$(jq -r '.ok' <<<"$result")" != "true" ]]; then
         die "error" "$(jq -r '.error.message // "HQ operation failed"' <<<"$result")"
     fi
@@ -956,7 +961,7 @@ cmd_export() {
     local result out
     result="$(jq -cn --argjson year "$year" --arg format "$ext" \
         '{tool:"export_year_summary",arguments:{year:$year,format:$format}}' \
-        | hq_mcp_call)"
+        | hq_call)"
     [[ "$(jq -r '.ok' <<<"$result")" == "true" ]] \
         || die "error" "$(jq -r '.error.message // "report export failed"' <<<"$result")"
     out="$(jq -r '.filename' <<<"$result")"

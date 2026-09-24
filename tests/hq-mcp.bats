@@ -8,8 +8,8 @@ setup() {
     export NOTES_HOME="$TEST_ROOT/vault"
     export HQ_LOCAL_PATH="$TEST_ROOT/hq"
     export HQ_URL="https://hq.example.test"
-    export HQ_MCP_CLIENT="$TEST_BIN/hq-mcp-client"
-    export HQ_MCP_LOG="$TEST_ROOT/mcp-request.json"
+    export HQ_CALL="$TEST_BIN/hq-call"
+    export HQ_CALL_LOG="$TEST_ROOT/mcp-request.json"
     mkdir -p "$TEST_BIN" "$NOTES_HOME" "$HQ_LOCAL_PATH/docs_index"
     export PATH="$TEST_BIN:$PATH"
 
@@ -24,12 +24,12 @@ esac
 SH
     chmod +x "$TEST_BIN/severino-vault-mcp"
 
-    cat > "$HQ_MCP_CLIENT" <<'SH'
+    cat > "$HQ_CALL" <<'SH'
 #!/usr/bin/env bash
-tee "$HQ_MCP_LOG" >/dev/null
-case "$(jq -r .tool "$HQ_MCP_LOG")" in
+tee "$HQ_CALL_LOG" >/dev/null
+case "$(jq -r .tool "$HQ_CALL_LOG")" in
   execute_capability)
-    if [[ "$(jq -r .arguments.name "$HQ_MCP_LOG")" == "hq.sync" ]]; then
+    if [[ "$(jq -r .arguments.name "$HQ_CALL_LOG")" == "hq.sync" ]]; then
       printf '%s\n' '{"ok":true,"documentation":{"stats":{"created":1,"updated":0,"missing_relations":0,"orphans":[],"content_items_synced":1}},"topology":{"schema_version":3,"checksum":"1234567890abcdef","scheduled":[]}}'
     else
       printf '%s\n' '{"ok":true,"created":true,"project":{"slug":"example"}}'
@@ -39,7 +39,7 @@ case "$(jq -r .tool "$HQ_MCP_LOG")" in
   describe_capabilities) printf '%s\n' '{"ok":true,"capabilities":[{"name":"project.upsert","summary":"Idempotently create or update an HQ project by slug.","input_schema":{"required":["name"],"properties":{"slug":{"type":"string","default":""},"name":{"type":"string"},"status":{"type":"string","default":"idea"}}}}]}' ;;
 esac
 SH
-    chmod +x "$HQ_MCP_CLIENT"
+    chmod +x "$HQ_CALL"
 
     cat > "$TEST_BIN/ssh" <<'SH'
 #!/usr/bin/env bash
@@ -59,9 +59,9 @@ hq_bin() { "$TOOLS_HOME/bin/hq" "$@"; }
     run hq_bin sync
 
     [ "$status" -eq 0 ]
-    [ "$(jq -r .arguments.name "$HQ_MCP_LOG")" = "hq.sync" ]
-    [ "$(jq -r '.arguments.payload.manifest[0].doc_id' "$HQ_MCP_LOG")" = "rb-one" ]
-    [ "$(jq -r '.arguments.payload | has("topology")' "$HQ_MCP_LOG")" = "false" ]
+    [ "$(jq -r .arguments.name "$HQ_CALL_LOG")" = "hq.sync" ]
+    [ "$(jq -r '.arguments.payload.manifest[0].doc_id' "$HQ_CALL_LOG")" = "rb-one" ]
+    [ "$(jq -r '.arguments.payload | has("topology")' "$HQ_CALL_LOG")" = "false" ]
     [[ "$output" == *"HQ is in sync"* ]]
     [[ "$output" != *"Topology"* ]]
     [[ "$output" != *"SSH MUST NOT RUN"* ]]
@@ -71,7 +71,7 @@ hq_bin() { "$TOOLS_HOME/bin/hq" "$@"; }
     run hq_bin validate
 
     [ "$status" -eq 0 ]
-    [ "$(jq -r .tool "$HQ_MCP_LOG")" = "audit_registry" ]
+    [ "$(jq -r .tool "$HQ_CALL_LOG")" = "audit_registry" ]
     [[ "$output" == *"every Project and Asset is referenced"* ]]
 }
 
@@ -79,8 +79,8 @@ hq_bin() { "$TOOLS_HOME/bin/hq" "$@"; }
     run hq_bin create project example --name Example --repo https://example.test/repo
 
     [ "$status" -eq 0 ]
-    [ "$(jq -r .arguments.name "$HQ_MCP_LOG")" = "project.upsert" ]
-    [ "$(jq -r .arguments.payload.repository_url "$HQ_MCP_LOG")" = "https://example.test/repo" ]
+    [ "$(jq -r .arguments.name "$HQ_CALL_LOG")" = "project.upsert" ]
+    [ "$(jq -r .arguments.payload.repository_url "$HQ_CALL_LOG")" = "https://example.test/repo" ]
     [[ "$output" == *"example: created"* ]]
 }
 
@@ -90,7 +90,7 @@ hq_bin() { "$TOOLS_HOME/bin/hq" "$@"; }
     run hq_bin export 2026 md
 
     [ "$status" -eq 0 ]
-    [ "$(jq -r .tool "$HQ_MCP_LOG")" = "export_year_summary" ]
+    [ "$(jq -r .tool "$HQ_CALL_LOG")" = "export_year_summary" ]
     [ "$(cat year-summary-2026.md)" = "# 2026" ]
 }
 
@@ -98,7 +98,7 @@ hq_bin() { "$TOOLS_HOME/bin/hq" "$@"; }
     run hq_bin create project -h
 
     [ "$status" -eq 0 ]
-    [ "$(jq -r .tool "$HQ_MCP_LOG")" = "describe_capabilities" ]
+    [ "$(jq -r .tool "$HQ_CALL_LOG")" = "describe_capabilities" ]
     [[ "$output" == *"--name"*"required"* ]]
     [[ "$output" == *"--status"*"default: 'idea'"* ]]
 }
