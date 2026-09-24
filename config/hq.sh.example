@@ -114,8 +114,9 @@ HQ_SEMANTIC_SETTINGS=(
 # list can be caught lagging the item instead of silently under-covering it.
 : "${HQ_SEMANTIC_PATTERN:=TIME_ZONE|_TZ$|FISCAL|INTERVAL_DAYS|LANGUAGE|LOCALE|CURRENCY|ROUNDING|WEEK_START}"
 
-# Routine data-plane operations use HQ's authenticated MCP endpoint. The URL
-# and auth-helper path live together in a non-secret local client profile;
-# bearer credentials are resolved only at call time by the helper.
-: "${HQ_MCP_CLIENT_CONFIG:=$HOME/.config/severino-mcp/client.json}"
-: "${HQ_MCP_CLIENT:=$TOOLS_HOME/lib/hq-mcp-client.py}"
+# Routine data-plane operations call HQ's tools as the operator, through a shell
+# on HQ_SSH_HOST: your own SSH certificate and agent, no shared token. Agents
+# use MCP under their own identities. Defaults live with the code that uses them
+# (lib/hq-call, bin/hq); set these only to override.
+# export HQ_CONTAINER=<container name on HQ_SSH_HOST>
+# export HQ_CALL=<an alternative transport, e.g. a test double>

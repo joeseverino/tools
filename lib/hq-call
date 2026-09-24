@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Call one HQ tool as the operator: a JSON request on stdin, the tool's JSON
+# result on stdout -- the same contract as HQ's MCP tools, which is what it runs.
+#
+# Reached through a shell on the HQ host, so the operator is proven the way they
+# already are there: their own short-lived SSH certificate, and root through
+# their own agent. Never a shared token. Agents use MCP under their own
+# identities; the operator uses this.
+#
+#   HQ_SSH_HOST   SSH alias of the HQ host (required)
+#   HQ_CONTAINER  the HQ container on it (default: severino-hq)
+
+set -euo pipefail
+
+host="${HQ_SSH_HOST:?hq-call: HQ_SSH_HOST is required}"
+container="${HQ_CONTAINER:-severino-hq}"
+# It becomes part of a remote command line, so it is a plain name or nothing.
+if [[ ! "$container" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
+    echo "hq-call: HQ_CONTAINER is not a container name: $container" >&2
+    exit 2
+fi
+
+exec ssh "$host" "sudo docker exec -i $container python manage.py hq_call"
