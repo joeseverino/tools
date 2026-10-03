@@ -820,6 +820,7 @@ reinstall_repo() {
     IFS=$'\t' read -r -a argv <<<"${plan#*$'\t'}"
     [[ -d "$path" ]] || die "error" "$id checkout not found: $path"
     [[ "${argv[0]}" == uv ]] && argv[0]="${UV_BIN:-uv}"
+    command -v "${argv[0]}" >/dev/null || die "error" "$id installs with ${argv[0]}, which is not installed"
     msg "$DIM" "step" "$id: ${argv[*]}"
     (cd "$path" && "${argv[@]}")
     verdict="$(node "$TOOLS_HOME/lib/tools/capabilities.ts" fingerprints "$id")"
@@ -840,7 +841,6 @@ cmd_reinstall() {
         while IFS= read -r id; do ids+=("$id"); done \
             < <(node "$TOOLS_HOME/lib/tools/capabilities.ts" ids install)
     fi
-    command -v uv >/dev/null || die "error" "uv not installed"
     local fail=0
     for id in "${ids[@]}"; do reinstall_repo "$id" || fail=1; done
     (( ! fail )) || die "error" "an installed tool still differs from its source" 1

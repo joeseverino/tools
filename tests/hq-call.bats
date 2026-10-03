@@ -1,6 +1,8 @@
 #!/usr/bin/env bats
 # lib/hq-call: the operator's transport to HQ's tools over the host shell.
 
+load helpers
+
 setup() {
     export TEST_BIN="$BATS_TEST_TMPDIR/bin"
     export SSH_LOG="$BATS_TEST_TMPDIR/ssh"
