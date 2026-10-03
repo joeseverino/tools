@@ -55,7 +55,7 @@ fake_call() {
     chmod +x "$HQ_CALL"
 }
 
-hq_bin() { NOTES_HOME="$BATS_TEST_TMPDIR" "$BATS_TEST_DIRNAME/../bin/hq" "$@"; }
+hq_bin() { NOTES_HOME="$BATS_TEST_TMPDIR" HQ_URL="https://hq.example.test" "$BATS_TEST_DIRNAME/../bin/hq" "$@"; }
 
 resources() {
     cat > "$BATS_TEST_TMPDIR/resources.json" <<'JSON'

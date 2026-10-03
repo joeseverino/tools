@@ -11,7 +11,7 @@
     "typecheck": "tsc -p ."
   },
   "dependencies": {
-    "@mermaid-js/mermaid-cli": "11.15.0",
+    "@mermaid-js/mermaid-cli": "11.17.0",
     "ajv": "8.20.0",
     "highlight.js": "11.11.1",
     "markdown-it": "15.0.2"

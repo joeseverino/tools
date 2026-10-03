@@ -35,8 +35,15 @@ if [[ ${1-} ]]; then
     case "${2-}" in -h|--help|help|--describe|--describe=*) _init_help=1 ;; esac
     case "${3-}" in -h|--help) _init_help=1 ;; esac
     if [[ $_init_help -eq 0 ]]; then
-        # shellcheck source=/dev/null
-        source "$TOOLS_HOME/config/$1.sh"
+        # A local config/<name>.sh wins; without one, the tracked template's
+        # defaults apply, so a clean checkout (CI, a new Mac) runs as-is.
+        if [[ -f "$TOOLS_HOME/config/$1.sh" ]]; then
+            # shellcheck source=/dev/null
+            source "$TOOLS_HOME/config/$1.sh"
+        else
+            # shellcheck source=/dev/null
+            source "$TOOLS_HOME/config/$1.sh.example"
+        fi
     fi
     unset _init_help
 fi
