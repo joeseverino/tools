@@ -19,6 +19,6 @@
   "devDependencies": {
     "@types/node": "24.19.1",
     "cordon-spec": "1.4.0",
-    "typescript": "6.0.3"
+    "typescript": "7.0.2"
   }
 }
