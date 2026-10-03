@@ -498,7 +498,7 @@ Render Mermaid .mmd sources to neighboring PNG files.
 
 Each path may be an .mmd file or a directory. Directories render their top-level .mmd files.
 
-Rendering uses the Mermaid CLI pinned in package.json and the local Chromium, with Joe Severino brand tokens, PNG output, 1100px width, 3x scale, and a white background. Set DIAGRAM_BRAND_KIT to override the kit directory.
+Rendering uses the Mermaid CLI pinned in package.json and the local Chromium, with Joe Severino brand tokens, PNG output up to 3300px on the long side, and a white background. Set DIAGRAM_BRAND_KIT to override the kit directory.
 
 Author flow diagrams with flowchart TB. Contract diagrams may use HTML labels for dense multiline nodes; site diagrams stay on SVG labels when their nodes are single-line.
 
@@ -720,7 +720,7 @@ Usage: `gate-preview`
 
 | Argument | Description |
 |---|---|
-| `--cordon <DIR>` | Cordon checkout whose engine to run (default: $CORDON_HOME, else the sibling Assets/cordon) — point it at a branch worktree to preview a proposed check change |
+| `--cordon <DIR>` | Cordon checkout whose engine to run (default: the sibling Assets/cordon) — point it at a branch worktree to preview a proposed check change |
 | `--json` | Machine-readable output: one object with a per-repo verdicts array |
 
 Effect: `read`

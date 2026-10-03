@@ -79,11 +79,11 @@ EOF
 @test "marks sync creates current notes and ledgers; re-run is a no-op" {
     run "$TOOLS_HOME/bin/marks" sync
     [ "$status" -eq 0 ]
-    [ -f "$MARKS_DIR/Reading List.md" ] \
-        && [ -f "$MARKS_DIR/Bookmarks.md" ] \
-        && [ -f "$MARKS_DIR/Archive/Reading List Archive.md" ] \
-        && [ -f "$MARKS_DIR/Archive/Bookmarks Archive.md" ] \
-        && [ -f "$MARKS_STATE" ]
+    [ -f "$MARKS_DIR/Reading List.md" ]
+    [ -f "$MARKS_DIR/Bookmarks.md" ]
+    [ -f "$MARKS_DIR/Archive/Reading List Archive.md" ]
+    [ -f "$MARKS_DIR/Archive/Bookmarks Archive.md" ]
+    [ -f "$MARKS_STATE" ]
 
     before="$(cat "$MARKS_DIR/Archive/Bookmarks Archive.md" "$MARKS_DIR/Bookmarks.md")"
     run "$TOOLS_HOME/bin/marks" sync

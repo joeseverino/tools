@@ -22,6 +22,6 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-    uses: joeseverino/cordon/.github/workflows/cordon-release.yml@main
+    uses: joeseverino/cordon/.github/workflows/cordon-release.yml@v2
     # Typed repo? Override the default "simple" (version.txt):
     # with: { release-type: node }   # or python, go, …

@@ -74,6 +74,9 @@ try {
 }
 
 console.log(JSON.stringify({
+  // Mermaid 12 defaults to ELK and the neo look; keep the dagre layout the diagrams were drawn for.
+  layout: 'dagre',
+  look: 'classic',
   theme: 'base',
   themeCSS: [
     `@font-face { font-family: "Inter"; src: url("data:font/woff2;base64,${fontData}") format("woff2"); font-style: normal; font-weight: 100 900; }`,
@@ -86,6 +89,7 @@ console.log(JSON.stringify({
   ].join(' '),
   flowchart: {
     curve: 'basis',
+    wrappingWidth: 260,
     nodeSpacing: 42,
     rankSpacing: 52,
     padding: 14,

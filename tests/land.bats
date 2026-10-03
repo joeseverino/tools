@@ -63,9 +63,9 @@ assert o["group"]=="Workspace", o.get("group")
     setup_land_fleet
     run land_bin
     [ "$status" -eq 0 ]
-    grep -qF "dry run" <<<"$output" \
-      && grep -qF "green-app  PR #12 (passing) → merge" <<<"$output" \
-      && grep -qF "red-app    PR #13 (failing) — not green" <<<"$output"
+    grep -qF "dry run" <<<"$output"
+    grep -qF "green-app  PR #12 (passing) → merge" <<<"$output"
+    grep -qF "red-app    PR #13 (failing) — not green" <<<"$output"
     [ ! -s "$GH_MERGE_LOG" ]
 }
 
@@ -73,8 +73,8 @@ assert o["group"]=="Workspace", o.get("group")
     setup_land_fleet
     run land_bin green-app --go
     [ "$status" -eq 0 ]
-    grep -qF "merged" <<<"$output" \
-      && grep -qF "green-app: PR #12" <<<"$output"
+    grep -qF "merged" <<<"$output"
+    grep -qF "green-app: PR #12" <<<"$output"
     grep -qF "pr merge --squash --delete-branch" "$GH_MERGE_LOG"
 }
 
@@ -106,8 +106,8 @@ assert o["group"]=="Workspace", o.get("group")
     setup_land_fleet
     run land_bin --go
     [ "$status" -eq 2 ]
-    grep -qF "open PRs" <<<"$output" \
-      && grep -qF "pass --all" <<<"$output"
+    grep -qF "open PRs" <<<"$output"
+    grep -qF "pass --all" <<<"$output"
     [ ! -s "$GH_MERGE_LOG" ]
 }
 

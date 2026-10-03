@@ -12,7 +12,7 @@ describe_spec() {
     desc_inventory "Other" 240
     desc_synopsis "gate-preview [options]"
     desc_effect read
-    desc_opt --cordon DIR -- "Cordon checkout whose engine to run (default: \$CORDON_HOME, else the sibling Assets/cordon) — point it at a branch worktree to preview a proposed check change"
+    desc_opt --cordon DIR -- "Cordon checkout whose engine to run (default: the sibling Assets/cordon) — point it at a branch worktree to preview a proposed check change"
     desc_opt --json -- "Machine-readable output: one object with a per-repo verdicts array"
     desc_para "Answers 'what turns red if this cordon change ships?' before it ships. Every fleet repo carrying a gate (a cordon.checks.json or scripts/check.sh) gets the named engine run over it with --json, and the verdicts land in one table: repo, ok, and the failed check ids. Repos are discovered from repos --json (the one read surface), so the preview and the cockpit can't disagree about what the fleet is. The engine runs read-only (never --fix); a red row here is a red gate after merge."
     desc_example "gate-preview --cordon ~/wt/cordon-stricter-bats" -- "preview a branch's checks against the whole fleet"
@@ -20,7 +20,7 @@ describe_spec() {
 
 desc_help_intercept "$@"
 
-CORDON_DIR="${CORDON_HOME:-$CODE_HOME/Assets/cordon}"
+CORDON_DIR="$CODE_HOME/Assets/cordon"
 JSON_MODE=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -29,7 +29,7 @@ while [[ $# -gt 0 ]]; do
         *)        die_unknown flag "$1" ;;
     esac
 done
-ENGINE="$CORDON_DIR/checks/run.mjs"
+ENGINE="$CORDON_DIR/checks/run.ts"
 [[ -f "$ENGINE" ]] || die "error" "no checks engine at $ENGINE (pass --cordon <checkout>)"
 
 # Gated = carries a cordon.checks.json or the canonical scripts/check.sh. The

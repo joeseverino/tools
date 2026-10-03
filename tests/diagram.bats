@@ -49,7 +49,7 @@ STUB
     [ -f "$BATS_TEST_TMPDIR/diagrams/one.png" ]
     [ -f "$BATS_TEST_TMPDIR/diagrams/two.png" ]
     [ "$(wc -l < "$MMDC_LOG" | tr -d ' ')" -eq 2 ]
-    grep -q -- '-i one.mmd -o one.png -c .* -p .* -w 1100 -s 3 -b white' "$MMDC_LOG"
+    grep -q -- '-i one.mmd -o one.png -c .* -p .* --size 3300 -b white' "$MMDC_LOG"
     grep -q '"primaryBorderColor": "#123456"' "$CONFIG_LOG"
     grep -q '"theme": "base"' "$CONFIG_LOG"
     grep -q 'data:font/woff2;base64' "$CONFIG_LOG"
