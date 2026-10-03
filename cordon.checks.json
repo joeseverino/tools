@@ -1,4 +1,3 @@
 {
-  "$schema": "https://jseverino.com/schemas/cordon-checks-config-v2.json",
-  "disable": ["bats-assertions"]
+  "$schema": "https://raw.githubusercontent.com/joeseverino/cordon/main/checks/config.schema.json"
 }

@@ -14,7 +14,7 @@ on:
 
 jobs:
   cordon:
-    uses: joeseverino/cordon/.github/workflows/cordon-gate.yml@main
+    uses: joeseverino/cordon/.github/workflows/cordon-gate.yml@v2
     with:
       runner: macos-latest
       packages: bash zsh bats-core jq

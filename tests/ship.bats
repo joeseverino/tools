@@ -55,8 +55,11 @@ load helpers
     mkdir -p "$home/Assets/workrepo"
     cd "$home/Assets/workrepo"
     git init -q -b main .
-    git config user.email t@t.io && git config user.name tester
-    printf 'one\n' > a.txt && git add a.txt && git commit -q -m "feat: one"
+    git config user.email t@t.io
+    git config user.name tester
+    printf 'one\n' > a.txt
+    git add a.txt
+    git commit -q -m "feat: one"
     # origin exists in config but is unreachable — fetch is soft, push must fail
     git remote add origin "$BATS_TEST_TMPDIR/definitely-missing.git"
     git checkout -q -b feat/work

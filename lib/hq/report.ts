@@ -1,6 +1,6 @@
 // hq/report.ts — the JSON shaping and plain-text reports behind `hq`: the
 // create request, the sync summary and state record, the doctor and validate
-// reports, the dev/prod parity table, and `hq create <kind> -h`.
+// reports, and `hq create <kind> -h`.
 //
 // Usage: report.ts <command> [args...]; JSON arrives on stdin or as arguments.
 import { createHash } from 'node:crypto';
@@ -191,46 +191,6 @@ function validate(): void {
   process.stdout.write(`${out.join('\n')}\n`);
 }
 
-// ---- dev/prod parity -----------------------------------------------------------
-
-function parseEnv(raw: string): Map<string, string> {
-  const entries = new Map<string, string>();
-  for (const line of raw.split('\n')) {
-    const at = line.indexOf('=');
-    if (at >= 0) entries.set(line.slice(0, at), line.slice(at + 1));
-  }
-  return entries;
-}
-
-function envParity(devRaw: string, prodRaw: string, unforwarded: string): void {
-  const dev = parseEnv(devRaw);
-  const prod = parseEnv(prodRaw);
-  const names = [...new Set([...dev.keys(), ...prod.keys()])].sort();
-  const rows = names.map((name) => [name, dev.get(name) ?? '(unset)', prod.get(name) ?? '(unset)'] as const);
-  const header = ['setting', 'dev', 'prod'] as const;
-  const width = (i: 0 | 1 | 2): number => Math.max(header[i].length, ...rows.map((row) => row[i].length));
-  const [w0, w1, w2] = [width(0), width(1), width(2)];
-  const line = (a: string, b: string, c: string, d: string): string =>
-    `  ${a.padEnd(w0)}  ${b.padEnd(w1)}  ${c.padEnd(w2)}  ${d}`;
-  const out = ['', line('setting', 'dev', 'prod', 'verdict')];
-  for (const [name, devValue, prodValue] of rows) {
-    out.push(line(name, devValue, prodValue, devValue === prodValue ? 'ok' : 'MISMATCH'));
-  }
-  out.push('');
-  const missing = unforwarded.split('\n').filter(Boolean);
-  for (const key of missing) {
-    out.push(`  prod sets ${key}, which reads as data-meaning and dev does not inherit`);
-    out.push('  fix       add it to HQ_SEMANTIC_ENV in config/hq.sh');
-  }
-  if (missing.length) out.push('');
-  const mismatched = rows.some(([, devValue, prodValue]) => devValue !== prodValue);
-  out.push(mismatched || missing.length
-    ? '  dev and prod disagree about what the data means'
-    : '  dev matches prod on every data-meaning setting');
-  process.stdout.write(`${out.join('\n')}\n`);
-  if (mismatched || missing.length) process.exitCode = 1;
-}
-
 switch (command) {
   case 'create-request': createRequest(args); break;
   case 'create-help': createHelp(args[0] ?? ''); break;
@@ -238,6 +198,5 @@ switch (command) {
   case 'sync-state': syncState(args[0] ?? '', args[1] ?? '', args[2] ?? '', args[3] ?? '', args[4] ?? ''); break;
   case 'doctor': doctor(); break;
   case 'validate': validate(); break;
-  case 'env-parity': envParity(args[0] ?? '', args[1] ?? '', args[2] ?? ''); break;
   default: fail(`unknown report: ${command}`);
 }

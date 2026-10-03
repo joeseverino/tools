@@ -10,7 +10,7 @@ describe_spec() {
     desc_effect local_write
     desc_synopsis "diagram <path>..."
     desc_para "Each path may be an .mmd file or a directory. Directories render their top-level .mmd files."
-    desc_para "Rendering uses the Mermaid CLI pinned in package.json and the local Chromium, with Joe Severino brand tokens, PNG output, 1100px width, 3x scale, and a white background. Set DIAGRAM_BRAND_KIT to override the kit directory."
+    desc_para "Rendering uses the Mermaid CLI pinned in package.json and the local Chromium, with Joe Severino brand tokens, PNG output up to 3300px on the long side, and a white background. Set DIAGRAM_BRAND_KIT to override the kit directory."
     desc_para "Author flow diagrams with flowchart TB. Contract diagrams may use HTML labels for dense multiline nodes; site diagrams stay on SVG labels when their nodes are single-line."
     desc_pos path +variadic -- "Mermaid source file or directory"
     desc_example "diagram docs/diagrams/"
@@ -57,7 +57,7 @@ for src in "${sources[@]}"; do
     if (
         cd "$dir"
         "$mmdc" -i "$name" -o "${name%.mmd}.png" -c "$config" -p "$browser" \
-            -w 1100 -s 3 -b white
+            --size 3300 -b white
     ); then
         msg "$GREEN" "rendered" "$src ${DIM}→${RESET} $out"
     else

@@ -70,7 +70,7 @@ EOF
     grep -q 'page-break-inside: auto; break-inside: auto' "$html"
     grep -q 'thead { display: table-header-group; }' "$html"
     grep -q 'overflow-wrap: anywhere' "$html"
-    ! grep -q 'body {[^}]*width: 100%' "$html"
+    ! grep -q 'body {[^}]*width: 100%' "$html" || return 1
     grep -q 'main { padding-inline: 2mm; }' "$html"
     rm -f "$html"
 }
@@ -183,12 +183,12 @@ EOF
         "$TOOLS_HOME/bin/doc-to-pdf" "$input" "$pdf"
 
     [ "$status" -eq 0 ]
-    grep -q -- '-p .* -w 1100' "$mmdc_log"
+    grep -q -- '-p .* --size 3300' "$mmdc_log"
     local html
     html="$(printf '%s\n' "$output" | sed -n 's/^doc-to-pdf: kept HTML at //p' | head -1)"
     grep -q 'class="mermaid-diagram"' "$html"
     grep -q 'data:image/png;base64' "$html"
-    ! grep -q 'mermaid.initialize' "$html"
+    ! grep -q 'mermaid.initialize' "$html" || return 1
     rm -f "$html"
 }
 

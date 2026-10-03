@@ -11,6 +11,10 @@ updates:
     labels:
       - "dependencies"
       - "javascript"
+    ignore:
+      # Types track the Node runtime (.nvmrc), not the latest Node.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   # The CI workflow's actions (keeps the SHA-pinned uses: current).
   - package-ecosystem: "github-actions"
