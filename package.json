@@ -17,7 +17,7 @@
     "markdown-it": "15.0.2"
   },
   "devDependencies": {
-    "@types/node": "24.19.1",
+    "@types/node": "26.6.3",
     "cordon-spec": "1.4.0",
     "typescript": "6.0.3"
   }
