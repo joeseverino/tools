@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 # repo new|register — fleet entry as one verb.
 #
-# Closes the unguarded seam at the front door of the fleet: repos that enter
-# by hand skip steps (severino-life, cordon-starter, screencasts, and actual
-# all reached disk with no vault project doc or HQ slug; severino-edu-mcp
-# shipped its first PR ungated). `new` bootstraps a repo from the
+# Repos created by hand skip steps (no vault project doc, no HQ slug, no
+# gate). `new` bootstraps a repo from the
 # cordon-starter baseline — prune to one emitter track, fresh history, hooks,
 # initial commit, GitHub repo + branch protection — and then registers it the
 # same way `register` does for a repo that already exists: the

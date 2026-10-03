@@ -53,7 +53,7 @@ describe_spec() {
     desc_opt --days N -- "Stale window in days (default 14)"
     desc_opt --json -- "Machine-readable output"
 
-    desc_cmd add -- "Capture a new task (delegates to the MCP's add_task)"
+    desc_cmd add -- "Capture a new task (delegates to severino-vault-mcp task-add)"
     desc_effect vault_write
     desc_opt --project P  -- "Owning project — colocates at 01 Projects/<project>/tasks/"
     desc_opt --effort E   -- "Effort S|M|L (default S)"

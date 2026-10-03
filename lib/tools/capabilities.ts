@@ -50,7 +50,6 @@ export function loadCapabilities(): CapabilitiesManifest {
 function repoPath(repo: Repository): string {
   const overrides: Record<string, string | undefined> = {
     'severino-vault-mcp': process.env.MCP_HOME,
-    'severino-edu-mcp': process.env.EDU_MCP_HOME,
     'severino-life': process.env.LIFE_MCP_HOME,
     'vault-engine': process.env.VAULT_ENGINE_HOME,
   };

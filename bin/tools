@@ -776,7 +776,7 @@ cmd_bump_engine() {
         < <(node "$TOOLS_HOME/lib/tools/capabilities.ts" pairs engine_consumer)
     for i in "${!repos[@]}"; do
         repo="${repos[$i]}" name="${ids[$i]}"
-        [[ -f "$repo/uv.lock" ]] || die "error" "no uv.lock at $repo (set MCP_HOME / EDU_MCP_HOME / LIFE_MCP_HOME)"
+        [[ -f "$repo/uv.lock" ]] || die "error" "no uv.lock at $repo (set MCP_HOME / LIFE_MCP_HOME)"
         before="$(engine_lock_pin "$repo")"
         msg "$DIM" "step" "$name: uv lock --upgrade-package severino-vault-engine"
         (cd "$repo" && "$uv" lock --upgrade-package severino-vault-engine)
