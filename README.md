@@ -190,7 +190,6 @@ Umbrella command for the personal CLI toolchain.
 | `tools contracts [id]` | `[id]`<br>`--check`<br>`--json`<br>`--scope <local\|fleet\|live>` | `read` | Inspect the producer → consumer contract graph and projection drift |
 | `tools derive [projection]` | `[projection]`<br>`--all`<br>`--go`<br>`--json`<br>`--scope <local\|fleet>` | `local_write` | Regenerate a declared consumer projection from its owner contract |
 | `tools reinstall [repo]` | `[repo]` | `local_write + network` | Reinstall a registered uv tool from its checkout and verify it matches the source |
-| `tools bump-engine` | `--lock-only` | `local_write + network` | Re-lock severino-vault-engine in every consumer repo and reinstall their uv tools |
 
 **`tools describe` details**
 
@@ -221,16 +220,6 @@ Runs each repository's declared install command, then compares the installed fin
 
 ```sh
 tools reinstall severino-vault-mcp  # reinstall the vault MCP and verify it against source
-```
-
-**`tools bump-engine` details**
-
-The one flow for moving the fleet to a newer vault-engine: each consumer repo (the vault MCPs and the life CLI) gets 'uv lock --upgrade-package severino-vault-engine', then its uv tool reinstalled so the running servers match the new pin. The lock edits are left uncommitted — ship each consumer repo's bump through its own PR flow. 'tools doctor' gates the invariant this maintains: every consumer pins the same engine commit (engine lock parity).
-
-**Examples**
-
-```sh
-tools bump-engine  # move every declared engine consumer to current main and reinstall
 ```
 
 #### `inbox`

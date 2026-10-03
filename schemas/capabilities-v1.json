@@ -16,7 +16,6 @@
           "path": { "type": "string", "minLength": 1 },
           "describe": { "$ref": "#/$defs/command" },
           "brief_section": { "$ref": "#/$defs/command" },
-          "engine_consumer": { "type": "boolean" },
           "install": { "$ref": "#/$defs/command" },
           "fingerprint": {
             "type": "object",

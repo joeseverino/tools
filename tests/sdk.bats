@@ -59,14 +59,14 @@ load helpers
     [ "$status" -eq 0 ]
 }
 
-@test "capability manifest validates and derives engine consumers with env seams" {
+@test "capability manifest validates and derives repo paths with env seams" {
     run bash -c 'node "$TOOLS_HOME/lib/tools/validate-json.ts" "$TOOLS_HOME/schemas/capabilities-v1.json" \
       < "$TOOLS_HOME/config/capabilities.json"'
     [ "$status" -eq 0 ]
 
     MCP_HOME="$BATS_TEST_TMPDIR/mcp" \
       LIFE_MCP_HOME="$BATS_TEST_TMPDIR/life" \
-      run node "$TOOLS_HOME/lib/tools/capabilities.ts" paths engine_consumer
+      run node "$TOOLS_HOME/lib/tools/capabilities.ts" paths install
     [ "$status" -eq 0 ]
     [ "$output" = "$BATS_TEST_TMPDIR/mcp
 $BATS_TEST_TMPDIR/life" ]
