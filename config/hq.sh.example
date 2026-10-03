@@ -14,7 +14,7 @@
 
 # Local checkout of the HQ app. Used by `hq ship` to commit/push/deploy a
 # code correction from one command.
-: "${CODE_HOME:=$HOME/Documents/Code}"
+: "${CODE_HOME:?set by lib/sdk/core.sh}"
 : "${HQ_LOCAL_PATH:=$CODE_HOME/Projects/severino-hq}"
 
 # The indexed-dir list is the MCP's to derive (its config's indexed_dirs plus

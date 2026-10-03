@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# repos [options] [name] — fleet inventory of every repo under ~/Documents/Code.
+# repos [options] [name] — fleet inventory of every repo under $CODE_HOME.
 # One call returns git state, package manager, CI, and last commit for every
 # repo, so an agent (or human) gets the whole picture without running a dozen
 # git/ls/du commands per repo. `--json` is the machine surface.
@@ -9,7 +9,6 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 # shellcheck source=lib/git.sh
 source "$TOOLS_HOME/lib/git.sh"   # the branch-state verdict (git_branch_state) lives here, not re-derived
 
-: "${CODE_HOME:=$HOME/Documents/Code}"
 
 REPOS_LOCAL_OK=()
 REPOS_CONFIG="${REPOS_CONFIG:-$TOOLS_HOME/config/repos.sh}"
@@ -21,7 +20,7 @@ fi
 # The single source of truth for repos's surface: lib/describe.sh renders
 # both this tool's -h text and its --describe JSON from this one declaration.
 describe_spec() {
-    desc_tool "repos" "Fleet inventory of every repo under ~/Documents/Code."
+    desc_tool "repos" "Fleet inventory of every repo under CODE_HOME."
     desc_inventory "Workspace" 190
     desc_leaf_commands
     desc_synopsis "repos [options] [name] | repos tui [options] [name]"
@@ -104,7 +103,7 @@ if (( TUI )); then
     [[ -n "$PM_FILTER" ]] && args+=(--pm "$PM_FILTER")
     for root in "${ROOTS[@]}"; do args+=(--root "$root"); done
     [[ -n "$NAME_FILTER" ]] && args+=("$NAME_FILTER")
-    exec node "$TOOLS_HOME/lib/repos/tui.mjs" "${args[@]}"
+    exec node "$TOOLS_HOME/lib/repos/tui.ts" "${args[@]}"
 fi
 
 # ---------- per-repo collection (parallel arrays, one entry per included repo) ----------
@@ -219,9 +218,9 @@ collect() {
     # Emit ONE \x1f-delimited record (no field holds \x1f or a newline — the
     # commit subject is %s, a single line). The collect runs in parallel, one
     # subshell per repo writing its record to a temp file; merge_record reads them
-    # back in order and appends to the arrays, and lib/repos/json.mjs parses the
+    # back in order and appends to the arrays, and lib/repos/json.ts parses the
     # same files for --json. Field ORDER is the contract, defined once in
-    # lib/repos/record.mjs (RECORD_FIELDS) — this printf and merge_record below
+    # lib/repos/record.ts (RECORD_FIELDS) — this printf and merge_record below
     # both follow it, and the schema-parity test locks the JSON shape.
     printf '%s\x1f' \
         "$name" "$root_label" "$d" "$is_git" "$branch" "$remote" "$has_remote" \
@@ -257,7 +256,7 @@ merge_record() {
 # independent, so fanning it out turns a sequential ~Nx130ms walk into one bounded
 # by the slowest single repo. Same temp-dir + wait pattern the --prs pass uses.
 SCAN_TMP="$(mktemp -d)"
-PR_TMP=""   # set by the --prs pass; json.mjs reads it, so it's cleaned at exit
+PR_TMP=""   # set by the --prs pass; json.ts reads it, so it's cleaned at exit
 trap 'rm -rf "$SCAN_TMP" "$PR_TMP"' EXIT
 scan_idx=0
 for root in "${ROOTS[@]}"; do
@@ -297,7 +296,7 @@ if (( PRS )) && (( N > 0 )); then
         i=$(( i + 1 ))
     done
     wait
-    # The --json surface reads $PR_TMP directly (json.mjs projects each blob), so
+    # The --json surface reads $PR_TMP directly (json.ts projects each blob), so
     # the array splice + state correction below is only for the human render.
     if (( ! JSON )); then
         while IFS=$'\t' read -r idx num state prci review url; do
@@ -307,20 +306,20 @@ if (( PRS )) && (( N > 0 )); then
             # Correct the network-free hint: an open PR means the branch is its PR's
             # home (iterate), not stale — the want_pr=1 arm of git_branch_state.
             [[ "$state" == "open" ]] && R_STATE[idx]="pr"
-        done < <(node "$TOOLS_HOME/lib/repos/pr.mjs" "$PR_TMP")
+        done < <(node "$TOOLS_HOME/lib/repos/pr.ts" "$PR_TMP")
     fi
 fi
 
 # ---------- JSON surface ----------
-# Built once from the field manifest by a real serializer (lib/repos/record.mjs +
-# json.mjs), reading collect()'s records straight from the scan temp dir — no
+# Built once from the field manifest by a real serializer (lib/repos/record.ts +
+# json.ts), reading collect()'s records straight from the scan temp dir — no
 # hand-concatenated, escape-prone printf for the fleet's most-consumed contract.
 if (( JSON )); then
     json_args=(--record-dir "$SCAN_TMP" --scan-count "$scan_idx")
     for root in "${ROOTS[@]}"; do json_args+=(--root "$root"); done
     (( ICLOUD )) && json_args+=(--icloud)
     (( PRS )) && json_args+=(--pr-dir "$PR_TMP")
-    node "$TOOLS_HOME/lib/repos/json.mjs" "${json_args[@]}"
+    node "$TOOLS_HOME/lib/repos/json.ts" "${json_args[@]}"
     exit 0
 fi
 

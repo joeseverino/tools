@@ -10,7 +10,7 @@ describe_spec() {
     desc_effect local_write
     desc_synopsis "diagram <path>..."
     desc_para "Each path may be an .mmd file or a directory. Directories render their top-level .mmd files."
-    desc_para "Rendering uses Mermaid CLI 11.15.0 with Joe Severino brand tokens, PNG output, 1100px width, 3x scale, and a white background. Set DIAGRAM_BRAND_KIT to override the kit directory."
+    desc_para "Rendering uses the Mermaid CLI pinned in package.json and the local Chromium, with Joe Severino brand tokens, PNG output, 1100px width, 3x scale, and a white background. Set DIAGRAM_BRAND_KIT to override the kit directory."
     desc_para "Author flow diagrams with flowchart TB. Contract diagrams may use HTML labels for dense multiline nodes; site diagrams stay on SVG labels when their nodes are single-line."
     desc_pos path +variadic -- "Mermaid source file or directory"
     desc_example "diagram docs/diagrams/"
@@ -39,11 +39,14 @@ for target in "$@"; do
     fi
 done
 
-command -v npx >/dev/null || die "error" "npx not installed (install Node.js)"
+mmdc="${MMDC_BIN:-$TOOLS_HOME/node_modules/.bin/mmdc}"
+[[ -x "$mmdc" ]] || die "error" "mermaid-cli is not installed; run: npm ci (in $TOOLS_HOME)"
 
 config="$(mktemp "${TMPDIR:-/tmp}/diagram-config.XXXXXX.json")"
-trap 'rm -f "$config"' EXIT
-node "$TOOLS_HOME/lib/diagram/config.mjs" > "$config"
+browser="$(mktemp "${TMPDIR:-/tmp}/diagram-browser.XXXXXX.json")"
+trap 'rm -f "$config" "$browser"' EXIT
+node "$TOOLS_HOME/lib/diagram/config.ts" > "$config"
+node "$TOOLS_HOME/lib/diagram/puppeteer.ts" > "$browser"
 
 header "rendering" "${#sources[@]}"
 failed=0
@@ -53,8 +56,8 @@ for src in "${sources[@]}"; do
     out="${src%.mmd}.png"
     if (
         cd "$dir"
-        npx -y -p @mermaid-js/mermaid-cli@11.15.0 mmdc \
-            -i "$name" -o "${name%.mmd}.png" -c "$config" -w 1100 -s 3 -b white
+        "$mmdc" -i "$name" -o "${name%.mmd}.png" -c "$config" -p "$browser" \
+            -w 1100 -s 3 -b white
     ); then
         msg "$GREEN" "rendered" "$src ${DIM}→${RESET} $out"
     else

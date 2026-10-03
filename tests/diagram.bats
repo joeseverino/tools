@@ -1,12 +1,12 @@
 #!/usr/bin/env bats
-# diagram.bats — Mermaid renderer behavior without downloading Mermaid CLI.
+# diagram.bats — Mermaid renderer behavior with the CLI and browser stubbed.
 
 load helpers
 
 setup() {
     mkdir -p "$BATS_TEST_TMPDIR/bin" "$BATS_TEST_TMPDIR/diagrams"
     mkdir -p "$BATS_TEST_TMPDIR/kit/web"
-    export NPX_LOG="$BATS_TEST_TMPDIR/npx.log"
+    export MMDC_LOG="$BATS_TEST_TMPDIR/mmdc.log"
     export CONFIG_LOG="$BATS_TEST_TMPDIR/config.json"
     export DIAGRAM_BRAND_KIT="$BATS_TEST_TMPDIR/kit"
     export DIAGRAM_FONT="$BATS_TEST_TMPDIR/inter.woff2"
@@ -21,9 +21,11 @@ setup() {
   --brand-paper: #ffffff;
 }
 EOF
-    cat > "$BATS_TEST_TMPDIR/bin/npx" <<'STUB'
+    export MMDC_BIN="$BATS_TEST_TMPDIR/bin/mmdc"
+    export DIAGRAM_CHROMIUM="$MMDC_BIN"
+    cat > "$MMDC_BIN" <<'STUB'
 #!/usr/bin/env bash
-printf '%s\n' "$*" >> "$NPX_LOG"
+printf '%s\n' "$*" >> "$MMDC_LOG"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -i) src="$2"; shift 2 ;;
@@ -34,7 +36,7 @@ while [[ $# -gt 0 ]]; do
 done
 printf 'rendered from %s\n' "$src" > "$out"
 STUB
-    chmod +x "$BATS_TEST_TMPDIR/bin/npx"
+    chmod +x "$MMDC_BIN"
 }
 
 @test "directory input renders each top-level mmd with the established settings" {
@@ -46,8 +48,8 @@ STUB
     [ "$status" -eq 0 ]
     [ -f "$BATS_TEST_TMPDIR/diagrams/one.png" ]
     [ -f "$BATS_TEST_TMPDIR/diagrams/two.png" ]
-    [ "$(wc -l < "$NPX_LOG" | tr -d ' ')" -eq 2 ]
-    grep -q -- '-y -p @mermaid-js/mermaid-cli@11.15.0 mmdc -i one.mmd -o one.png -c .* -w 1100 -s 3 -b white' "$NPX_LOG"
+    [ "$(wc -l < "$MMDC_LOG" | tr -d ' ')" -eq 2 ]
+    grep -q -- '-i one.mmd -o one.png -c .* -p .* -w 1100 -s 3 -b white' "$MMDC_LOG"
     grep -q '"primaryBorderColor": "#123456"' "$CONFIG_LOG"
     grep -q '"theme": "base"' "$CONFIG_LOG"
     grep -q 'data:font/woff2;base64' "$CONFIG_LOG"

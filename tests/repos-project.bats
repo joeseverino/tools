@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # repos-project.bats — the shared read-side projection. `repos` is the one read
-# owner; lib/repos/project.mjs is the one way the loop's write tools consume it,
+# owner; lib/repos/project.ts is the one way the loop's write tools consume it,
 # so ship/land/resync each declare only a filter + columns, not a second copy of
 # the stdin/parse loop. These assert the shared reader's contract and each
 # driver's projection over it.
@@ -13,14 +13,14 @@ plan() { # plan <module.mjs> <json-payload>  [env=val ...]
 }
 
 @test "shared reader: garbage in -> empty out (never throws)" {
-    run plan lib/resync/plan.mjs 'not json at all'
+    run plan lib/resync/plan.ts 'not json at all'
     [ "$status" -eq 0 ]
     [ "$output" = "" ]
 }
 
 @test "shared reader: a row function returning null drops that repo" {
     payload='{"repos":[{"name":"a","path":"/a","git":true,"has_remote":true,"dirty":2},{"name":"b","path":"/b","git":true,"has_remote":false}]}'
-    run plan lib/resync/plan.mjs "$payload"
+    run plan lib/resync/plan.ts "$payload"
     [ "$status" -eq 0 ]
     # b has no remote -> dropped; only a survives, with dirty=2
     [ "$output" = $'a\t/a\t2' ]
@@ -28,19 +28,19 @@ plan() { # plan <module.mjs> <json-payload>  [env=val ...]
 
 @test "resync plan: only git repos with a remote, dirty = dirty+untracked" {
     payload='{"repos":[{"name":"x","path":"/x","git":true,"has_remote":true,"dirty":1,"untracked":2},{"name":"nogit","path":"/n","git":false,"has_remote":true}]}'
-    run plan lib/resync/plan.mjs "$payload"
+    run plan lib/resync/plan.ts "$payload"
     [ "$output" = $'x\t/x\t3' ]
 }
 
 @test "land plan: only repos with an OPEN PR, projected to land's columns" {
     payload='{"repos":[{"name":"g","path":"/g","pr":{"state":"open","number":12,"ci":"passing","url":"u12"}},{"name":"closed","path":"/c","pr":{"state":"merged","number":9}},{"name":"nopr","path":"/n"}]}'
-    run plan lib/land/plan.mjs "$payload"
+    run plan lib/land/plan.ts "$payload"
     [ "$output" = $'g\t/g\t12\tpassing\tu12' ]
 }
 
 @test "ship plan still emits its exact TSV through the shared reader" {
     payload='{"repos":[{"name":"tools","path":"/tmp/tools","branch":"ship/demo","dirty":0,"untracked":0,"ahead":0,"has_remote":true,"upstream":true}]}'
-    run plan lib/ship/plan.mjs "$payload" SHIP_INCLUDE_CLEAN_BRANCH=1
+    run plan lib/ship/plan.ts "$payload" SHIP_INCLUDE_CLEAN_BRANCH=1
     [ "$output" = $'tools\t/tmp/tools\tship/demo\t0\t0\t1' ]
 }
 
@@ -77,11 +77,11 @@ assert s==["cordon","cordon-starter"], s
     git -C "$CODE_HOME/Projects/demo" commit -q -m "feat: x"
     # the live emitter must validate against the published contract
     "$TOOLS_HOME/bin/repos" --json \
-        | node "$TOOLS_HOME/lib/tools/validate-json.mjs" "$TOOLS_HOME/schemas/repos.schema.json"
+        | node "$TOOLS_HOME/lib/tools/validate-json.ts" "$TOOLS_HOME/schemas/repos.schema.json"
 }
 
 @test "validate-json + repos schema: accepts a minimal doc, rejects a missing field" {
-    local v="$TOOLS_HOME/lib/tools/validate-json.mjs" s="$TOOLS_HOME/schemas/repos.schema.json"
+    local v="$TOOLS_HOME/lib/tools/validate-json.ts" s="$TOOLS_HOME/schemas/repos.schema.json"
     # one chained statement so each clause gates under bats' last-command errexit:
     # a minimal valid doc passes, and dropping a required key is actually caught.
     printf '%s' '{"ok":true,"roots":[],"count":0,"repos":[]}' | node "$v" "$s" \
@@ -96,7 +96,7 @@ assert s==["cordon","cordon-starter"], s
     run node -e '
       const TH = process.env.TOOLS_HOME;
       const { readFileSync } = require("node:fs");
-      import(TH + "/lib/repos/record.mjs").then((m) => {
+      import(TH + "/lib/repos/record.ts").then((m) => {
         const schema = JSON.parse(readFileSync(TH + "/schemas/repos.schema.json", "utf8"));
         const want = Object.keys(schema.$defs.repo.properties).sort();
         const rec  = m.parseRecord(m.RECORD_FIELDS.map(() => "x").join(""));

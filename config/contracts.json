@@ -38,7 +38,7 @@
       "scope": "local",
       "check": {
         "repository": "tools",
-        "argv": ["node", "lib/tools/check-cordon-schema.mjs"]
+        "argv": ["node", "lib/tools/check-cordon-schema.ts"]
       }
     },
     {

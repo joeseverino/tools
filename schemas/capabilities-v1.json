@@ -18,6 +18,15 @@
           "brief_section": { "$ref": "#/$defs/command" },
           "engine_consumer": { "type": "boolean" },
           "install": { "$ref": "#/$defs/command" },
+          "fingerprint": {
+            "type": "object",
+            "required": ["installed", "source"],
+            "properties": {
+              "installed": { "$ref": "#/$defs/command" },
+              "source": { "$ref": "#/$defs/command" }
+            },
+            "additionalProperties": false
+          },
           "schema_contract": { "$ref": "#/$defs/command" },
           "schema_fingerprint": { "$ref": "#/$defs/command" }
         },

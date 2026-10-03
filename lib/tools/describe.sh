@@ -16,30 +16,25 @@ cmd_describe() {
     if (( tui )); then
         [[ -z "$only" ]] || die "usage" "--tui describes the whole toolchain; drop the tool name ('$only' stays '$only -h')" 2
         if (( repos )); then
-            exec node "$TOOLS_HOME/lib/tools/describe-tui.mjs" --repos
+            exec node "$TOOLS_HOME/lib/tools/describe-tui.ts" --repos
         else
-            exec node "$TOOLS_HOME/lib/tools/describe-tui.mjs"
+            exec node "$TOOLS_HOME/lib/tools/describe-tui.ts"
         fi
     fi
 
     if [[ -n "$only" && -n "$only_cmd" ]]; then
         [[ -x "$TOOLS_HOME/bin/$only" ]] || die "error" "no such tool: $only"
-        "$TOOLS_HOME/bin/$only" --describe \
-            | TOOLS_DESC_CMD="$only_cmd" TOOLS_DESC_PRETTY="$pretty" python3 -c '
-import json, os, sys
-want = os.environ["TOOLS_DESC_CMD"]
-doc = json.load(sys.stdin)
-cmd = next((c for c in doc.get("commands", []) if c["name"] == want), None)
-if cmd is None:
-    names = ", ".join(c["name"] for c in doc.get("commands", [])) or "(none)"
-    print(json.dumps({"ok": False,
-        "error": "%s has no command %r; commands: %s" % (doc.get("name"), want, names)}))
-    sys.exit(1)
-out = {"ok": True, "schema_version": doc.get("schema_version"), "tool": doc.get("name")}
-out.update(cmd)
-print(json.dumps(out, indent=2) if os.environ["TOOLS_DESC_PRETTY"] == "1" else json.dumps(out))
-'
-        return "${PIPESTATUS[1]}"
+        local -a style=(-c)
+        (( pretty )) && style=(--indent 2)
+        local projected
+        projected="$("$TOOLS_HOME/bin/$only" --describe | jq "${style[@]}" --arg want "$only_cmd" '
+            ([.commands[]? | select(.name == $want)] | first) as $cmd
+            | if $cmd == null then
+                {ok: false, error: "\(.name) has no command \u0027\($want)\u0027; commands: \([.commands[]?.name] | if length == 0 then "(none)" else join(", ") end)"}
+              else {ok: true, schema_version, tool: .name} + $cmd end')" || return 1
+        printf '%s\n' "$projected"
+        [[ "$(jq -r .ok <<<"$projected")" == true ]] || return 1
+        return 0
     fi
 
     if [[ -n "$only" ]]; then
@@ -65,11 +60,11 @@ print(json.dumps(out, indent=2) if os.environ["TOOLS_DESC_PRETTY"] == "1" else j
     cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/severino-tools"
     if [[ -z "${TOOLS_DESCRIBE_NO_CACHE:-}" ]]; then
         if (( repos )); then
-            local obsidian_contract="${CODE_HOME:-$HOME/Documents/Code}/Projects/severino-obsidian/contract/obsidian-commands.json"
+            local obsidian_contract="$CODE_HOME/Projects/severino-obsidian/contract/obsidian-commands.json"
             sig=$({ cat "$TOOLS_HOME"/bin/* "$TOOLS_HOME"/lib/*.sh \
                 "$TOOLS_HOME"/lib/sdk/*.sh "$TOOLS_HOME"/lib/tools/describe.sh \
-                "$TOOLS_HOME"/lib/tools/capabilities.mjs \
-                "$TOOLS_HOME"/lib/sdk/process.mjs \
+                "$TOOLS_HOME"/lib/tools/capabilities.ts \
+                "$TOOLS_HOME"/lib/sdk/process.ts \
                 "$TOOLS_HOME"/config/capabilities.json 2>/dev/null
                 [[ -r "$obsidian_contract" ]] && cat "$obsidian_contract"
             } | cksum) || sig=""
@@ -101,9 +96,9 @@ print(json.dumps(out, indent=2) if os.environ["TOOLS_DESC_PRETTY"] == "1" else j
         local siblings=""
         if (( repos )); then
             local capability_objs
-            capability_objs=$(node "$TOOLS_HOME/lib/tools/capabilities.mjs" run-all describe 2>/dev/null) \
+            capability_objs=$(node "$TOOLS_HOME/lib/tools/capabilities.ts" run-all describe 2>/dev/null) \
                 || capability_objs="[]"
-            local obsidian_contract="${CODE_HOME:-$HOME/Documents/Code}/Projects/severino-obsidian/contract/obsidian-commands.json"
+            local obsidian_contract="$CODE_HOME/Projects/severino-obsidian/contract/obsidian-commands.json"
             if [[ -r "$obsidian_contract" ]] && out=$(cat "$obsidian_contract") && [[ "$out" == \{* ]]; then
                 local capability_body="${capability_objs#[}"
                 capability_body="${capability_body%]}"
@@ -120,8 +115,8 @@ print(json.dumps(out, indent=2) if os.environ["TOOLS_DESC_PRETTY"] == "1" else j
         fi
     fi
 
-    if (( pretty )) && command -v python3 >/dev/null 2>&1; then
-        printf '%s\n' "$body" | python3 -m json.tool
+    if (( pretty )); then
+        printf '%s\n' "$body" | jq --indent 4 .
     else
         printf '%s\n' "$body"
     fi

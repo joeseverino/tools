@@ -2,6 +2,13 @@
 # Stable shell SDK core: presentation, errors, basic guards, and JSON scalars.
 # shellcheck disable=SC2034 # Public color constants are consumed by callers.
 
+# CODE_HOME is the root that holds Projects/ and Assets/. It follows from where
+# this checkout lives (Assets/tools), so no tool keeps its own default.
+if [[ -z "${CODE_HOME:-}" && -n "${TOOLS_HOME:-}" ]]; then
+    CODE_HOME="$(cd "$TOOLS_HOME/../.." && pwd)"
+fi
+export CODE_HOME
+
 if [[ -t 1 ]]; then
     BOLD=$'\033[1m'; DIM=$'\033[2m'; RESET=$'\033[0m'
     GREEN=$'\033[32m'; RED=$'\033[31m'; YELLOW=$'\033[33m'
@@ -81,7 +88,7 @@ json_join() { local IFS=','; printf '%s' "$*"; }
 # Versioned result envelope for lightweight scripts and agent utilities.
 # data/warnings/receipt/next are pre-rendered JSON so callers never lose
 # structured values. The shape is pinned by schemas/result-v1.json;
-# lib/sdk/result.mjs is the Node face of the same envelope — change together.
+# lib/sdk/result.ts is the Node face of the same envelope — change together.
 result_ok() {
     local data="${1:-null}" warnings="${2:-[]}" receipt="${3:-null}" next="${4:-[]}"
     printf '{"ok":true,"result_version":1,"data":%s,"warnings":%s,"receipt":%s,"next":%s}\n' \

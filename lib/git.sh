@@ -2,9 +2,9 @@
 # git.sh — the one owner of git/PR mechanics for the toolchain.
 #
 # The single source of truth for "how we commit / push / open-PR / land / sync a
-# repo." `ship` (fleet) is built on it; the per-repo commands (site publish/land,
-# hq ship, vault sync) ride the same primitives as they migrate, so the mechanics
-# are written and bulletproofed once, not per tool. Same shape as lib/drift.sh.
+# repo." `ship` (fleet) is built on it, and the per-repo commands (land, hq
+# ship, vault sync) ride the same primitives, so the mechanics are written and
+# bulletproofed once, not per tool.
 #
 # Each function operates on the current working directory — callers cd into the
 # repo first. Functions echo their primary result (branch name, PR URL, body) and

@@ -17,7 +17,7 @@ setup() {
     [ "$note_count" -eq 1 ]
 
     note=$(find "$INBOX_DIR" -maxdepth 1 -type f -name "*.md" -print)
-    [[ "$(basename "$note")" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{6}\ remember\ the\ milk\.md$ ]]
+    [[ "$(basename "$note")" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{6}\ remember\ the\ milk\.md$ ]] || return 1
 
     run sed -n '1,6p' "$note"
     [ "$status" -eq 0 ]

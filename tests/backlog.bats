@@ -46,11 +46,11 @@ STUBEOF
     [ "$status" -eq 0 ]
     # -h renders the synopsis + prose (the rich paras supersede the one-line
     # tagline by design — see describe.sh's description blurb).
-    [[ "$output" == *"Usage: backlog [board"* ]]
-    [[ "$output" == *"renders what the MCP emits"* ]]
+    [[ "$output" == *"Usage: backlog [board"* ]] || return 1
+    [[ "$output" == *"renders what the MCP emits"* ]] || return 1
     run "$TOOLS_HOME/bin/backlog" --describe
     [ "$status" -eq 0 ]
-    [[ "$output" == *'"name":"backlog"'* ]]
+    [[ "$output" == *'"name":"backlog"'* ]] || return 1
     # the one-line description is the --describe contract's "description" field.
     [[ "$output" == *"thin client over the vault MCP"* ]]
 }
@@ -58,9 +58,9 @@ STUBEOF
 @test "board renders the MCP task-list JSON, grouped by project" {
     run backlog
     [ "$status" -eq 0 ]
-    [[ "$output" == *"cordon"* ]]
-    [[ "$output" == *"v4-semantics"* ]]
-    [[ "$output" == *"ci-parity"* ]]
+    [[ "$output" == *"cordon"* ]] || return 1
+    [[ "$output" == *"v4-semantics"* ]] || return 1
+    [[ "$output" == *"ci-parity"* ]] || return 1
     # the cross-cutting bucket is its own group
     [[ "$output" == *"cross"* ]]
 }
@@ -89,8 +89,8 @@ STUBEOF
 @test "add delegates to task-add with the title and flags, then reports" {
     run backlog add "New thing" --project tools --effort M
     [ "$status" -eq 0 ]
-    [[ "$output" == *"captured"* ]]
-    [[ "$output" == *"task-new-thing"* ]]
+    [[ "$output" == *"captured"* ]] || return 1
+    [[ "$output" == *"task-new-thing"* ]] || return 1
     grep -q 'task-add New thing --project tools --effort M' "$SVMC_LOG"
 }
 

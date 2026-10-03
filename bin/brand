@@ -4,7 +4,6 @@ set -euo pipefail
 
 source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 
-CODE_HOME="${CODE_HOME:-$HOME/Documents/Code}"
 BRAND_HOME="${BRAND_HOME:-$CODE_HOME/Assets/severino-brand}"
 
 describe_spec() {
@@ -25,7 +24,7 @@ describe_spec() {
     desc_para "Spec format and template fields live in the engine README. --tokens defaults to the primary kit's. Use this for designed graphics; use \`diagram\` for Mermaid flowcharts and sequence diagrams."
     desc_cmd status -- "Show brand location, engine version, and git state"
     desc_effect read
-    desc_env CODE_HOME   -- "Defaults to ~/Documents/Code"
+    desc_env CODE_HOME   -- "Root holding Projects/ and Assets/ (default: two levels above TOOLS_HOME)"
     desc_env BRAND_HOME  -- "Defaults to \$CODE_HOME/Assets/severino-brand"
 }
 

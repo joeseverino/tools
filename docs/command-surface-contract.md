@@ -120,13 +120,10 @@ contract, and it lives in the one intercept every tool already calls
 (`desc_help_intercept`) — a new deploy command is gated the moment it declares
 its effect, with zero per-tool wiring. At a TTY it prompts `[y/N]`;
 non-interactive it **fails closed** unless `TOOLS_ASSUME_YES=1` is set (the
-bypass CI and intentional automation use), so a stray `hq ship` / `site publish`
+bypass CI and intentional automation use), so a stray `hq ship` / `hq restart`
 can't fire by accident, by hand or by an agent. A tool with no `describe_spec`
-has no executable declared surface to gate. Covered by `site-mcp.bats`.
-
-**Declared once where it's shared:** the drift guards declare their effects a
-single time in `drift_describe_commands` (show/diff `read +network`, pull
-`vault_write +network`), and all four guards inherit them.
+has no executable declared surface to gate. Covered by `describe.bats`, against
+a throwaway tool with one deploy and one read command.
 
 ## Scoped lookup — the token-minimal AI path
 

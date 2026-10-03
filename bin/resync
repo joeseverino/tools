@@ -40,9 +40,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Fleet state from its one owner (repos), projected to the fields resync needs
-# (lib/resync/plan.mjs over the shared repos/project.mjs reader): only git repos
+# (lib/resync/plan.ts over the shared repos/project.ts reader): only git repos
 # with a remote, as name<TAB>path<TAB>dirty-count.
-plan="$(repos --json ${NAME:+"$NAME"} 2>/dev/null | node "$TOOLS_HOME/lib/resync/plan.mjs")"
+plan="$(repos --json ${NAME:+"$NAME"} 2>/dev/null | node "$TOOLS_HOME/lib/resync/plan.ts")"
 
 count="$(printf '%s\n' "$plan" | grep -c . || true)"
 header "resync" "$count"

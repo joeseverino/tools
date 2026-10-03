@@ -30,11 +30,17 @@ pin_for() {
     ' _ "$1"
 }
 
-# stub_uv — a no-op uv that logs each invocation to $UV_LOG.
+# stub_uv — a no-op uv that logs each invocation to $UV_LOG. Both sides of the
+# vault MCP's declared fingerprint (the installed binary and `uv run` in the
+# checkout) report the same value, so a reinstall verifies.
 stub_uv() {
-    export UV_BIN="$BATS_TEST_TMPDIR/uv" UV_LOG="$BATS_TEST_TMPDIR/uv.log"
-    printf '#!/usr/bin/env bash\necho "$*" >> "$UV_LOG"\n' > "$UV_BIN"
-    chmod +x "$UV_BIN"
+    local bin="$BATS_TEST_TMPDIR/stub-bin"
+    mkdir -p "$bin"
+    export UV_BIN="$bin/uv" UV_LOG="$BATS_TEST_TMPDIR/uv.log"
+    printf '#!/usr/bin/env bash\necho "$*" >> "$UV_LOG"\n[[ "$*" == *--fingerprint* ]] && echo f00d\nexit 0\n' > "$UV_BIN"
+    printf '#!/usr/bin/env bash\necho f00d\n' > "$bin/severino-vault-mcp"
+    chmod +x "$UV_BIN" "$bin/severino-vault-mcp"
+    export PATH="$bin:$PATH"
     : > "$UV_LOG"
 }
 
@@ -85,5 +91,5 @@ stub_uv() {
     stub_uv
     MCP_HOME="$BATS_TEST_TMPDIR/vault-mcp" EDU_MCP_HOME="$BATS_TEST_TMPDIR/edu-mcp" LIFE_MCP_HOME="$BATS_TEST_TMPDIR/life" \
         run "$TOOLS_HOME/bin/tools" bump-engine
-    [ "$status" -eq 0 ] && [ "$(grep -c "tool install --reinstall ." "$UV_LOG")" -eq 3 ]
+    [ "$status" -eq 0 ] && [ "$(grep -c "tool install . --force --reinstall" "$UV_LOG")" -eq 3 ]
 }

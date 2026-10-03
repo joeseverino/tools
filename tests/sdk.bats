@@ -5,44 +5,44 @@ load helpers
 
 @test "shell SDK emits valid success and failure result envelopes" {
     run bash -c 'source "$TOOLS_HOME/lib/sdk/core.sh"; result_ok '\''{"value":1}'\'' \
-      | node "$TOOLS_HOME/lib/tools/validate-json.mjs" "$TOOLS_HOME/schemas/result-v1.json"'
+      | node "$TOOLS_HOME/lib/tools/validate-json.ts" "$TOOLS_HOME/schemas/result-v1.json"'
     [ "$status" -eq 0 ]
-    [[ "$output" == *"valid: result-v1.json"* ]]
+    [[ "$output" == *"valid: result-v1.json"* ]] || return 1
 
     run bash -c 'source "$TOOLS_HOME/lib/sdk/core.sh"; result_ok '\''{"value":1}'\'' '\''["partial sync"]'\'' \
-      | node "$TOOLS_HOME/lib/tools/validate-json.mjs" "$TOOLS_HOME/schemas/result-v1.json"'
+      | node "$TOOLS_HOME/lib/tools/validate-json.ts" "$TOOLS_HOME/schemas/result-v1.json"'
     [ "$status" -eq 0 ]
 
     run bash -c 'source "$TOOLS_HOME/lib/sdk/core.sh"; result_error stale_plan "reload" 1 \
-      | node "$TOOLS_HOME/lib/tools/validate-json.mjs" "$TOOLS_HOME/schemas/result-v1.json"'
+      | node "$TOOLS_HOME/lib/tools/validate-json.ts" "$TOOLS_HOME/schemas/result-v1.json"'
     [ "$status" -eq 0 ]
 }
 
 @test "Node result SDK emits envelopes valid against the same schema" {
     run bash -c 'node --input-type=module -e '\''
-      import { success, writeResult } from "./lib/sdk/result.mjs";
+      import { success, writeResult } from "./lib/sdk/result.ts";
       writeResult(success({ value: 1 }, { warnings: ["partial sync"] }));
-    '\'' | node "$TOOLS_HOME/lib/tools/validate-json.mjs" "$TOOLS_HOME/schemas/result-v1.json"'
+    '\'' | node "$TOOLS_HOME/lib/tools/validate-json.ts" "$TOOLS_HOME/schemas/result-v1.json"'
     [ "$status" -eq 0 ]
 
     run bash -c 'node --input-type=module -e '\''
-      import { failure, writeResult } from "./lib/sdk/result.mjs";
+      import { failure, writeResult } from "./lib/sdk/result.ts";
       writeResult(failure("stale_plan", "reload", { retryable: true }));
-    '\'' | node "$TOOLS_HOME/lib/tools/validate-json.mjs" "$TOOLS_HOME/schemas/result-v1.json"'
+    '\'' | node "$TOOLS_HOME/lib/tools/validate-json.ts" "$TOOLS_HOME/schemas/result-v1.json"'
     [ "$status" -eq 0 ]
 }
 
 @test "die_unknown degrades cleanly without the describe runtime" {
     run bash -c 'source "$TOOLS_HOME/lib/sdk/core.sh"; die_unknown flag --nope'
     [ "$status" -eq 2 ]
-    [[ "$output" == *"unknown flag: --nope"* ]]
+    [[ "$output" == *"unknown flag: --nope"* ]] || return 1
     [[ "$output" != *"command not found"* ]]
 }
 
 @test "header takes an optional noun and pluralizes it" {
     run bash -c 'source "$TOOLS_HOME/lib/sdk/core.sh"; header syncing 2 repo'
     [ "$status" -eq 0 ]
-    [[ "$output" == *"syncing 2 repos"* ]]
+    [[ "$output" == *"syncing 2 repos"* ]] || return 1
 
     run bash -c 'source "$TOOLS_HOME/lib/sdk/core.sh"; header archiving 1'
     [ "$status" -eq 0 ]
@@ -51,7 +51,7 @@ load helpers
 
 @test "Node process SDK parses JSON and reports invalid JSON" {
     run node --input-type=module -e '
-      import { runJson } from "./lib/sdk/process.mjs";
+      import { runJson } from "./lib/sdk/process.ts";
       const good = runJson(process.execPath, ["-e", "console.log(JSON.stringify({ok:true}))"]);
       const bad = runJson(process.execPath, ["-e", "console.log(\"nope\")"]);
       if (!good.ok || !good.json.ok || bad.ok || !bad.error.includes("invalid JSON")) process.exit(1);
@@ -60,20 +60,20 @@ load helpers
 }
 
 @test "capability manifest validates and derives engine consumers with env seams" {
-    run bash -c 'node "$TOOLS_HOME/lib/tools/validate-json.mjs" "$TOOLS_HOME/schemas/capabilities-v1.json" \
+    run bash -c 'node "$TOOLS_HOME/lib/tools/validate-json.ts" "$TOOLS_HOME/schemas/capabilities-v1.json" \
       < "$TOOLS_HOME/config/capabilities.json"'
     [ "$status" -eq 0 ]
 
     MCP_HOME="$BATS_TEST_TMPDIR/mcp" EDU_MCP_HOME="$BATS_TEST_TMPDIR/edu" \
       LIFE_MCP_HOME="$BATS_TEST_TMPDIR/life" \
-      run node "$TOOLS_HOME/lib/tools/capabilities.mjs" paths engine_consumer
+      run node "$TOOLS_HOME/lib/tools/capabilities.ts" paths engine_consumer
     [ "$status" -eq 0 ]
     [ "$output" = "$BATS_TEST_TMPDIR/mcp
 $BATS_TEST_TMPDIR/edu
 $BATS_TEST_TMPDIR/life" ]
 
     MCP_HOME="$BATS_TEST_TMPDIR/mcp" run node --input-type=module -e '
-      import { repositoryEntries } from "./lib/tools/capabilities.mjs";
+      import { repositoryEntries } from "./lib/tools/capabilities.ts";
       const mcp = repositoryEntries().find((entry) => entry.id === "severino-vault-mcp");
       if (mcp.path !== process.env.MCP_HOME) process.exit(1);
     '
@@ -81,7 +81,7 @@ $BATS_TEST_TMPDIR/life" ]
 }
 
 @test "contract graph validates, fingerprints owners, and checks declared projections" {
-    run bash -c 'node "$TOOLS_HOME/lib/tools/validate-json.mjs" "$TOOLS_HOME/schemas/contract-graph-v1.json" \
+    run bash -c 'node "$TOOLS_HOME/lib/tools/validate-json.ts" "$TOOLS_HOME/schemas/contract-graph-v1.json" \
       < "$TOOLS_HOME/config/contracts.json"'
     [ "$status" -eq 0 ]
 
@@ -99,7 +99,7 @@ $BATS_TEST_TMPDIR/life" ]
 
     run node --input-type=module -e '
       import fs from "node:fs";
-      import { repositoryCapability } from "./lib/tools/capabilities.mjs";
+      import { repositoryCapability } from "./lib/tools/capabilities.ts";
       const graph = JSON.parse(fs.readFileSync("config/contracts.json"));
       const edge = graph.projections.find((item) => item.id === "hq.frontmatter-schema");
       const source = graph.contracts.find((item) => item.id === edge.contract).source;
@@ -120,7 +120,7 @@ JSON
     TOOLS_CONTRACT_GRAPH="$graph" MCP_HOME="$repo" run "$TOOLS_HOME/bin/tools" derive fixture.output --json
     [ "$status" -eq 0 ]
     [ ! -e "$repo/derived.txt" ]
-    [[ "$output" == *'"status":"planned"'* ]]
+    [[ "$output" == *'"status":"planned"'* ]] || return 1
 
     TOOLS_CONTRACT_GRAPH="$graph" MCP_HOME="$repo" run "$TOOLS_HOME/bin/tools" derive fixture.output --go --json
     [ "$status" -eq 0 ]

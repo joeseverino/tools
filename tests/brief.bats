@@ -87,11 +87,11 @@ assert pr["green-app"]["review"]=="approved", pr
 @test "render: a stale branch_state surfaces as a rebranch row (consumes the owner)" {
     payload='{"repos":{"repos":[{"name":"old-app","pm":"npm","branch_state":"stale"}]}}'
     # json digest carries the stale repo
-    run bash -c 'printf "%s" "$1" | node "$TOOLS_HOME/lib/brief/render.mjs" json 1' _ "$payload"
+    run bash -c 'printf "%s" "$1" | node "$TOOLS_HOME/lib/brief/render.ts" json 1' _ "$payload"
     [ "$status" -eq 0 ]
     echo "$output" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["repos"]["stale"]==["old-app"], d["repos"]'
     # human briefing names the recovery verb
-    run bash -c 'printf "%s" "$1" | node "$TOOLS_HOME/lib/brief/render.mjs" human 1' _ "$payload"
+    run bash -c 'printf "%s" "$1" | node "$TOOLS_HOME/lib/brief/render.ts" human 1' _ "$payload"
     [ "$status" -eq 0 ]
     grep -qF "ship old-app --rebranch --go" <<<"$output"
 }
@@ -105,7 +105,7 @@ assert pr["green-app"]["review"]=="approved", pr
 
 @test "daily render: logs the day's commits + shipped work, drops empty sections" {
     activity='{"commits":[{"repo":"tools","subjects":["feat: daily note","fix: route die to stderr"]}],"closed":[{"doc_id":"task-foo","title":"Fix the foo","project":"tools"}]}'
-    run bash -c 'printf "%s" "$1" | node "$TOOLS_HOME/lib/brief/daily.mjs" 2026-06-25' _ "$activity"
+    run bash -c 'printf "%s" "$1" | node "$TOOLS_HOME/lib/brief/daily.ts" 2026-06-25' _ "$activity"
     [ "$status" -eq 0 ]
     # one chained assertion (bats 1.13 gates only the last command): header with
     # the count summary, a repo-prefixed commit line, the shipped task as a link.
@@ -118,9 +118,22 @@ assert pr["green-app"]["review"]=="approved", pr
 }
 
 @test "daily render: a quiet day is just the header" {
-    run bash -c 'printf "%s" "{\"commits\":[],\"closed\":[]}" | node "$TOOLS_HOME/lib/brief/daily.mjs" 2026-06-25'
+    run bash -c 'printf "%s" "{\"commits\":[],\"closed\":[]}" | node "$TOOLS_HOME/lib/brief/daily.ts" 2026-06-25'
     [ "$status" -eq 0 ]
     grep -qF 'nothing recorded yet' <<<"$output" && ! grep -q 'Commits' <<<"$output"
+}
+
+# plug_section <command...> — a capability manifest declaring one repository
+# whose brief_section is the given argv.
+plug_section() {
+    mkdir -p "$BATS_TEST_TMPDIR/code/garden"
+    export CODE_HOME="$BATS_TEST_TMPDIR/code"
+    export TOOLS_CAPABILITIES="$BATS_TEST_TMPDIR/capabilities.json"
+    python3 - "$@" > "$TOOLS_CAPABILITIES" <<'PY'
+import json, sys
+print(json.dumps({"capabilities_version": 1, "repositories": [
+    {"id": "garden", "path": "garden", "brief_section": sys.argv[1:]}]}))
+PY
 }
 
 @test "a plugged section folds into digest, briefing, and the next block" {
@@ -130,7 +143,7 @@ assert pr["green-app"]["review"]=="approved", pr
 printf '%s\n' '{"name":"garden","lines":[{"label":"attention","value":"ferns need water (3d overdue)","warn":true},{"label":"beds","value":"4 planted"}],"next":[{"label":"water","value":"garden water   (1 needs attention)"}],"queue":[{"sev":88,"subject":"ferns 3d overdue","why":"water them","action":{"label":"water","cmd":"garden water","effect":"read"}}]}'
 SH
     chmod +x "$BATS_TEST_TMPDIR/garden-brief"
-    export BRIEF_SECTION_EMITTERS="$BATS_TEST_TMPDIR/garden-brief"
+    plug_section "$BATS_TEST_TMPDIR/garden-brief"
 
     run brief_bin --json
     [ "$status" -eq 0 ]
@@ -149,12 +162,12 @@ PY
 
 @test "absent or failing section emitters degrade to the classic briefing" {
     setup_brief_fleet
-    export BRIEF_SECTION_EMITTERS="/nonexistent-emitter --json"
+    plug_section /nonexistent-emitter --json
     run brief_bin --json
     [ "$status" -eq 0 ]
     OUTPUT="$output" python3 - <<'PY'
 import json, os
 d = json.loads(os.environ["OUTPUT"])
-assert "sections" not in d
+assert not d.get("sections")
 PY
 }

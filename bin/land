@@ -46,9 +46,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Fleet PR state from its one owner (repos --prs), projected to the fields land
-# acts on (lib/land/plan.mjs over the shared repos/project.mjs reader): only
+# acts on (lib/land/plan.ts over the shared repos/project.ts reader): only
 # repos with an OPEN PR, as name<TAB>path<TAB>number<TAB>ci<TAB>url.
-plan="$(GH_BIN="$GH_BIN" repos --json --prs ${NAME:+"$NAME"} 2>/dev/null | node "$TOOLS_HOME/lib/land/plan.mjs")"
+plan="$(GH_BIN="$GH_BIN" repos --json --prs ${NAME:+"$NAME"} 2>/dev/null | node "$TOOLS_HOME/lib/land/plan.ts")"
 
 if [[ -z "$plan" ]]; then
     header "land" 0

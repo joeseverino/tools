@@ -1,7 +1,9 @@
 # Architecture
 
-The personal CLI toolchain: small bash/zsh/node tools that share one look and
-feel, one help/JSON contract, and one set of drift guards. This doc is the map;
+The personal CLI toolchain: small bash/zsh tools with TypeScript modules under
+`lib/`, sharing one look and feel and one help/JSON contract. It owns nothing
+another system owns: infrastructure is HQ's, publishing is the site repo's, and
+vault writes are the MCP's. This doc is the map;
 [`command-surface-contract.md`](command-surface-contract.md) is the deep dive on
 the contract that ties them together. House rules for editing live in
 [`../AGENTS.md`](../AGENTS.md).
@@ -11,11 +13,11 @@ the contract that ties them together. House rules for editing live in
 | Dir | What |
 |---|---|
 | `bin/` | Exactly one executable per tool, nothing else. `tools install`, `tools describe`, `tools doctor`, and CI discover tools by globbing `bin/*`. |
-| `lib/` | Stable narrow SDK modules under `lib/sdk/`; `common.sh` as the compatibility aggregator; shared engines (`describe.sh`, `tui.mjs`); tool-specific support under `lib/<tool>/`. |
+| `lib/` | Stable narrow SDK modules under `lib/sdk/`; `common.sh` as the compatibility aggregator; shared engines (`describe.sh`, `tui.ts`); tool-specific support under `lib/<tool>/`. |
 | `config/` | Per-tool defaults from layout env vars. `*.example` are templates; their gitignored copies are user-specific. |
 | `schemas/` | Machine-enforced cross-tool contracts. Runtime verification inputs, not prose documentation. |
-| `tests/` | Hermetic bats suite — throwaway keys, tmpdirs, no Keychain. |
-| `bench/` | Every measured README claim has a script here; they run in CI. |
+| `tests/` | Hermetic bats suite: tmpdirs and stubbed binaries, never the network. CI runs it. |
+| `bench/` | Every measured README claim has a script here; `tools check` runs them. |
 | `docs/` | This map, the contract deep-dive, and `docs/diagrams/` (mermaid sources + rendered PNGs). |
 
 ## The emit-once command surface
@@ -57,16 +59,17 @@ rejects missing metadata and duplicate positions. Every command also carries an
 
 Tools' shared mechanics are a small SDK for this repo, sibling repos, one-off
 scripts, and agent utilities. Shell consumers import `lib/sdk/core.sh`,
-`lib/sdk/svmc.sh`, or `lib/sdk.sh`; Node consumers import `lib/sdk/process.mjs`,
-`result.mjs`, and `svmc.mjs`. Existing commands keep sourcing `common.sh`, which
+`lib/sdk/svmc.sh`, or `lib/sdk.sh`; Node consumers import `lib/sdk/process.ts`,
+`result.ts`, and `svmc.ts`. Existing commands keep sourcing `common.sh`, which
 is now only a compatibility aggregator over those narrow modules.
 
 Structured utilities use the versioned `result-v1` envelope. Fleet capabilities
 (describe/brief emitters, engine consumers, schema and install surfaces) live in
-`config/capabilities.json` and are derived by `capabilities.mjs`; on-disk fleet
-state remains owned by `repos --json`. Operational credentials are requested by
-logical id through `lib/sdk/secrets.sh`; `schemas/secrets-v1.json` is the one
-registry contract and the provider references never leak into callers. See
+`config/capabilities.json` and are derived by `capabilities.ts`; on-disk fleet
+state remains owned by `repos --json`. The registry also declares how each
+repository installs and how it reports its fingerprint, which drives `tools
+reinstall` and the installed-matches-source check in `tools doctor`. The
+toolchain holds no credentials (see [`../SECURITY.md`](../SECURITY.md)). See
 [`SDK.md`](SDK.md).
 
 Cross-repository SSOT relationships live in `config/contracts.json`. The graph
@@ -96,24 +99,22 @@ every command before it pulls the trigger." See
 [`command-surface-contract.md`](command-surface-contract.md) for the effect
 model and the scoped-lookup AI path.
 
-## Drift-guard family
+## HQ, not a second copy
 
-`ts-acl`, `cf-dns`, `adguard`, and `nginx` are one tool wearing four hats:
-`lib/drift.sh` is the shared core (`drift_main`), and each guard supplies only
-`get_token` / `fetch_live` / `normalize` + config. They expose the same
-`show` / `diff` / `pull` surface (declared once in `drift_describe_commands`, so
-all four inherit it — including their effects). Each guard owns a
-`DRIFT_DATASET_ID`; a `pull` writes the live state through the MCP's
-`infra-write` (one call that writes the dataset's JSON cache, regenerates the
-doc's table, and stamps `last_reviewed`), and `diff` reads the cache via `infra`.
-The dataset and its render columns are declared once in the vault's
-infra-dataset registry.
+Infrastructure facts (DNS records and rewrites, proxy hosts, the tailnet
+policy, certificates, containers) belong to Severino HQ, which reads them from
+each provider and reconciles what it declares. The toolchain reaches HQ through
+`lib/hq-call`, HQ's own MCP tool contract carried over SSH with the operator's
+certificate: `hq call <tool> [json]` exposes every capability, and `hq drift`
+reads HQ's reconciliation verdict (what has moved past its last applied
+declaration, or gone unhealthy). `tools doctor --live` gates on it. Nothing here
+fetches a provider or keeps a cache of one.
 
 ## The MCP boundary
 
 We own `severino-vault-mcp` but call it as a plain, schema-validated CLI — never
 hand-editing vault frontmatter or shelling out to `yq`. Shell and Node callers
-go through `lib/sdk/svmc.sh` and `lib/sdk/svmc.mjs`, respectively; both set the
+go through `lib/sdk/svmc.sh` and `lib/sdk/svmc.ts`, respectively; both set the
 vault path and binary override consistently. The MCP is the one
 canonical writer and the one canonical frontmatter schema (`hq schema`
 regenerates HQ's copy from it). It emits the **same `describe` contract** this
@@ -122,9 +123,8 @@ repo defines (a subset + the shared `schema_version` and `effect`), so
 
 ## Verification
 
-`tools check` runs everything CI runs: shebang-driven `bash -n` / `zsh -n` /
-`node --check`, shellcheck, the bats suite, and the bench assertions
-(`--no-bench` skips the slow step). `tools doctor --all` is the cross-system
-rollup (hq doctor, hq schema --check, site doctor); `--live` adds the drift
-guards (network + 1Password approval). `tools status --json` / `tools doctor --json` give
-machine-readable state.
+`tools check` runs everything CI runs (`bash -n` / `zsh -n`, the strict
+TypeScript type-check, shellcheck, contract validation, the bats suite) plus the
+bench assertions (`--no-bench` skips them). `tools doctor --all` is the
+cross-system rollup (`hq doctor`); `--live` adds `hq drift`. `tools status
+--json` / `tools doctor --json` give machine-readable state.

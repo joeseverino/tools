@@ -5,13 +5,12 @@
 # The single source of truth for a tool's surface is one function it defines:
 #
 #     describe_spec() {
-#         desc_tool "encrypt" "Encrypt files to your default age public key."
-#         desc_synopsis "encrypt [options] <file>..."
-#         desc_opt -c --copy             -- "Keep the original file (encrypt a copy)"
-#         desc_opt -k --key PATH +repeat -- "Add another public key as a recipient"
-#         desc_pos file +variadic        -- "File(s) to encrypt"
-#         desc_env KEYS_HOME             -- "Read from ~/.zshrc; resolves AGE_PUBKEY"
-#         desc_example "encrypt notes.md" -- "original removed"
+#         desc_tool "diagram" "Render Mermaid .mmd sources to neighboring PNG files."
+#         desc_synopsis "diagram <path>..."
+#         desc_effect local_write
+#         desc_pos path +variadic        -- "Mermaid source file or directory"
+#         desc_env DIAGRAM_BRAND_KIT     -- "Brand kit directory override"
+#         desc_example "diagram docs/diagrams/" -- "render every source there"
 #     }
 #
 # From that one declaration, two pure renderers derive every view — no prose is
@@ -342,7 +341,7 @@ describe_render_usage() {
         [[ -n "$_D_DESC" ]] && printf '\n%s\n' "$_D_DESC"
     fi
 
-    # Effect line for a leaf tool (tool-level scope) — e.g. encrypt is a
+    # Effect line for a leaf tool (tool-level scope) — e.g. diagram is a
     # local_write. Command tools leave this at the default read and show nothing.
     _describe_render_effect_line ""
 
@@ -813,8 +812,8 @@ describe_render_json() {
     fi
     out+=$(printf ',"commands":[%s]}' "$cmds")
 
-    if (( pretty )) && command -v python3 >/dev/null 2>&1; then
-        printf '%s\n' "$out" | python3 -m json.tool
+    if (( pretty )); then
+        printf '%s\n' "$out" | jq --indent 4 .
     else
         printf '%s\n' "$out"
     fi
@@ -864,7 +863,7 @@ describe_emit() {
 # Leaf vs subcommand is read from the spec itself (does it declare any desc_cmd?),
 # so adding or removing a subcommand re-routes dispatch with no second edit. A
 # leaf's bare / `help` invocation is the tool's own to define (`backup` runs,
-# `encrypt` errors with its usage), so the intercept deliberately does NOT claim
+# `diagram` errors with its usage), so the intercept deliberately does NOT claim
 # those for a leaf — only the unambiguous -h/--help/--describe meta-flags.
 desc_help_intercept() {
     # Meta-flags are universal — unambiguous for every tool, leaf or subcommand.
@@ -913,7 +912,7 @@ _describe_has_command() {
 # warning, derived from the same `desc_effect` line that feeds -h / the README /
 # the agent JSON, never hand-wired per command. A `deploy` (the top of the
 # read→deploy ladder — it ships to prod) requires an explicit confirmation, so a
-# stray `hq ship` / `site deploy` can't fire by accident, by hand OR by an agent.
+# stray `hq ship` / `hq restart` can't fire by accident, by hand OR by an agent.
 # Bypass with TOOLS_ASSUME_YES=1 (intentional automation / CI); a non-interactive
 # shell without it fails closed rather than deploying blind. Every tool inherits
 # this for free — it runs from the one intercept they already call, so a new
@@ -921,10 +920,9 @@ _describe_has_command() {
 desc_guard_effect() {
     local cmd="$1"   # a command name for a subcommand tool, or "" = the leaf tool itself
     shift || true
-    # No spec means no declared effect (defaults to read) — nothing to gate. Also
-    # keeps lib/drift.sh's hermetic test harness, which overrides usage() and
-    # never declares describe_spec, working unchanged. `-f` not `-F`: zsh's `-F`
-    # is float, not function-exists (see desc_help_intercept).
+    # No spec means no declared effect (defaults to read) — nothing to gate.
+    # `-f` not `-F`: zsh's `-F` is float, not function-exists (see
+    # desc_help_intercept).
     declare -f describe_spec >/dev/null || return 0
     describe_reset
     describe_spec

@@ -113,8 +113,8 @@ vault_inbox() {
 # across the fleet + work shipped. A daily note is retrospective (the cockpit
 # shows pending work; this shows the record). The chain keeps owners intact:
 # repos --json owns the repo list, backlog --json --all owns the task ledger →
-# daily-gather.mjs folds each repo's commit log for the date + the day's closures
-# → daily.mjs renders → svmc daily-write writes the marked region atomically.
+# daily-gather.ts folds each repo's commit log for the date + the day's closures
+# → daily.ts renders → svmc daily-write writes the marked region atomically.
 vault_daily() {
     local date=""
     while [[ $# -gt 0 ]]; do
@@ -131,9 +131,9 @@ vault_daily() {
     repos_json="$(repos --json 2>/dev/null)"      || die "error" "repos --json failed"
     board="$(backlog --json --all 2>/dev/null)"   || board='{"tasks":[]}'
     activity="$(printf '{"date":"%s","repos":%s,"board":%s}' "$day" "$repos_json" "$board" \
-        | node "$TOOLS_HOME/lib/brief/daily-gather.mjs" "$day")" \
+        | node "$TOOLS_HOME/lib/brief/daily-gather.ts" "$day")" \
         || die "error" "gathering the day's activity failed"
-    block="$(printf '%s' "$activity" | node "$TOOLS_HOME/lib/brief/daily.mjs" "$day")" \
+    block="$(printf '%s' "$activity" | node "$TOOLS_HOME/lib/brief/daily.ts" "$day")" \
         || die "error" "rendering the daily block failed"
 
     local write_args=()
