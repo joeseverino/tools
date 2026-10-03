@@ -294,7 +294,7 @@ _tools_suite_contract() {
         'board:The default board, grouped by project'
         'list:Flat list view (same filters as the board)'
         'stale:Open/active tasks untouched past the stale window — the review nudge'
-        'add:Capture a new task (delegates to the MCP'\''s add_task)'
+        'add:Capture a new task (delegates to severino-vault-mcp task-add)'
         'move:Transition a task to a new status (stamps closed: on done)'
         'close:Shorthand for '\''move <id> done'\'''
       )

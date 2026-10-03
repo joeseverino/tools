@@ -64,12 +64,11 @@ load helpers
       < "$TOOLS_HOME/config/capabilities.json"'
     [ "$status" -eq 0 ]
 
-    MCP_HOME="$BATS_TEST_TMPDIR/mcp" EDU_MCP_HOME="$BATS_TEST_TMPDIR/edu" \
+    MCP_HOME="$BATS_TEST_TMPDIR/mcp" \
       LIFE_MCP_HOME="$BATS_TEST_TMPDIR/life" \
       run node "$TOOLS_HOME/lib/tools/capabilities.ts" paths engine_consumer
     [ "$status" -eq 0 ]
     [ "$output" = "$BATS_TEST_TMPDIR/mcp
-$BATS_TEST_TMPDIR/edu
 $BATS_TEST_TMPDIR/life" ]
 
     MCP_HOME="$BATS_TEST_TMPDIR/mcp" run node --input-type=module -e '

@@ -8,26 +8,65 @@
     {
       "id": "severino-vault-mcp",
       "path": "Assets/severino-vault-mcp",
-      "describe": ["severino-vault-mcp", "describe"],
+      "describe": [
+        "severino-vault-mcp",
+        "describe"
+      ],
       "engine_consumer": true,
-      "install": ["uv", "tool", "install", ".", "--force", "--reinstall"],
-      "fingerprint": { "installed": ["severino-vault-mcp", "--fingerprint"], "source": ["uv", "run", "--quiet", "--project", ".", "severino-vault-mcp", "--fingerprint"] },
-      "schema_contract": ["severino-vault-mcp", "schema", "--contract"],
-      "schema_fingerprint": ["severino-vault-mcp", "schema", "--fingerprint"]
-    },
-    {
-      "id": "severino-edu-mcp",
-      "path": "Assets/severino-edu-mcp",
-      "engine_consumer": true,
-      "install": ["uv", "tool", "install", ".", "--force", "--reinstall"]
+      "install": [
+        "uv",
+        "tool",
+        "install",
+        ".[life]",
+        "--force",
+        "--reinstall"
+      ],
+      "fingerprint": {
+        "installed": [
+          "severino-vault-mcp",
+          "--fingerprint"
+        ],
+        "source": [
+          "uv",
+          "run",
+          "--quiet",
+          "--project",
+          ".",
+          "severino-vault-mcp",
+          "--fingerprint"
+        ]
+      },
+      "schema_contract": [
+        "severino-vault-mcp",
+        "schema",
+        "--contract"
+      ],
+      "schema_fingerprint": [
+        "severino-vault-mcp",
+        "schema",
+        "--fingerprint"
+      ]
     },
     {
       "id": "severino-life",
       "path": "Assets/severino-life",
-      "describe": ["life", "describe"],
-      "brief_section": ["life", "brief-section"],
+      "describe": [
+        "life",
+        "describe"
+      ],
+      "brief_section": [
+        "life",
+        "brief-section"
+      ],
       "engine_consumer": true,
-      "install": ["uv", "tool", "install", ".", "--force", "--reinstall"]
+      "install": [
+        "uv",
+        "tool",
+        "install",
+        ".",
+        "--force",
+        "--reinstall"
+      ]
     }
   ]
 }

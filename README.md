@@ -674,7 +674,7 @@ A task lives with its project under 01 Projects/<project>/tasks/, or in 07 Backl
 | `backlog board` | `--json`<br>`--status <S>`<br>`--project <P>`<br>`--stale`<br>`--all` | `read` | The default board, grouped by project |
 | `backlog list` | `--json`<br>`--status <S>`<br>`--project <P>`<br>`--all` | `read` | Flat list view (same filters as the board) |
 | `backlog stale` | `--days <N>`<br>`--json` | `read` | Open/active tasks untouched past the stale window — the review nudge |
-| `backlog add <title>...` | `<title>...`<br>`--project <P>`<br>`--effort <E>`<br>`--priority <P>`<br>`--related-projects <PROJECTS>` | `vault_write` | Capture a new task (delegates to the MCP's add_task) |
+| `backlog add <title>...` | `<title>...`<br>`--project <P>`<br>`--effort <E>`<br>`--priority <P>`<br>`--related-projects <PROJECTS>` | `vault_write` | Capture a new task (delegates to severino-vault-mcp task-add) |
 | `backlog move <id> <status>` | `<id>`<br>`<status>` | `vault_write` | Transition a task to a new status (stamps closed: on done) |
 | `backlog close <id>` | `<id>` | `vault_write` | Shorthand for 'move <id> done' |
 

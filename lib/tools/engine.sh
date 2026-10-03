@@ -10,7 +10,7 @@
 # faces.
 
 # engine_consumers — print the consumer repo paths, one per line. The env
-# seams MCP_HOME / EDU_MCP_HOME / LIFE_MCP_HOME (lib/tools/capabilities.ts)
+# seams MCP_HOME / LIFE_MCP_HOME (lib/tools/capabilities.ts)
 # let the bats suite point at fixtures, else the sibling checkouts resolve.
 engine_consumers() {
     node "$TOOLS_HOME/lib/tools/capabilities.ts" paths engine_consumer
