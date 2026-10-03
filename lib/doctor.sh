@@ -70,18 +70,13 @@ gate() {
 doctor_gates() {
     local fail=0
     gate "hq doctor"   "$TOOLS_HOME/bin/hq" doctor         || fail=1
-    gate "site doctor" "$TOOLS_HOME/bin/site" doctor       || fail=1
     return "$fail"
 }
 
-# Live gates — drift guards hit real APIs (network + 1Password approval), so they only
-# run when explicitly asked for (`tools doctor --live`).
+# Live gates read HQ's own reconciliation verdict over SSH, so they run only
+# when asked for (`tools doctor --live`).
 doctor_live_gates() {
-    local fail=0
-    gate "cf-dns drift"  "$TOOLS_HOME/bin/cf-dns"  diff || fail=1
-    gate "adguard drift" "$TOOLS_HOME/bin/adguard" diff || fail=1
-    gate "ts-acl drift"  "$TOOLS_HOME/bin/ts-acl"  diff || fail=1
-    return "$fail"
+    gate "hq drift" "$TOOLS_HOME/bin/hq" drift
 }
 
 # doctor_finish <fail> — one JSON object or the colored verdict; returns

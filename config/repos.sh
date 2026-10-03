@@ -8,5 +8,4 @@
 REPOS_LOCAL_OK=(
     Backups
     screencasts
-    fitness-dashboard
 )

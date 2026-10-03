@@ -10,10 +10,10 @@ SDK standardizes mechanics; it never owns domain vocabulary.
 schemas/                 language-neutral contracts
 lib/sdk/core.sh          shell output, errors, JSON scalars, result envelopes
 lib/sdk.sh               shell command runtime (core + Cordon emitter)
-lib/sdk/process.mjs      argument-safe sync/async process execution
-lib/sdk/result.mjs       result-v1 constructors and rendering
-lib/sdk/svmc.{sh,mjs}    governed vault CLI crossing
-lib/sdk/secrets.sh       logical secret ids, schema validation, provider crossing
+lib/sdk/process.ts       argument-safe sync/async process execution
+lib/sdk/result.ts        result-v1 constructors and rendering
+lib/sdk/svmc.{sh,ts}     governed vault CLI crossing
+lib/sdk/paths.ts         CODE_HOME and TOOLS_HOME, derived once
 config/capabilities.json fleet capability declarations
 config/contracts.json    producer → consumer contract graph
 ```
@@ -47,26 +47,25 @@ receipt, and next-action fields without every script inventing an envelope.
 ## Node utility
 
 ```js
-import { runJson } from './lib/sdk/process.mjs';
-import { success, failure, writeResult } from './lib/sdk/result.mjs';
+import { runJson } from './lib/sdk/process.ts';
+import { success, failure, writeResult } from './lib/sdk/result.ts';
 
 const result = runJson('some-command', ['--json']);
 writeResult(result.ok ? success(result.json) : failure('command_failed', result.error));
 ```
 
-Use `svmc(args)` from `lib/sdk/svmc.mjs` for vault governance. It owns binary
+Use `svmc(args)` from `lib/sdk/svmc.ts` for vault governance. It owns binary
 selection, vault-path propagation, argument-safe execution, JSON parsing, and
 the MCP `{ok,error}` convention.
 
-Shell consumers use `secret_read <logical-id>` from `lib/sdk/secrets.sh`; the
-versioned `schemas/secrets-v1.json` contract validates the registry before any
-provider call. Callers never know a vault name, item name, or provider URI.
+The SDK holds no credentials. Anything that needs one goes to the system that
+owns it: HQ through `hq call`, a secret through 1Password at the point of use.
 
 ## Capability registry
 
 `config/capabilities.json` declares repository capabilities once: describe and
 brief emitters, engine consumers, install commands, and schema surfaces.
-`lib/tools/capabilities.mjs` derives federation and fleet operations from it.
+`lib/tools/capabilities.ts` derives federation and fleet operations from it.
 Repository discovery (`repos --json`) remains the owner of actual on-disk fleet
 state; the manifest declares capabilities, not inventory.
 

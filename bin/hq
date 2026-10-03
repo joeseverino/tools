@@ -66,10 +66,17 @@ describe_spec() {
     desc_example "hq create project my-site --name \"My Site\" --category cloudflare --status published --url https://example.com"
     desc_example "hq create asset example-com --name \"example.com\" --category domain"
 
-    desc_cmd deploy    -- "RETIRED — refuses. It shipped the host-only image and dropped every admitted extension off production. Landing on main IS the deploy"
-    desc_effect read
-    desc_cmd pin       -- "RETIRED — refuses. It set HQ_COMMIT on every plugin; that variable must not exist, and deleting it is the fix"
-    desc_effect read
+    desc_cmd call      -- "Call one HQ tool as the operator: the MCP tool contract, JSON arguments in, the tool's JSON result out"
+    desc_effect remote_write +network
+    desc_pos tool      -- "HQ tool name (list them: hq call describe_capabilities)"
+    desc_pos arguments +optional -- "Tool arguments as one JSON object (default: {})"
+    desc_para "The same surface agents reach over MCP, reached over the host shell with the operator's own SSH certificate. A tool that writes is gated by HQ exactly as it is over MCP, including changes held for approval."
+    desc_example "hq call list_managed_resources '{\"limit\":20}'" -- "what HQ manages"
+
+    desc_cmd drift     -- "List managed resources HQ reports out of sync or unhealthy; exit 1 when any are"
+    desc_effect read +network
+    desc_opt --json    -- "Print the drifted resources as JSON"
+    desc_para "HQ reconciles what it declares against what each provider reports. This reads that verdict; it never reads a provider itself."
 
     desc_cmd ship      -- "Commit + push a small HQ change. The push IS the deploy: it triggers the gated pipeline (build → scan → deploy on green)"
     desc_effect deploy +network
@@ -117,7 +124,7 @@ describe_spec() {
 
 require_manifest_mcp() {
     svmc_available \
-        || die "error" "severino-vault-mcp is required; run \`site reinstall-mcp\`"
+        || die "error" "severino-vault-mcp is required; run \`tools reinstall severino-vault-mcp\`"
 }
 
 build_manifest() {
@@ -125,7 +132,7 @@ build_manifest() {
     local help
     help="$(svmc --help 2>&1 || true)"
     if [[ "$help" != *"hq-manifest"* ]]; then
-        die "error" "installed severino-vault-mcp is outdated; run \`site reinstall-mcp\`"
+        die "error" "installed severino-vault-mcp is outdated; run \`tools reinstall severino-vault-mcp\`"
     fi
     # Dir list is the MCP's to derive (indexed_dirs + slim content dirs) — the
     # HQ_VAULT_DIRS second hand-kept copy is retired.
@@ -139,6 +146,48 @@ hq_call() {
     local call="${HQ_CALL:-$TOOLS_HOME/lib/hq-call}"
     [[ -x "$call" ]] || die "error" "HQ call transport is unavailable: $call"
     "$call"
+}
+
+cmd_call() {
+    local tool="${1:-}" arguments="${2:-}" request
+    [[ -n "$tool" ]] || { usage_command call; return 0; }
+    [[ "$tool" =~ ^[a-z][a-z0-9_]*$ ]] || die "usage" "not an HQ tool name: $tool" 2
+    [[ $# -le 2 ]] || die "usage" "hq call <tool> ['{json}']" 2
+    [[ -n "$arguments" ]] || arguments='{}'
+    request="$(jq -cn --arg tool "$tool" --argjson arguments "$arguments" \
+        'if ($arguments | type) == "object" then {tool:$tool, arguments:$arguments} else error end' 2>/dev/null)" \
+        || die "usage" "arguments must be one JSON object" 2
+    hq_call <<<"$request"
+}
+
+cmd_drift() {
+    local json=0
+    case "${1:-}" in "") ;; --json) json=1 ;; *) die_unknown flag "$1" drift ;; esac
+    local result drifted count
+    result="$(jq -cn '{tool:"list_managed_resources",arguments:{limit:1000}}' | hq_call)" \
+        || die "error" "HQ did not answer list_managed_resources"
+    jq -e '.items | type == "array"' <<<"$result" >/dev/null 2>&1 \
+        || die "error" "HQ's list_managed_resources answer has no items"
+    # A declared-only record (a machine, a delivery target) is kept, never
+    # reconciled, so it cannot drift. Anything HQ reconciles drifts when it is
+    # unhealthy or when its declaration moved past what was last applied.
+    drifted="$(jq -c '[.items[] | select(.enabled and .health.state != "declared")
+        | select((.in_sync | not) or .health.state != "healthy")
+        | {key, kind, in_sync, health: .health.label,
+           reason: (if .in_sync then (.health.message // "")
+                    else "declared generation \(.generation), last applied \(.observed_generation)" end)}]' <<<"$result")"
+    count="$(jq 'length' <<<"$drifted")"
+    if (( json )); then
+        printf '%s\n' "$drifted"
+    elif (( count == 0 )); then
+        msg "$GREEN" "drift" "every resource HQ reconciles is in sync ($(jq '[.items[] | select(.enabled and .health.state != "declared")] | length' <<<"$result") checked)"
+    else
+        jq -r '.[] | "\(.kind)\t\(.key)\t\(.health)\t\(.reason)"' <<<"$drifted" \
+            | while IFS=$'\t' read -r kind key health reason; do
+                msg "$YELLOW" "$kind" "$key ${DIM}$health${reason:+ · $reason}${RESET}"
+            done
+    fi
+    (( count == 0 ))
 }
 
 require_hq_admin() {
@@ -325,7 +374,7 @@ cmd_schema() {
 
     require_manifest_mcp
     if ! svmc schema --json >/dev/null 2>&1; then
-        die "error" "installed severino-vault-mcp lacks \`schema\`; run \`site reinstall-mcp\`"
+        die "error" "installed severino-vault-mcp lacks \`schema\`; run \`tools reinstall severino-vault-mcp\`"
     fi
 
     local dest="$HQ_LOCAL_PATH/docs_index/schema.json"
@@ -416,63 +465,7 @@ cmd_sync() {
     fi
     stats_json="$(jq -c '.documentation.stats' <<<"$result_json")"
 
-    python3 - "$tmp" "$stats_json" "$prune" <<'PY'
-import json
-import sys
-
-manifest_path, raw_stats, prune_flag = sys.argv[1:4]
-manifest = json.load(open(manifest_path, encoding="utf-8"))
-stats = json.loads(raw_stats)
-prune = prune_flag == "1"
-
-created = stats.get("created", 0)
-updated = stats.get("updated", 0)
-doc_pruned = stats.get("orphans_pruned", 0)
-content_synced = stats.get("content_items_synced", 0)
-content_pruned = stats.get("content_items_pruned", 0)
-missing = stats.get("missing_relations", 0)
-orphans = stats.get("orphans") or []
-
-print(f"Docs      {len(manifest)} indexed")
-
-changes = []
-if created:
-    changes.append(f"{created} created")
-if updated:
-    changes.append(f"{updated} updated")
-if doc_pruned:
-    changes.append(f"{doc_pruned} removed")
-print(f"Changes   {', '.join(changes) if changes else 'none'}")
-
-if missing:
-    print(f"Relations {missing} missing")
-    for item in stats.get("missing_relations_detail", [])[:8]:
-        print(f"          {item['doc_id']} → missing {item['kind']} {item['slug']}")
-else:
-    print("Relations ok")
-
-content = []
-if content_synced:
-    content.append(f"{content_synced} mirrored")
-if content_pruned:
-    content.append(f"{content_pruned} stale removed")
-print(f"Content   {', '.join(content) if content else 'none'}")
-
-if orphans:
-    if prune:
-        print(f"Cleanup   pruned {len(orphans)} orphan doc row(s)")
-    else:
-        print(f"Cleanup   {len(orphans)} orphan doc row(s); run `hq sync --prune`")
-        for doc_id in orphans[:8]:
-            print(f"          {doc_id}")
-else:
-    print("Cleanup   no orphans")
-
-if missing or (orphans and not prune):
-    print("Done      synced with cleanup needed")
-else:
-    print("Done      HQ is in sync")
-PY
+    node "$TOOLS_HOME/lib/hq/report.ts" sync-summary "$tmp" "$stats_json" "$prune"
 
     # Record what shipped — manifest hash plus the exact inputs — so
     # `vault status` and `hq doctor` can detect staleness deterministically
@@ -481,27 +474,7 @@ PY
     state_file="$(hq_sync_state_file)"
     mkdir -p "$(dirname "$state_file")"
     vault_head="$(git -C "$VAULT" rev-parse HEAD 2>/dev/null || echo unknown)"
-    python3 -c '
-import hashlib, json, sys
-from datetime import datetime, timezone
-
-manifest, state, vault, dirs, head = sys.argv[1:6]
-with open(manifest, "rb") as fh:
-    sha = hashlib.sha256(fh.read()).hexdigest()
-with open(state, "w", encoding="utf-8") as fh:
-    json.dump(
-        {
-            "manifest_sha256": sha,
-            "vault": vault,
-            "vault_dirs": dirs,
-            "vault_head": head,
-            "synced_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        },
-        fh,
-        indent=2,
-    )
-    fh.write("\n")
-' "$tmp" "$state_file" "$VAULT" "mcp-default" "$vault_head"
+    node "$TOOLS_HOME/lib/hq/report.ts" sync-state "$tmp" "$state_file" "$VAULT" "mcp-default" "$vault_head"
 }
 
 # Dev/prod parity for the settings that change what stored data MEANS. A
@@ -533,52 +506,7 @@ cmd_doctor_env() {
     dev="$(hq_effective_settings ${dev_semantic[@]+"${dev_semantic[@]}"})"
     prod="$(hq_effective_settings ${prod_semantic[@]+"${prod_semantic[@]}"})"
 
-    python3 - "$dev" "$prod" "$HQ_PROD_UNFORWARDED" <<'PY'
-import sys
-
-dev_raw, prod_raw, unforwarded = sys.argv[1:4]
-
-
-def parse(raw):
-    return dict(
-        line.split("=", 1) for line in raw.splitlines() if "=" in line
-    )
-
-
-dev, prod = parse(dev_raw), parse(prod_raw)
-rows = [
-    (name, dev.get(name, "(unset)"), prod.get(name, "(unset)"))
-    for name in sorted(set(dev) | set(prod))
-]
-widths = [
-    max(len(str(cell)) for cell in column)
-    for column in zip(("setting", "dev", "prod"), *rows)
-]
-mismatched = [row for row in rows if row[1] != row[2]]
-
-print()
-print("  %-*s  %-*s  %-*s  %s" % (widths[0], "setting", widths[1], "dev",
-                                  widths[2], "prod", "verdict"))
-for name, dev_value, prod_value in rows:
-    print("  %-*s  %-*s  %-*s  %s" % (
-        widths[0], name, widths[1], dev_value, widths[2], prod_value,
-        "ok" if dev_value == prod_value else "MISMATCH",
-    ))
-print()
-
-missing = [key for key in unforwarded.splitlines() if key]
-for key in missing:
-    print("  prod sets %s, which reads as data-meaning and dev does not "
-          "inherit" % key)
-    print("  fix       add it to HQ_SEMANTIC_ENV in config/hq.sh")
-if missing:
-    print()
-
-if mismatched or missing:
-    print("  dev and prod disagree about what the data means")
-    sys.exit(1)
-print("  dev matches prod on every data-meaning setting")
-PY
+    node "$TOOLS_HOME/lib/hq/report.ts" env-parity "$dev" "$prod" "$HQ_PROD_UNFORWARDED"
 }
 
 cmd_doctor() {
@@ -596,30 +524,10 @@ cmd_doctor() {
     report="$(svmc hq-manifest "$VAULT" --report 2>/dev/null)" \
         || true
     [[ -n "$report" ]] \
-        || die "error" "hq-manifest --report returned nothing; run \`site reinstall-mcp\`"
+        || die "error" "hq-manifest --report returned nothing; run \`tools reinstall severino-vault-mcp\`"
 
     local rc=0
-    printf '%s' "$report" | python3 -c '
-import json, sys
-
-r = json.load(sys.stdin)
-missing = r.get("missing_frontmatter", [])
-dups = r.get("duplicates", [])
-
-if not missing and not dups:
-    print("ok: %s indexed docs have valid frontmatter" % r.get("count", 0))
-    sys.exit(0)
-
-if dups:
-    print("%d duplicate doc_id(s):" % len(dups))
-    for d in dups:
-        print("  - %s: %s  <->  %s" % (d["doc_id"], d["first"], d["second"]))
-if missing:
-    print("%d doc(s) missing or invalid frontmatter:" % len(missing))
-    for path in missing:
-        print("  - " + path)
-sys.exit(1)
-' || rc=1
+    printf '%s' "$report" | node "$TOOLS_HOME/lib/hq/report.ts" doctor || rc=1
 
     # The other half of "the gap between vault state and HQ state": is the
     # manifest HQ holds the one the vault produces right now?
@@ -637,23 +545,7 @@ sys.exit(1)
 
 cmd_validate() {
     msg "$DIM" "validate" "HQ registry ↔ vault docs"
-    jq -cn '{tool:"audit_registry",arguments:{}}' | hq_call | python3 -c '
-import json, sys
-r = json.load(sys.stdin)
-projects = r["orphan_projects"]
-assets = r["orphan_assets"]
-print("Projects  {} total, {} with zero docs".format(r["projects_total"], len(projects)))
-for slug in projects:
-    print(f"          orphan: {slug}")
-print("Assets    {} total, {} with zero docs".format(r["assets_total"], len(assets)))
-for slug in assets:
-    print(f"          orphan: {slug}")
-print("Registry  " + (
-    "review orphans above — stale slug from a rename, or a duplicate row"
-    if projects or assets else
-    "ok — every Project and Asset is referenced by at least one doc"
-))
-'
+    jq -cn '{tool:"audit_registry",arguments:{}}' | hq_call | node "$TOOLS_HOME/lib/hq/report.ts" validate
 }
 
 cmd_create() {
@@ -668,35 +560,7 @@ cmd_create() {
 
     if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
         jq -cn '{tool:"describe_capabilities",arguments:{}}' | hq_call \
-            | python3 -c '
-import json, sys
-kind = sys.argv[1]
-catalog = json.load(sys.stdin)
-name = kind + ".upsert"
-capability = next((item for item in catalog["capabilities"] if item["name"] == name), None)
-if capability is None:
-    raise SystemExit("HQ does not advertise " + name)
-schema = capability["input_schema"]
-required = set(schema.get("required", []))
-print("Usage: hq create {} <slug> [--field value ...]".format(kind))
-print("\n" + capability["summary"] + "\n\nFields:")
-for field, spec in schema.get("properties", {}).items():
-    if field == "slug":
-        continue
-    label = "--" + field.replace("_", "-")
-    detail = []
-    if field in required:
-        detail.append("required")
-    if "default" in spec:
-        detail.append("default: {!r}".format(spec["default"]))
-    if spec.get("enum"):
-        detail.append("one of: " + ", ".join(map(str, spec["enum"])))
-    elif spec.get("format"):
-        detail.append(spec["format"])
-    elif spec.get("type"):
-        detail.append(spec["type"])
-    print("  {:28} {}".format(label, "; ".join(detail)))
-' "$kind"
+            | node "$TOOLS_HOME/lib/hq/report.ts" create-help "$kind"
         return
     fi
 
@@ -704,7 +568,7 @@ for field, spec in schema.get("properties", {}).items():
 
     local slug="$1" result
     msg "$DIM" "hq" "$kind.upsert $slug"
-    result="$(python3 "$TOOLS_HOME/lib/hq-create-request.py" "$kind" "$@" | hq_call)"
+    result="$(node "$TOOLS_HOME/lib/hq/report.ts" create-request "$kind" "$@" | hq_call)"
     if [[ "$(jq -r '.ok' <<<"$result")" != "true" ]]; then
         die "error" "$(jq -r '.error.message // "HQ operation failed"' <<<"$result")"
     fi
@@ -752,33 +616,11 @@ cmd_life_sync() {
     msg "$GREEN" "synced" "life → severino-hq"
 }
 
-# hq deploy — retired. It predates composition.
-#
-# It resolved the last green ci.yml run and deployed severino-hq:sha-..., the
-# HOST-ONLY image, while production runs severino-hq/composition:... -- the host
-# plus every admitted extension. Running it took the extensions off production
-# and whole domains stopped existing, which is the failure composition was
-# introduced to end. It refuses rather than staying available to muscle memory.
-cmd_deploy() {
-    die "error" "hq deploy is retired: it ships the host-only image and drops every admitted extension off production. Landing on main IS the deploy; to rebuild by hand run the 'Compose and deploy extensions' workflow (workflow_dispatch)."
-}
-
 # env-diff / env-apply — prod's env renders from the 1Password "severino-hq
 # env" item via severino-hq-secrets.service on the server (see the HQ repo's
 # scripts/refresh-secrets.sh). Drift reporting is key-level only: values never
 # reach stdout. Value refresh is the hourly timer's job; env-apply just runs
 # the same unit on demand.
-# hq pin — retired. It created the trap it existed to manage.
-#
-# It set HQ_COMMIT on every dev plugin, pinning the host source their test jobs
-# check out. A pin only ever goes stale, and every failure it causes reads as a
-# host bug. Unset, hq-ref falls back to main and a plugin tests against the host
-# as it actually is, which is the property the design depends on. Deleting the
-# variable is the fix, never moving it.
-cmd_pin() {
-    die "error" "hq pin is retired: HQ_COMMIT must not exist. Unset, hq-ref falls back to main and each plugin tests against the host as it is. If a plugin's CI fails on something the host plainly has, delete the pin: gh variable delete HQ_COMMIT"
-}
-
 cmd_env_diff() {
     require_hq_admin
     case "${1:-}" in "") ;; *) die_unknown flag "$1" env-diff ;; esac
@@ -979,13 +821,13 @@ case "${1:-}" in
     manifest)   shift; cmd_manifest "$@" ;;
     sync)       shift; cmd_sync "$@" ;;
     dev)        shift; cmd_dev "$@" ;;
-    pin)        shift; cmd_pin "$@" ;;
     doctor)     shift; cmd_doctor "$@" ;;
     schema)     shift; cmd_schema "$@" ;;
     validate)   shift; cmd_validate "$@" ;;
     life-sync)  shift; cmd_life_sync "$@" ;;
     create)     shift; cmd_create "$@" ;;
-    deploy)     shift; cmd_deploy "$@" ;;
+    call)       shift; cmd_call "$@" ;;
+    drift)      shift; cmd_drift "$@" ;;
     env-apply)  shift; cmd_env_apply "$@" ;;
     env-diff)   shift; cmd_env_diff "$@" ;;
     ship)       shift; cmd_ship "$@" ;;

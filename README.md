@@ -1,33 +1,33 @@
 # tools
 
-A small suite of personal CLI tools that share a common look and feel —
-colored output, aligned status lines, meaningful exit codes, and `-h`
-help on every command. Cohesive enough to feel like one program even
-though each tool is a standalone script.
+My personal macOS command-line toolchain: vault capture and sync, the
+commit-to-merge loop across every repo, HQ operations, diagrams, and PDFs. Each
+tool is one script in `bin/` that declares its command surface once, and its
+help, shell completions, the reference below, and a machine-readable spec all
+render from that declaration, each command carrying its blast radius so an
+agent can check it before acting.
 
-**Design docs:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (the repo map)
-and [`docs/command-surface-contract.md`](docs/command-surface-contract.md) (the
-emit-once `describe` contract + the effect model, with diagrams). House rules
-for editing are in [`AGENTS.md`](AGENTS.md).
+The toolchain stays thin by owning nothing another system already owns.
+Infrastructure facts belong to [Severino HQ](https://github.com/joeseverino/severino-hq),
+reached through `hq call` and `hq drift`. The site publishes from its own repo.
+Vault reads and writes go through the vault MCP. What is left here is the glue
+between them.
 
-**Platform:** macOS only. The crypt tools rely on `/usr/bin/security`
-(Keychain), `osascript` (passphrase dialogs), and `open -W`. The
-`tools watch` agent uses `launchctl`. None of this has Linux/WSL
-equivalents in-tree.
+**Design docs:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (the repo map),
+[`docs/command-surface-contract.md`](docs/command-surface-contract.md) (the
+emit-once contract and the effect model), and [`docs/SDK.md`](docs/SDK.md) (the
+shared runtime other repos use). House rules for editing are in
+[`AGENTS.md`](AGENTS.md).
 
-**Requirements:**
+## Requirements
 
-- `bash` ≥ 4 (Homebrew: `brew install bash`) — macOS ships 3.2, which
-  is missing associative arrays used by `tools doctor`.
-- `zsh` ≥ 5 — for the completion file and `dns-test`.
-- `age`, `git`, `rsync` — `brew install age git rsync`.
-- An age-compatible identity (SSH ed25519 is fine).
-- `node` ≥ 20 — only for the Node-based tools (`doc-to-pdf`,
-  `site manage`, `site compare`). Run `npm ci` once to fetch their
-  pinned deps and the JSON Schema validator used by `tools check`.
-- `shellcheck` + `bats-core` — only to run `tools check` (the CI suite)
-  locally. The macOS system `/usr/bin/expect` runs the real-PTY coverage for
-  `site manage`.
+- macOS, with `bash` 4 or newer (`brew install bash`) and `zsh` 5.
+- `git`, `rsync`, `jq`, and `uv`.
+- Node 24 (the version in `.nvmrc`). The modules under `lib/` are TypeScript,
+  which Node runs directly. Run `npm ci` once for their pinned dependencies.
+- A local Chromium, Chrome, or Edge for `doc-to-pdf` and `diagram`. Neither
+  downloads a browser.
+- `shellcheck` and `bats-core` to run `tools check`.
 
 ## What's in the box
 
@@ -38,10 +38,6 @@ tools/
   bin/                   # public command surface
     # Core
     tools         # Umbrella command for the personal CLI toolchain.
-    # Cryptography
-    encrypt       # Age-encrypt files to your public key; remove originals.
-    decrypt       # Age-decrypt .age files with your private key; restore originals.
-    open-age      # Decrypt a .age file to a temp file and open it in the default app.
     # Vault
     inbox         # Quick-capture a note into the vault inbox.
     vault         # Operations on the vault git repo.
@@ -51,21 +47,15 @@ tools/
     # Diagnostics
     dns-test      # Compare DNS resolver latency across paths.
     cbm           # Health and recovery for the codebase-memory-mcp daemon.
-    # Drift guards
-    ts-acl        # Fetch the live Tailscale ACL policy and diff it against the vault cache.
-    cf-dns        # Fetch the live Cloudflare DNS records and diff them against the vault cache.
-    adguard       # Fetch the live AdGuard Home DNS rewrites and diff them against the vault cache.
-    nginx         # Fetch the live Nginx Proxy Manager proxy hosts and diff them against the vault cache.
     # Integrations
     hq            # Sync vault frontmatter to Severino HQ, plus routine HQ operational commands.
-    site          # Public jseverino.com Astro site workflow.
     brand         # Render Joe's brand kits via the branding-engine.
     # Authoring
     remember      # Write a Claude memory file + MEMORY.md index entry in one shot.
     doc-to-pdf    # Render a Markdown file (with Mermaid) to PDF via local Chromium, offline.
     diagram       # Render Mermaid .mmd sources to neighboring PNG files.
     # Workspace
-    repos         # Fleet inventory of every repo under ~/Documents/Code.
+    repos         # Fleet inventory of every repo under CODE_HOME.
     brief         # One emit-once snapshot of repos, vault, writeups, and any plugged-in section.
     start         # Begin new work on a fresh branch off the default branch.
     ship          # Commit, push, and PR pending work — one repo, or the whole fleet.
@@ -76,8 +66,7 @@ tools/
     # Other
     gate-preview  # See a cordon change's blast radius: run the engine across every gated repo before merging it.
   .github/               # CI workflows and repository automation
-  archive/               # retired scripts kept for reference
-  bench/                 # measured claims asserted in CI
+  bench/                 # measured claims, asserted by tools check
   completions/           # generated zsh completion
   config/                # tracked defaults and user-local templates
   docs/                  # architecture and contract explanations
@@ -87,94 +76,92 @@ tools/
 ```
 <!-- END GENERATED REPO INVENTORY -->
 
-## Lightweight SDK
+## How it connects
 
-This repository also supplies the shared command runtime for sibling repos,
-one-off scripts, and agent-generated utilities. Narrow shell and Node modules
-provide Cordon declarations, versioned result envelopes, safe process/JSON
-execution, and governed MCP adapters without importing domain logic. Start with
-[`docs/SDK.md`](docs/SDK.md), or run `tools new <name> --agent` for a conformant
-result-v1 scaffold.
+- **HQ.** `hq call <tool> [json]` reaches any HQ capability as the operator,
+  over SSH with your own short-lived certificate, under the same approval rules
+  as HQ's MCP. `hq drift` reports what HQ reconciles that no longer matches its
+  declaration, and `tools doctor --live` gates on it.
+- **The fleet.** [`config/capabilities.json`](config/capabilities.json) declares
+  each sibling repository once: where it lives, how it installs, how it reports
+  its fingerprint, and what it contributes (a describe surface, a `brief`
+  section). `tools reinstall`, `tools bump-engine`, `tools doctor`, and `brief`
+  all read it, so a repository is added in one place.
+- **The contract.** Every tool conforms to
+  [cordon](https://github.com/joeseverino/cordon)'s command-surface schema, and
+  `tools check` validates the whole toolchain, sibling emitters included,
+  against it.
+- **The SDK.** Other repos source [`lib/sdk.sh`](lib/sdk.sh) or import the
+  TypeScript modules under `lib/sdk/` for the same declarations, result
+  envelopes, and process helpers. `tools new <name> --agent` scaffolds a
+  conformant tool.
 
-Layout rules, so the repo stays navigable as it grows:
+Layout rules:
 
-- **`bin/` is the public surface.** Exactly one executable per tool, no
-  support files. `tools install`, the zsh completions, and CI all discover
-  tools by iterating `bin/*`, so adding a tool means dropping one file there.
-- **`lib/` splits shared from tool-specific.** Helpers used by every tool
-  (`common.sh`, `init.sh`, `key.sh`) sit flat; anything that belongs to one
-  tool lives under `lib/<tool>/`, so a tool's footprint is obvious and
-  removable.
-- **Tools that outgrow a script become their own project.** `site compare`
-  launches the sitedrift viewer from its own checkout (override the entry
-  point with `SITEDRIFT_ENTRY`) rather than vendoring a copy here.
+- **`bin/` is the public surface.** One executable per tool and nothing else;
+  install, completions, and CI discover tools by listing `bin/`.
+- **`lib/` splits shared from tool-specific.** Shared code sits flat or in
+  `lib/sdk/`; anything one tool owns lives in `lib/<tool>/`, so its footprint is
+  obvious and removable.
+- **A tool that outgrows a script becomes its own project**, as sitedrift and
+  branding-engine did.
 
 ## Install
 
 ```sh
-brew install bash zsh age git rsync
-git clone <this-repo> ~/path/to/tools
-export TOOLS_HOME=~/path/to/tools   # add this to ~/.zshrc
+brew install bash zsh git rsync jq uv
+git clone https://github.com/joeseverino/tools ~/Code/Assets/tools
+export TOOLS_HOME=~/Code/Assets/tools        # in ~/.zshrc
+cd "$TOOLS_HOME" && npm ci
 
-cp config/backup.sh.example config/backup.sh   # then edit for your files
-tools install                                  # symlinks into ~/.local/bin
-tools doctor                                   # verify env, deps, symlinks
-tools key cache                                # one-time passphrase cache
+cp config/backup.sh.example config/backup.sh # then edit for your files
+cp config/hq.sh.example config/hq.sh         # then set the HQ host
+tools install                                # symlinks into ~/.local/bin
+tools doctor                                 # verify env, deps, symlinks
 ```
 
-`tools install` is idempotent — re-run after pulling or adding a new
-tool to refresh the symlinks. Override the install target with
-`TOOLS_INSTALL_DIR=/somewhere/else tools install`. Make sure that
-directory is on `$PATH`.
+`tools install` is idempotent; re-run it after adding a tool. Override the
+target with `TOOLS_INSTALL_DIR`, and keep it on `$PATH`.
 
 ### Layout env vars
 
-Each tool resolves paths in two tiers:
-
-1. **Tool-specific env var** (e.g. `AGE_PUBKEY`, `VAULT`) — explicit
-   per-invocation override; takes precedence.
-2. **Layout var** (e.g. `KEYS_HOME`, `NOTES_HOME`) — required, read
-   from your shell environment; tools error out with a clear message if
-   not set.
-
-Example `.zshrc` block — adapt to your own paths:
-
 ```sh
-export TOOLS_HOME="$HOME/code/tools"          # this repo
-export NOTES_HOME="$HOME/code/notes"          # vault repo (with .git/)
-export KEYS_HOME="$HOME/code/keys"            # age public/private key pair
-export BACKUPS_HOME="$HOME/code/backups"      # mirror destination
+export TOOLS_HOME="$HOME/Code/Assets/tools"   # this repo
+export NOTES_HOME="$HOME/Documents/notes"     # the vault (a git repo)
+export BACKUPS_HOME="$HOME/Code/Assets/Backups"
 ```
 
-`config/vault.sh` and `config/crypt.sh` synthesize the derived paths
-(`VAULT`, `INBOX_DIR`, `AGE_PUBKEY`, `AGE_KEY`) from these. Change a
-layout var and every tool follows.
-
-If you reorganize, edit only the layout vars in `~/.zshrc` — never the
-tracked configs.
+`CODE_HOME`, the root holding `Projects/` and `Assets/`, follows from
+`TOOLS_HOME` (two levels up) unless you set it. `config/vault.sh` derives the
+vault paths from `NOTES_HOME`. Change a layout var and every tool follows; never
+edit the tracked configs for your own paths.
 
 ### Zsh completion
 
-Add this to `~/.zshrc` **before** `compinit`:
+Add this to `~/.zshrc` before `compinit`:
 
 ```sh
 fpath=("$TOOLS_HOME/completions" $fpath)
 ```
 
-Then restart your shell. The completion file is generated from every tool's
-`--describe` contract, so commands, flags, choices, and positional arguments
-stay aligned with help automatically. Regenerate it with `tools generate`.
+The completion file is generated from every tool's contract, so commands,
+flags, choices, and arguments always match the help. `tools generate` rebuilds
+it.
 
 ## Conventions
 
-- **Output**: header → status lines → optional summary → trailing newline.
-- **Status lines**: a colored verb (`encrypted`, `captured`, `pulled`,
-  etc.) in a fixed-width column, then the path or detail, then optional
-  dim context.
-- **Exit codes**: `0` success or only-skips, `1` at least one failure,
-  `2` usage error (bad flag, missing args).
-- **Flags**: `-h` / `--help` always works. `-f` / `--force` opts into
-  clobber where it makes sense.
+- **Output:** a header, aligned status lines (a colored verb in a fixed column,
+  then the detail), an optional summary, a trailing newline.
+- **Exit codes:** `0` success, `1` at least one failure, `2` usage error.
+- **Flags:** `-h` / `--help` always works and never acts. A `deploy`-effect
+  command asks for confirmation unless `TOOLS_ASSUME_YES=1`.
+
+## Development
+
+`tools check` is the gate, and CI runs the same suite: ShellCheck, a strict
+TypeScript type-check, contract and schema validation, the generated-surface
+check, and the bats tests. `tools check --ci` runs it hermetically, as CI does.
+Releases are cut by release-please from conventional commits.
 
 ## Tools
 
@@ -192,19 +179,17 @@ Umbrella command for the personal CLI toolchain.
 
 | Invocation | Arguments / options | Effect | Summary |
 |---|---|---|---|
-| `tools status` | `--json` | `read + network` | One-screen health check across vault, inbox, backup, keys |
+| `tools status` | `--json` | `read + network` | One-screen health check across vault, inbox, and backup |
 | `tools doctor` | `--all`<br>`--live`<br>`--json` | `read + network` | Verify environment, deps, and installed symlinks |
-| `tools secrets [doctor|inventory]` | `[doctor\|inventory]` | `read` | Inspect the logical secret registry without reading secret values |
 | `tools check` | `--no-bench`<br>`--ci` | `local_write` | Run the full CI suite locally: lint, tests, bench |
-| `tools new <name>` | `<name>`<br>`--drift`<br>`--agent`<br>`--verify` | `local_write` | Scaffold a new tool in bin/ with the house conventions |
+| `tools new <name>` | `<name>`<br>`--agent`<br>`--verify` | `local_write` | Scaffold a new tool in bin/ with the house conventions |
 | `tools install` | — | `local_write` | Create symlinks in $INSTALL_DIR for every tool |
-| `tools key [cache|forget|status|test]` | `[cache\|forget\|status\|test]` | `local_write + interactive` | Cache / forget / test the age key passphrase in Keychain |
-| `tools watch [enable|disable|status|run-now]` | `[enable\|disable\|status\|run-now]` | `local_write` | Manage the optional launchd auto-sync agent (off by default) |
 | `tools describe [tool] [command]` | `[tool]`<br>`[command]`<br>`--pretty`<br>`--repos`<br>`--tui` | `read` | Emit the command surface of every tool as one JSON document (the emit-once contract) |
 | `tools tui` | `--repos` | `read + interactive` | Open the full-screen command-surface explorer (shorthand for 'describe --tui') |
 | `tools generate [all|completions|readme]` | `[all\|completions\|readme]`<br>`--check` | `local_write` | Regenerate contract-derived completions and README reference/inventory |
 | `tools contracts [id]` | `[id]`<br>`--check`<br>`--json`<br>`--scope <local\|fleet\|live>` | `read` | Inspect the producer → consumer contract graph and projection drift |
 | `tools derive [projection]` | `[projection]`<br>`--all`<br>`--go`<br>`--json`<br>`--scope <local\|fleet>` | `local_write` | Regenerate a declared consumer projection from its owner contract |
+| `tools reinstall [repo]` | `[repo]` | `local_write + network` | Reinstall a registered uv tool from its checkout and verify it matches the source |
 | `tools bump-engine` | `--lock-only` | `local_write + network` | Re-lock severino-vault-engine in every consumer repo and reinstall their uv tools |
 
 **`tools describe` details**
@@ -228,6 +213,16 @@ Contracts are declared once in config/contracts.json. Owners emit source facts; 
 
 Dry-run by default. Repairs are schema-limited to local writes and execute only owner-declared commands; remote writes and deploys cannot enter this generic path.
 
+**`tools reinstall` details**
+
+Runs each repository's declared install command, then compares the installed fingerprint with one computed from the checkout wherever the repository declares a fingerprint. A mismatch fails, so a stale install cannot pass for current.
+
+**Examples**
+
+```sh
+tools reinstall severino-vault-mcp  # reinstall the vault MCP and verify it against source
+```
+
 **`tools bump-engine` details**
 
 The one flow for moving the fleet to a newer vault-engine: each consumer repo (the vault MCPs and the life CLI) gets 'uv lock --upgrade-package severino-vault-engine', then its uv tool reinstalled so the running servers match the new pin. The lock edits are left uncommitted — ship each consumer repo's bump through its own PR flow. 'tools doctor' gates the invariant this maintains: every consumer pins the same engine commit (engine lock parity).
@@ -237,80 +232,6 @@ The one flow for moving the fleet to a newer vault-engine: each consumer repo (t
 ```sh
 tools bump-engine  # move every declared engine consumer to current main and reinstall
 ```
-
-#### `encrypt`
-
-Age-encrypt files to your public key; remove originals.
-
-Encrypts files to your default age public key (and any extras passed with -k). The original file is removed on success unless -c is given.
-
-Usage: `encrypt <file>...`
-
-| Argument | Description |
-|---|---|
-| `-c, --copy` | Keep the original file (encrypt a copy) |
-| `-f, --force` | Overwrite existing .age output files |
-| `-k, --key <PATH>` | Add another public key as a recipient (repeatable) |
-| `<file>...` | File(s) to encrypt |
-
-Effect: `local_write`
-
-**Examples**
-
-```sh
-encrypt notes.md  # original removed
-encrypt -c ~/.ssh/id_ed25519  # original kept (backup pattern)
-encrypt -k ~/keys/coworker.pub notes.md
-encrypt -k a.pub -k b.pub *.md
-encrypt -f *.txt
-encrypt -- -starts-with-dash.md
-```
-
-#### `decrypt`
-
-Age-decrypt .age files with your private key; restore originals.
-
-Decrypts .age files using your default age private key. If the key is an SSH key with a passphrase, decrypt unlocks it transparently using the passphrase cached via 'tools key cache' — one prompt up front, silent forever after. With no cached passphrase, it prompts (terminal or osascript dialog, whichever is appropriate).
-
-Usage: `decrypt <file>...`
-
-| Argument | Description |
-|---|---|
-| `-f, --force` | Overwrite existing decrypted output files |
-| `-k, --key <PATH>` | Add another identity to try (repeatable). Bypasses the cached passphrase / unlock path for that key. |
-| `-p, --stdout` | Write decrypted bytes to stdout, not a file. Silent on success; status/errors go to stderr (e.g. decrypt -p secret.age \| less). |
-| `--no-cache` | Don't use the cached passphrase even if one exists. Lets age prompt directly (terminal only). |
-| `<file>...` | The .age file(s) to decrypt |
-
-Effect: `local_write + interactive`
-
-**Examples**
-
-```sh
-decrypt notes.md.age
-decrypt -k ~/keys/oldkey notes.md.age
-decrypt -f *.age
-decrypt -p secret.age | less
-```
-
-#### `open-age`
-
-Decrypt a .age file to a temp file and open it in the default app.
-
-Decrypts a .age file to a temporary file under $TMPDIR (mode 600, owner-only), opens it in the default macOS app for the underlying extension via 'open -W', then deletes the temporary file when the app finishes with it.
-
-The plaintext never lands in the source directory or anywhere persistent. $TMPDIR is per-user and cleared by macOS on reboot.
-
-Set it as the default opener for .age files with 'duti -s <bundle.id.of.this.script> .age all', or wrap this script in a tiny .app bundle (Automator: Run Shell Script).
-
-Usage: `open-age <file>`
-
-| Argument | Description |
-|---|---|
-| `--no-cache` | Skip the cached passphrase, let age prompt directly |
-| `<file>` | The .age file to open |
-
-Effect: `local_write + interactive`
 
 #### `inbox`
 
@@ -433,56 +354,6 @@ cbm fix --dry-run  # show what recovery would touch, change nothing
 cbm prune --days 7  # delete index-worker logs older than a week
 ```
 
-#### `ts-acl`
-
-Fetch the live Tailscale ACL policy and diff it against the vault cache.
-
-| Invocation | Arguments / options | Effect | Summary |
-|---|---|---|---|
-| `ts-acl show` | — | `read + network` | Fetch and print the live state (normalized, sorted JSON) |
-| `ts-acl diff` | — | `read + network` | Diff live vs the vault cache; exit 1 on drift |
-| `ts-acl pull` | — | `vault_write + network` | Regenerate the vault cache (JSON + doc table) from live (accept drift) |
-
-#### `cf-dns`
-
-Fetch the live Cloudflare DNS records and diff them against the vault cache.
-
-Records are normalized to type/name/content/proxied (+ priority for MX);
-
-Cloudflare-internal fields (id, timestamps, meta) are dropped.
-
-| Invocation | Arguments / options | Effect | Summary |
-|---|---|---|---|
-| `cf-dns show` | — | `read + network` | Fetch and print the live state (normalized, sorted JSON) |
-| `cf-dns diff` | — | `read + network` | Diff live vs the vault cache; exit 1 on drift |
-| `cf-dns pull` | — | `vault_write + network` | Regenerate the vault cache (JSON + doc table) from live (accept drift) |
-
-#### `adguard`
-
-Fetch the live AdGuard Home DNS rewrites and diff them against the vault cache.
-
-Rewrites are normalized to domain/answer, sorted by domain.
-
-| Invocation | Arguments / options | Effect | Summary |
-|---|---|---|---|
-| `adguard show` | — | `read + network` | Fetch and print the live state (normalized, sorted JSON) |
-| `adguard diff` | — | `read + network` | Diff live vs the vault cache; exit 1 on drift |
-| `adguard pull` | — | `vault_write + network` | Regenerate the vault cache (JSON + doc table) from live (accept drift) |
-
-#### `nginx`
-
-Fetch the live Nginx Proxy Manager proxy hosts and diff them against the vault cache.
-
-Proxy hosts are normalized to domain_names / forward_scheme / forward_host /
-
-forward_port / enabled, sorted by domain.
-
-| Invocation | Arguments / options | Effect | Summary |
-|---|---|---|---|
-| `nginx show` | — | `read + network` | Fetch and print the live state (normalized, sorted JSON) |
-| `nginx diff` | — | `read + network` | Diff live vs the vault cache; exit 1 on drift |
-| `nginx pull` | — | `vault_write + network` | Regenerate the vault cache (JSON + doc table) from live (accept drift) |
-
 #### `hq`
 
 Sync vault frontmatter to Severino HQ, plus routine HQ operational commands.
@@ -499,8 +370,8 @@ Severino HQ glue. Reads YAML frontmatter from the vault and upserts the HQ docs 
 | `hq validate` | — | `read + network` | Report HQ registry entries (Projects/Assets) that no vault doc references. Read-only |
 | `hq life-sync` | — | `remote_write + network` | Emit the Life vault projection on this Mac and install it on HQ (renewals, goals, tasks, claims, vehicles) |
 | `hq create <project|asset> <slug>` | `<project\|asset>`<br>`<slug>` | `remote_write + network` | Create or update a Project or Asset in HQ (idempotent upsert by slug) |
-| `hq deploy` | — | `read` | RETIRED — refuses. It shipped the host-only image and dropped every admitted extension off production. Landing on main IS the deploy |
-| `hq pin` | — | `read` | RETIRED — refuses. It set HQ_COMMIT on every plugin; that variable must not exist, and deleting it is the fix |
+| `hq call <tool> [arguments]` | `<tool>`<br>`[arguments]` | `remote_write + network` | Call one HQ tool as the operator: the MCP tool contract, JSON arguments in, the tool's JSON result out |
+| `hq drift` | `--json` | `read + network` | List managed resources HQ reports out of sync or unhealthy; exit 1 when any are |
 | `hq ship` | `-m, --message <TEXT>` | `deploy + network` | Commit + push a small HQ change. The push IS the deploy: it triggers the gated pipeline (build → scan → deploy on green) |
 | `hq env-diff` | — | `read + network` | Key-level drift between the 1Password 'severino-hq env' item (the source of truth) and the env rendered on prod. Key names only — values never print |
 | `hq env-apply` | — | `deploy + network` | Apply 1Password env changes to prod now: runs severino-hq-secrets.service (renders + restarts only if something changed; the hourly timer does this anyway) |
@@ -542,6 +413,20 @@ hq create project my-site --name "My Site" --category cloudflare --status publis
 hq create asset example-com --name "example.com" --category domain
 ```
 
+**`hq call` details**
+
+The same surface agents reach over MCP, reached over the host shell with the operator's own SSH certificate. A tool that writes is gated by HQ exactly as it is over MCP, including changes held for approval.
+
+**Examples**
+
+```sh
+hq call list_managed_resources '{"limit":20}'  # what HQ manages
+```
+
+**`hq drift` details**
+
+HQ reconciles what it declares against what each provider reports. This reads that verdict; it never reads a provider itself.
+
 **Examples**
 
 ```sh
@@ -550,104 +435,6 @@ hq manifest | jq '.[] | .doc_id'
 hq doctor  # find docs missing frontmatter
 hq export 2026  # download year-summary-2026.md
 ```
-
-#### `site`
-
-Public jseverino.com Astro site workflow.
-
-| Invocation | Arguments / options | Effect | Summary |
-|---|---|---|---|
-| `site status` | — | `read` | Show repo location, git state, and build-output state |
-| `site sync` | — | `local_write` | Sync public pages/writeups from the vault into the site repo |
-| `site check` | — | `local_write` | Run Astro diagnostics |
-| `site contrast` | — | `read` | Compute WCAG ratios for every text/background pair in base.css |
-| `site parity` | — | `read` | Assert vault Frontmatter Schema, Zod, and MCP agree on writeup fields |
-| `site build` | — | `local_write` | Run the full Astro build |
-| `site publish` | `--no-push` | `remote_write + network` | Open the PR: gate published writeups, hq sync, build + audits, commit the content snapshot, push the branch, open or update the PR to main |
-| `site deps <pr>...` | `<pr>...` | `local_write + network` | Absorb named Dependabot PR updates without unrelated direct-dependency drift |
-| `site sign-security` | — | `local_write + interactive` | Clear-sign public/.well-known/security.txt with the security@ key |
-| `site check-security` | — | `read` | Verify signature, required fields, Expires, and WKD file |
-| `site scaffold-primer` | Delegated: the site repo's `npm run scaffold:primer` — run it with --help for flags | `vault_write` | Scaffold a new 04 Reference/ primer with slim frontmatter |
-| `site scaffold-field` | Delegated: the site repo's `npm run scaffold:writeup-field` — run it with --help for flags | `local_write` | Patch every layer needed for a new writeup field (dry-run by default) |
-| `site draft-alt` | Delegated: the site repo's `npm run draft:cover-alt` — run it with --help for flags | `vault_write + network` | Use the Claude API to draft cover_alt from a writeup's cover image |
-| `site publish-all` | `--no-push` | `remote_write + network` | Alias of publish |
-| `site publish-writeup <slug>` | `<slug>` | `remote_write + network` | Full publish flow with the named writeup highlighted; the all-published gate runs once first |
-| `site validate <slug>` | `<slug>`<br>`--draft` | `read` | Run the writeup publish gate standalone — report only, no build/commit |
-| `site tech [query]` | `[query]` | `read` | List technology slugs from the vault catalog, filtered when a query is given |
-| `site featured [slug] [target]` | `[slug]`<br>`[target]` | `vault_write` | Show the home-page featured order, or move one writeup and renumber automatically |
-| `site manage` | — | `vault_write + interactive` | Interactive manager: every writeup on one screen — reorder, feature, publish. Nothing written until you save |
-| `site verify <slug>` | `<slug>` | `read + network` | Post-publish live check: page status, OG image, tag pages, and home placement |
-| `site land [slug]` | `[slug]`<br>`--yes` | `deploy + network` | Land the current branch's PR: confirm CI is green, squash-merge (signature-safe), wait for the deploy, then verify live |
-| `site reconcile` | `--yes` | `remote_write + network` | Close stale security-expiry issues and Dependabot PRs already satisfied by main |
-| `site diagnose` | Delegated: the site repo's `npm run diagnose` — run it with --help for flags (--fast, --json) | `read` | The collect-all gate: run every audit and report all failures in one pass |
-| `site release <version>` | `<version>`<br>`--ship` | `deploy + network` | Bump package.json, run publish:check, commit + signed tag, push, create the GitHub release |
-| `site test` | `--visual`<br>`--ui`<br>`--update` | `local_write` | Run the Playwright end-to-end suite |
-| `site doctor` | — | `read + network` | Pre-flight health check: CLI/npm drift, vault-mcp install, security, contrast, parity, type check, audit. No build |
-| `site reinstall-mcp` | `--yes`<br>`--editable` | `local_write` | Reinstall the severino-vault-mcp package from source |
-| `site new-writeup <slug>` | `<slug>` | `vault_write` | Scaffold a new vault writeup folder from the template (starts published: false) |
-| `site seo <page>` | `<page>`<br>`-r, --result` | `read` | Preview the Google-style search result snippet for a built page |
-| `site dev` | `--drafts` | `local_write + interactive` | Start the local Astro dev server |
-| `site open` | — | `read` | Open the local dev URL in the browser |
-| `site compare [path]` | `[path]`<br>`--dev <URL>`<br>`--live <URL>`<br>`--mobile`<br>`--desktop`<br>`--compact`<br>`--expanded`<br>`--link-scroll`<br>`--no-link-scroll`<br>`--scroll-mode <exact\|ratio>`<br>`--mirror-links`<br>`--no-mirror-links`<br>`--split <PERCENT>`<br>`--swap`<br>`--solo`<br>`--split-view`<br>`--overlay`<br>`--overlay-diff`<br>`--focus <dev\|live>`<br>`--notes`<br>`--note <TEXT>`<br>`--notes-out <FILE>`<br>`--clear-notes`<br>`--brand <NAME>`<br>`--http`<br>`--no-open` | `read + interactive` | Open a resizable dev-vs-live browser comparison |
-| `site og` | — | `local_write` | Regenerate the Open Graph social card (public/assets/og/) |
-
-**`site publish` details**
-
-Gate every published writeup, hq sync, build + audits, commit the synced snapshot on the current branch (auto-branching off main when needed), push, then open or update the PR to main. Only the generated snapshot is committed; your code/config edits ride the same branch and PR once you commit them. Drafts stay in the vault and are never pushed. The PR carries CI and the Cloudflare preview; merge it with `site land` once both are green.
-
-**`site deps` details**
-
-Reads each PR's declared npm package and target version, updates only those packages, and fails closed if any other direct dependency moves. The original PRs remain open until the replacement lands; `site reconcile` closes superseded updates afterward.
-
-**`site publish-writeup` details**
-
-The same gate as `site publish` validates every published writeup once before any sync, build, commit, or push. Requires the severino-vault-mcp console script on PATH.
-
-**`site tech` details**
-
-Catalog source: 06 Pages/_technology-groups.md. Featured slugs surface in the home-page cloud.
-
-**`site featured` details**
-
-No args prints the order the home page renders; a slug + target moves that writeup and renumbers 1..N (inserting one sets featured: true). The new order ships on the next `site publish`.
-
-**Examples**
-
-```sh
-site featured my-writeup top  # move to slot 1
-site featured my-writeup off  # unfeature; others close the gap
-```
-
-**`site manage` details**
-
-Full-screen manager (keys shown in-app): reorder featured, feature/unfeature, publish/unpublish across every writeup; saving submits one transactional plan. Ship with `site publish`.
-
-**`site verify` details**
-
-Checks the live site: /portfolio/<slug>/ is 200, the og:image resolves, every tag page lists it, and the home page shows it when featured. Run ~30s after publishing (Cloudflare rebuild).
-
-**`site land` details**
-
-Run after eyeballing the Cloudflare preview on the PR. Refuses to merge unless `gh pr checks` is all green, squash-merges (rebase strips SSH signatures, squash does not), deletes the branch, waits ~30s for the Cloudflare Pages rebuild, then runs the live checks. Requires the gh CLI.
-
-**`site new-writeup` details**
-
-Creates 05 Writeups/<slug>/index.md (published: false) and an images/ folder; stays out of the build until you set published: true.
-
-**`site seo` details**
-
-Reads dist.nosync — run `site build` first if the page is missing.
-
-**Examples**
-
-```sh
-site seo portfolio
-site seo --result architecting-a-custom-detection-engine
-```
-
-**`site compare` details**
-
-Both panes share a route and a draggable divider; the viewer documents its own keys. Review notes live in a shared file the viewer polls, so a teammate or an AI session can leave notes live — set SITE_COMPARE_VAULT (defaults to the vault 00 Inbox) for the drawer's Send-to-vault button.
 
 #### `brand`
 
@@ -724,7 +511,7 @@ Render Mermaid .mmd sources to neighboring PNG files.
 
 Each path may be an .mmd file or a directory. Directories render their top-level .mmd files.
 
-Rendering uses Mermaid CLI 11.15.0 with Joe Severino brand tokens, PNG output, 1100px width, 3x scale, and a white background. Set DIAGRAM_BRAND_KIT to override the kit directory.
+Rendering uses the Mermaid CLI pinned in package.json and the local Chromium, with Joe Severino brand tokens, PNG output, 1100px width, 3x scale, and a white background. Set DIAGRAM_BRAND_KIT to override the kit directory.
 
 Author flow diagrams with flowchart TB. Contract diagrams may use HTML labels for dense multiline nodes; site diagrams stay on SVG labels when their nodes are single-line.
 
@@ -745,7 +532,7 @@ diagram docs/diagrams/architecture.mmd
 
 #### `repos`
 
-Fleet inventory of every repo under ~/Documents/Code.
+Fleet inventory of every repo under CODE_HOME.
 
 Default roots are $CODE_HOME/Assets and $CODE_HOME/Projects. A directory is listed if it is a git work tree or carries a project manifest (package.json, pyproject.toml, go.mod, Cargo.toml). Use 'repos --pm npm' to see what is left to migrate, 'repos --unpushed' before stepping away, and 'repos --json' to consume the whole fleet in one parse.
 
@@ -777,7 +564,7 @@ repos --prs --fetch --json  # the full honest snapshot: fresh behind/gone plus o
 
 One emit-once snapshot of repos, vault, writeups, and any plugged-in section.
 
-Pure aggregator: it never re-implements a fact. Repo and PR state come from 'repos' (--prs folds in 'repos --prs', the one PR/CI owner — brief runs no gh of its own), and every vault fact (recent changes, docs to review, inbox) comes from 'severino-vault-mcp brief' and 'list-writeups' — the vault's one owner. Additional surfaces plug in as sections: each command listed in BRIEF_SECTION_EMITTERS (config/brief.sh) emits one section document — name, labelled lines, ranked queue rows, next-verb entries — that brief renders generically; the emitter's own repo owns every word of its content. Run 'brief' to orient, 'brief --json' for one parse of everything, 'brief tui' for the cockpit. The 'next' block names the loop verbs from the one classification: ship (dirty), land (green PR, with --prs), resync (merged), plus whatever plugged sections contribute.
+Pure aggregator: it never re-implements a fact. Repo and PR state come from 'repos' (--prs folds in 'repos --prs', the one PR/CI owner — brief runs no gh of its own), and every vault fact (recent changes, docs to review, inbox) comes from 'severino-vault-mcp brief' and 'list-writeups' — the vault's one owner. Additional surfaces plug in as sections: each repository that declares a brief_section command in config/capabilities.json emits one section document — name, labelled lines, ranked queue rows, next-verb entries — that brief renders generically; the emitter's own repo owns every word of its content. Run 'brief' to orient, 'brief --json' for one parse of everything, 'brief tui' for the cockpit. The 'next' block names the loop verbs from the one classification: ship (dirty), land (green PR, with --prs), resync (merged), plus whatever plugged sections contribute.
 
 | Invocation | Arguments / options | Effect | Summary |
 |---|---|---|---|
@@ -958,674 +745,10 @@ gate-preview --cordon ~/wt/cordon-stricter-bats  # preview a branch's checks aga
 ```
 <!-- END GENERATED CLI REFERENCE -->
 
-### tools
-
-Umbrella command for managing the suite itself. Its generated command reference
-is above; this section explains the higher-level behavior.
-
-`tools status` is the daily health check; `tools doctor` is the
-new-machine smoke test. `tools doctor --all` is the cross-system rollup:
-after the local checks it runs every system's own gate — `hq doctor`
-(frontmatter validity + vault→HQ sync freshness), `hq schema --check`
-(contract parity), `site doctor` (seams, install drift, security, types,
-audits) — each timed, with a failing gate's output tail inlined, and one
-verdict / exit code at the end. `--live` also runs the drift guards
-(`cf-dns` / `adguard` / `ts-acl` diff): live API reads that need network
-and 1Password approval. The gate registry lives in `lib/doctor.sh`; a gate's
-only contract is "exit 0 when healthy", so adding one is one line. Both
-commands take `--json` for machine-readable output (useful for agents
-and cron). `TOOLS_INSTALL_DIR` overrides the install target.
-
-`tools check` is the same command CI runs — the definition of "passing"
-lives in one place. It discovers scripts by shebang (`bash -n`, `zsh -n`,
-`node --check`), runs shellcheck over the tracked shell sources, the
-bats test suite in `tests/`, validates every describe document against
-`schemas/cordon-v4.json`, checks generated surfaces, and runs the bench
-assertions in `bench/`.
-`tools new <name>` drops a canonical skeleton in `bin/` — init.sh
-sourcing, usage block, arg loop, correct exit codes — and prints the
-follow-ups. `tools new <name> --drift` scaffolds a drift-guard tool
-instead (the `ts-acl` / `cf-dns` / `adguard` / `nginx` shape): `show` /
-`diff` / `pull` with `get_token` / `fetch_live` / `normalize` /
-`vault_block` already wired, plus a matching `config/<name>.sh` — fill in
-the TODOs (endpoint, creds key, jq projection) and seed the vault block
-with `<name> pull`.
-
-Add `--verify` to either scaffold command to regenerate derived surfaces
-and run `tools check --no-bench`.
-
-A successful `pull` writes through the
-[`severino-vault-mcp`](https://github.com/joeseverino/severino-vault-mcp)
-console script (`severino-vault-mcp infra-write <dataset-id>`, JSON on
-stdin) — never a raw file write. The MCP writes the dataset's JSON cache
-file, regenerates the doc's generated table region from the declared
-columns, and stamps `last_reviewed` to today (a pull is a review), in
-atomic-per-file writes — so the cache and the human table can never drift.
-`diff` reads the cache via `severino-vault-mcp infra <dataset-id>` and
-fails loudly when there is no cache (instead of comparing against nothing).
-The dataset, its cache path, and its render columns are declared once in
-the vault's infra-dataset registry. The loop is `<tool> diff` → reconcile
-the prose → `<tool> pull` → `hq sync`.
-
-#### tools describe — the command-surface contract
-
-Every tool emits its command surface as one structured JSON document conforming
-to [**Cordon**](https://github.com/joeseverino/cordon), the language-agnostic
-command-surface contract — this toolchain is Cordon's reference Bash emitter.
-Three consumers render from that single source: an AI session reads it,
-the `--tui` explorer builds a picker from it, and CI guards diff it. This is
-**emit-once, render-many** — a tool declares its surface once in a
-`describe_spec()` (the `desc_*` DSL in `lib/describe.sh`), and *both*
-`-h`/`--help` and `--describe` are derived from it, so the human help and
-the machine JSON can never drift (there is no prose to parse).
-
-```
-encrypt --describe            # one tool's contract (compact JSON)
-tools describe                # federated: every tool, one document
-tools describe --pretty       # indented, for reading
-tools describe encrypt        # just one tool
-tools describe hq restart     # just one command — the token-minimal AI path
-tools describe --repos        # also fold in sibling repos (severino-vault-mcp)
-tools describe --tui          # full-screen explorer: browse + copy invocations
-```
-
-Every command (and leaf tool) also declares its **effect** — a blast-radius
-class (`read | local_write | vault_write | remote_write | deploy`) plus
-`network` / `interactive` tags — via one `desc_effect` line. It's the signal an
-agent risk-gates on before running a command (a `deploy` vs a `read`), shown in
-the focused `-h`, colored in `--tui`, and carried in the JSON.
-
-`--tui` is the human tier of the contract: a two-pane explorer (tools | the
-selected tool's commands/options/args) over the same federated document.
-`Tab`/`←→` switch panes, `↑/↓` move, `/` filters tools *and* commands across the
-whole toolchain, `Enter` copies a ready-to-paste invocation, `q` quits.
-Aggregate only — a single tool stays the clean `<tool> -h`. It shares the
-`site manage` look via the common TUI library (`lib/tui.mjs`).
-
-The contract — a superset of what `severino-vault-mcp describe` emits:
-
-```jsonc
-{ "ok": true, "schema_version": 4, "name": "encrypt",
-  "description": "…", "group": "Cryptography", "order": 20,
-  "effect": "local_write",
-  "global_options": [ { "name": "--copy", "positional": false,
-                        "required": false, "help": "…",
-                        "flags": ["-c","--copy"], "takes_value": false } ],
-  "positionals":   [ { "name": "file", "positional": true,
-                       "required": true, "help": "…" } ],
-  "commands":      [ { "name": "…", "summary": "…", "args": [ … ],
-                       "effect": "deploy", "network": true } ] }
-```
-
-Output is byte-deterministic (no timestamps), so a guard can diff it across
-runs. `tools doctor` gates that every tool answers `--describe` with a valid
-contract — and because both views render from the one `describe_spec`, that
-gate plus the round-trip test in `tests/describe.bats` keep the whole suite
-self-describing as it grows. `lib/describe.sh` runs under both bash and zsh,
-so the lone zsh tool (`dns-test`) self-describes from the same engine.
-
-For the full design — the DSL, the `schema_version 4` shape, the effect model,
-scoped lookup, federation, and the diagrams — see
-[`docs/command-surface-contract.md`](docs/command-surface-contract.md). The
-repo map is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
-
-#### tools key — passphrase cache
-
-If your `$AGE_KEY` is a passphrase-protected SSH key (the default
-ed25519 with `ssh-keygen`'s prompt), `decrypt` and `open-age` would
-otherwise prompt for the passphrase on every call. Cache it in the
-login Keychain once with `tools key cache`; use the other generated `tools key`
-actions to inspect, test, or clear it.
-
-After `tools key cache`, every `decrypt`, `open-age`, and Finder
-integration runs silently — no prompts, no terminal popups.
-
-**How it works.** Storage is `/usr/bin/security` under service
-`age-key-passphrase`, account `$USER` — same mechanism as
-`git-credential-osxkeychain`. When `decrypt` runs:
-
-1. Fetch cached passphrase from Keychain (silent if cached).
-2. Copy `$AGE_KEY` to a fresh `$TMPDIR` file (mode 600).
-3. Run `ssh-keygen -p -P <passphrase>` to strip the passphrase from
-   the copy (canonical OpenSSH unlock — no `expect`, no pseudo-TTYs).
-4. Pass the unlocked copy to `age -i` for the actual decryption.
-5. Delete the unlocked copy on exit (trap covers crashes too).
-
-**Threat model.** Cached with `-A` (any app running as you can read
-it) — same effective protection as the SSH key file's mode 600. Not
-a security upgrade over the file; a UX upgrade for non-interactive
-contexts. The key file's passphrase still protects it in iCloud, git
-history, and backups.
-
-Bypass the cache for a single call: `decrypt --no-cache file.age`.
-
-#### tools watch — opt-in auto-sync
-
-Off by default. When enabled, launchd fires `vault sync` every
-`TOOLS_WATCH_INTERVAL` seconds (default 900 = 15 min). Output appended
-to `tools/.logs/vault-sync.log` (gitignored). Override the launchd
-label via `TOOLS_WATCH_LABEL` (default `com.tools.vault-sync`).
-
----
-
-### encrypt / decrypt
-
-Wrappers around [age](https://github.com/FiloSottile/age) for locking
-and unlocking files with an SSH ed25519 key. See [`SECURITY.md`](SECURITY.md)
-for the threat model — in particular, what encryption-at-rest does and does
-*not* protect against.
-
-`encrypt` removes the plaintext after successful encryption unless
-`-c` is given. `decrypt` always leaves the `.age` file in place.
-Use `decrypt -p` to view or pipe a secret without leaving plaintext on
-disk: `decrypt -p secret.age | less`.
-
-#### Examples
-
-```sh
-encrypt notes.md secrets.txt              # original removed
-encrypt -c ~/.ssh/id_ed25519              # original kept
-encrypt -k ~/keys/coworker.pub notes.md   # default + coworker
-decrypt notes.md.age
-decrypt -k ~/keys/oldkey notes.md.age     # add a second identity to try
-decrypt -p config.json.age | jq .          # view without touching disk
-decrypt --no-cache notes.md.age            # ignore cache, age prompts directly
-```
-
----
-
-### open-age
-
-Decrypt-and-open for `.age` files. Pulls plaintext into `$TMPDIR`
-(mode 600), opens it in the OS-default app for the underlying
-extension via `open -W`, then removes the temp when the app finishes
-with it. Plaintext never lands in the source directory or anywhere
-persistent.
-
-Set as the macOS default opener for `.age` to make double-clicking
-"just work":
-
-```sh
-brew install duti
-duti -s com.apple.Terminal .age all   # or your own .app bundle id
-```
-
-For multi-window editors (VS Code, Sublime), `open -W` returns when
-the *editor* exits, not when you close the window. For those flows,
-prefer `decrypt -p file.age | <viewer>` (no temp file at all) or use
-a single-document app as the default for `.age`.
-
----
-
-### inbox
-
-Quick-capture a note into the vault inbox folder.
-
-Filename is `YYYY-MM-DD HHMMSS <first words>.md` so notes sort
-chronologically and have a readable name. Body is the captured text,
-prefixed with a small `doc_id:` / `created:` frontmatter block. Inbox IDs use
-`inbox-YYYYMMDD-HHMMSS`, matching the timestamp in the filename. `--edit` opens
-the captured note and renames a blank capture from its first non-empty line on
-save.
-
-#### Examples
-
-```sh
-inbox "remember to update the homelab certs"
-pbpaste | inbox                            # capture clipboard
-echo "$URL" | inbox                        # capture a URL
-inbox -e                                   # blank note, opens $EDITOR
-inbox -e "draft: post-mortem template"     # seed + open $EDITOR
-```
-
-Defaults in `config/vault.sh`. Override with `VAULT` or `INBOX_DIR`.
-
----
-
-### vault
-
-Operations on the vault repo.
-
-Defaults in `config/vault.sh`.
-
----
-
-### hq
-
-Glue between an Obsidian vault and **Severino HQ** — a small private Django
-ops app (sources at [`joeseverino/severino-hq`](https://github.com/joeseverino/severino-hq))
-that I use as a documentation + projects + assets index. `hq` reads YAML
-frontmatter from every `.md` under `01 Projects/`, `02 Infrastructure/`,
-`03 Runbooks/` and upserts the HQ docs index, and wraps the routine
-`ssh + docker compose` calls for managing the deployment.
-
-`hq <subcommand> --help` for full flag lists. Subcommands that touch HQ
-records (`sync`, `create`) are idempotent — re-running upserts by key.
-
-`config/hq.sh` requires three env vars in your `~/.zshrc`:
-
-```bash
-export HQ_SSH_HOST=hq-host                       # entry in ~/.ssh/config
-export HQ_REMOTE_PATH=/opt/apps/severino-hq      # path on the server
-export HQ_URL=https://hq.example.com             # URL where HQ is served
-```
-
-`sync` pipes the manifest through `ssh "$HQ_SSH_HOST"` and runs
-`docker compose exec -T app python manage.py import_docs_manifest -` on the
-target container. A successful sync also records the shipped manifest's
-hash (plus the vault HEAD and the exact dirs) at
-`~/.local/state/severino-tools/hq-sync.json`, so `vault status` and
-`hq doctor` can report *exactly* when doc metadata has changed since the
-last sync — the hash covers only the frontmatter manifest HQ imports, so
-prose-only edits never flag. `deploy` / `logs` / `restart` wrap the equivalent
-`docker compose` calls; they assume `severino-hq`'s repo layout but are easy
-to adapt if you fork.
-
-#### Example workflow
-
-A typical day touches three surfaces — vault docs, HQ records, and the
-running container — without leaving the terminal:
-
-```bash
-# Edit a runbook in Obsidian, bump last_reviewed in the frontmatter, save.
-hq sync                              # push the change to HQ's docs index
-
-# Add a new project + supporting asset.
-hq create project my-tool \
-    --name "My Tool" --category automation --status active \
-    --repo https://github.com/me/my-tool
-hq create asset my-tool-com --name "my-tool.com" --category domain
-
-# Ship a code change to the Django app.
-cd ~/Projects/severino-hq && git push origin main
-hq deploy                            # pulls + rebuilds on $HQ_SSH_HOST
-
-# Tail logs after deploy. Restart if you only edited the .env on the server.
-hq logs --tail 100
-hq restart
-```
-
-Every subcommand is idempotent (`sync`, `create`, `deploy`) or read-only
-(`logs`, `manifest`, `doctor`), so the whole flow is safe to retry.
-
-#### Adding a new doc
-
-1. Copy `00 Templates/Runbook.md` (or `Infra Doc.md` / `Decision Record.md`) in the vault.
-2. Fill in `doc_id`, `title`, `system`, the rest of the frontmatter.
-3. `hq sync`.
-
-#### Editing an existing doc
-
-Change its frontmatter (e.g. bump `last_reviewed`, flip `status` to `deprecated`),
-save, `hq sync`. The doc_id is the upsert key — no duplicates.
-
----
-
-### site
-
-Publishing workflow for the public `jseverino.com` Astro site (sources at
-[`joeseverino/jseverino.com`](https://github.com/joeseverino/jseverino.com)).
-The Obsidian vault is the source of truth: `site` syncs the public pages and
-writeups out of the vault, builds the static output with Astro, and ships it
-to Cloudflare Pages.
-
-The writeup lifecycle: `site new-writeup <slug>` → write in Obsidian →
-`site dev --drafts` to preview → flip `published: true` → `site publish`.
-The publish command needs no slug — it gates every published writeup,
-builds, ships, and verifies the affected pages on the live site itself.
-(`site publish-all` remains as an alias; `site publish-writeup <slug>`
-runs the same batch gate once and highlights the named slug.)
-
-Publishing fails closed when `severino-vault-mcp` is missing, stale, or cannot
-run. The writeup gate is never skipped.
-
-`site manage` initializes through one `severino-vault-mcp writeup-dashboard`
-call, which shares a single writeup, catalog, and vault snapshot between the
-list and publish-readiness results. Saving sends one JSON plan to
-`apply-writeup-plan`; scalar edits and the complete featured order are staged
-and committed as one locked transaction, with rollback if any replacement
-fails.
-
-#### `site manage`: publishing control plane
-
-The TUI is an operator surface over the publishing system, not a second
-implementation of its rules:
-
-- **Read model:** one dashboard call returns writeup summaries and validation
-  from the same cached vault snapshot, so displayed state and gate results
-  cannot disagree because of separate scans.
-- **Staging model:** feature order, publish flips, and editable scalar fields
-  remain in memory until save. The UI can show the complete pending change
-  without partially mutating the vault.
-- **Commit boundary:** save submits one structured plan to the MCP. Schema
-  validation, sequential featured ordering, format-preserving YAML updates,
-  locking, and rollback stay in the owner service.
-- **Operational surface:** the Site tab composes server state, git state,
-  build artifacts, security checks, live reachability, and the existing
-  doctor/diagnose/build/test/publish commands instead of duplicating them.
-- **Terminal contract:** raw input is decoded as a stream, including split
-  escape sequences and bracketed paste. Editing is grapheme-aware, long fields
-  scroll horizontally with the cursor, and frames use Unicode terminal-cell
-  widths plus vertical viewports for small or resized panes.
-- **Verification:** hermetic replay tests cover model transitions and MCP
-  payloads; a real pseudo-terminal test runs the interactive branch at a small
-  window size and verifies paste, arrow decoding, alternate-screen behavior,
-  and terminal-mode restoration.
-
-The failure boundary is deliberate: loading fails closed if the dashboard is
-unavailable, saving is all-or-nothing through the MCP, and external commands
-temporarily leave the alternate screen so their native output and exit status
-remain visible. Quitting with staged changes requires an explicit save or
-discard decision.
-
-Before any MCP-backed site command runs, `site` compares the installed
-package fingerprint with the local MCP source checkout. Interactive commands
-offer to reinstall a missing, legacy, or stale package immediately.
-Noninteractive commands fail with `site reinstall-mcp` instead of forwarding
-an incompatible subcommand and exposing raw parser output.
-
-`hq manifest` and `hq sync` delegate frontmatter parsing to
-`severino-vault-mcp hq-manifest`. This keeps vault indexing, MCP reads, and HQ
-imports on one parser and rejects duplicate `doc_id` values before syncing.
-
-Set `SITE_MCP_AUTO_REINSTALL=1` for trusted local automation that should repair
-install drift without prompting.
-
-`site seo <url|path|slug>` reads the built Astro HTML from `dist.nosync` and renders a Google-style search result preview with canonical, title, description, robots, and Open Graph checks. Pass a domain, page slug, writeup slug, or absolute path; add `--result` for only the search-result mockup; run `site build` first if the page has not been built locally.
-
-`site compare [path]` opens local development and the live site in a labeled,
-resizable split view. It proxies both sides through localhost so the production
-site's frame protections remain intact. It includes stable linked scrolling,
-mirrored internal navigation, fixed mobile-width panes, collapsible chrome,
-reload-free swapping, a one-pane Solo mode, Google previews, and URL-backed
-review notes. Exact pixel-locked scrolling is the default; ratio mode remains
-available when page heights differ. Every UI state has a CLI flag:
-`--mobile`, `--compact`, `--link-scroll`, `--scroll-mode`, `--mirror-links`, `--split`,
-`--swap`, `--solo`, `--focus`, `--notes`, and repeatable `--note`. AI agents should run
-`site compare [path] --no-open`, then open the printed localhost URL with their
-browser tool.
-
-Example review launch:
-
-```bash
-site compare /portfolio/ --mobile --compact --mirror-links --link-scroll \
-  --notes --note "Check card spacing" --note "Confirm mobile menu parity"
-```
-
-The viewer serves trusted local HTTPS at `https://compare.homelab:4178` using
-the existing Local PKI certificate generated by `cert-gen compare.homelab`.
-Map `compare.homelab` to `127.0.0.1` locally. Safari is the default; set
-`SITE_COMPARE_BROWSER` to override it.
-
-The viewer itself is **sitedrift**, a separate project — `site compare` is
-just the launcher. It looks for the checkout at
-`~/Documents/Code/Projects/sitedrift/` and `SITEDRIFT_ENTRY` overrides the
-entry point.
-
-`site publish` is the everyday path: edit a writeup in Obsidian, run it, and
-the synced snapshot is committed on the current branch (auto-branching off
-main when needed), pushed, and a PR to main is opened or updated. The commit
-message is built from the diff: it names each slug as published (new), edited,
-or removed. Code and config edits ride the same branch and PR once committed.
-`--no-push` stops after the local build when you want to review the diff
-first. Then check CI and the Cloudflare preview on the PR and run `site land`:
-it confirms checks are green, squash-merges, waits ~30s for the Cloudflare
-rebuild, and verifies each affected writeup on the live site (page status,
-og:image, tag pages, home placement). `site <subcommand> --help` for flag
-details.
-
-Layout resolves from env vars, all with defaults:
-
-```bash
-export CODE_HOME="$HOME/Documents/Code"             # defaults shown
-export SITE_HOME="$CODE_HOME/Projects/jseverino.com"
-export NOTES_HOME="$CODE_HOME/Severino Labs"        # vault root
-```
-
-`config/site.sh` (copy from `site.sh.example`) is sourced last for further
-overrides — `SITE_DEV_HOST`, `SITE_DEV_PORT`.
-
----
-
-### backup
-
-Mirror tracked files into `$BACKUPS_HOME` using the source/destination
-pairs listed in `config/backup.sh`. Uses `rsync -a` so permissions,
-xattrs, and timestamps are preserved and unchanged files are skipped
-at the byte level. Directory destinations are mirrored with
-`--delete`, so they always match the source contents exactly.
-
-If `$BACKUPS_HOME` is a git repo, each run that actually changes a
-file auto-commits with a timestamped message — gives you a local-only
-point-in-time history without timestamped folders.
-
-#### Configuring the backup set
-
-`config/backup.sh` is gitignored so your personal list stays out of
-the repo. Copy the template and edit:
-
-```sh
-cp config/backup.sh.example config/backup.sh
-$EDITOR config/backup.sh
-```
-
-Each entry is `"<source><TAB><dest under $BACKUPS_HOME>"`. Use a real
-tab between the two fields. Bash's `$'\t'` makes the tab explicit:
-
-```sh
-BACKUP_ITEMS=(
-    "$HOME/.zshrc"$'\t'"dotfiles/zshrc"
-    "$HOME/.gitconfig"$'\t'"dotfiles/gitconfig"
-)
-```
-
----
-
-### dns-test
-
-Compare DNS resolver latency across a few paths — System DNS, a LAN
-AdGuard resolver, Cloudflare 1.1.1.1, and Cloudflare DoH. Reports
-avg/min/p50/p95/max plus the delta against a baseline.
-
-Adding a path is one line in the `paths=( ... )` table inside the
-script — `"Label|sampler|arg"` where the sampler is `sample_dig` or
-`sample_doh`. Adding DoT is a matter of writing a `sample_dot` that
-shells out to `kdig +tls`.
-
-### ts-acl
-
-Fetch the live Tailscale ACL policy and diff it against the copy stored in
-the vault, so policy drift gets caught instead of silently going stale.
-
-The logical fields `tailscale.oauth_client_id` and
-`tailscale.oauth_client_secret` resolve through the shared 1Password registry
-to the `Tailscale ACL OAuth` item in Infrastructure. The OAuth client is scoped
-to `acl:read`; `ts-acl` exchanges it for a short-lived access token, then reads
-`GET /api/v2/tailnet/-/acl`. `diff` pulls
-the fenced ```json block from `$TS_ACL_VAULT_DOC`. Needs `curl` and `jq`.
-
-### cf-dns
-
-The DNS sibling of `ts-acl`: fetch the live Cloudflare DNS records and diff them
-against a mirror stored in the vault, so zone drift gets caught instead of
-silently going stale.
-
-The mirror is a fenced ```json block under `$CF_DNS_VAULT_HEADING` in
-`$CF_DNS_VAULT_DOC` (the prose tables in that doc are for humans; the block is
-the diff target). Records are normalized to `type` / `name` / `content` /
-`proxied` — plus `priority` for `MX` — and Cloudflare-internal fields (id,
-timestamps, meta) are dropped, so the diff is stable. `diff` re-sorts both
-sides; `pull` rewrites the block in place. The accept-drift loop is:
-`cf-dns diff` → reconcile the prose tables → `cf-dns pull` → `hq sync`.
-
-The logical field `cloudflare.dns_token` resolves through the shared 1Password
-registry to the `Cloudflare DNS Drift` item in Infrastructure. Scope it to
-`Zone.DNS:Read` (plus `Zone:Read` so `cf-dns` can resolve the zone id from
-`$CF_ZONE`; pin `$CF_ZONE_ID` to drop that). `cf-dns` reads
-`GET /zones/{id}/dns_records`. Needs `curl` and `jq`.
-
-### adguard
-
-The homelab-DNS sibling of `cf-dns`: fetch the live AdGuard Home DNS rewrites
-and diff them against a mirror in the vault, so the rewrite set that routes
-`*.homelab` and the Tailscale-only `*.jseverino.com` services can't drift
-unnoticed.
-
-Reads `GET $ADGUARD_URL/control/rewrite/list` and normalizes each entry to
-`domain` / `answer`, sorted by domain. The mirror is the fenced ```json block
-under `$ADGUARD_VAULT_HEADING` in `$ADGUARD_VAULT_DOC`; the prose rewrite tables
-in that doc stay for humans. Same accept-drift loop as `cf-dns`:
-`adguard diff` → reconcile the tables → `adguard pull` → `hq sync`.
-
-The logical fields `adguard.username` and `adguard.password` resolve through
-the shared 1Password registry to the `AdGuard Home` item in Infrastructure.
-`$ADGUARD_URL` comes from `config/adguard.sh` (copy it from
-`config/adguard.sh.example`). Needs `curl`, `jq`, and an approved 1Password
-session.
-
-### nginx
-
-The reverse-proxy sibling of `cf-dns` / `adguard`: fetch the live Nginx Proxy
-Manager proxy hosts and diff them against a mirror in the vault, so the host →
-upstream map (`hq.jseverino.com`, `adguard.homelab`, …) can't drift unnoticed.
-
-Reads `GET $NGINX_URL/nginx/proxy-hosts` and normalizes each host to
-`domain_names` / `forward_scheme` / `forward_host` / `forward_port` / `enabled`,
-sorted by domain. The mirror is the fenced ```json block under
-`$NGINX_VAULT_HEADING` in `$NGINX_VAULT_DOC`; the prose table in that doc stays
-for humans. Same accept-drift loop: `nginx diff` → reconcile the table →
-`nginx pull` → `hq sync`.
-
-NPM has no long-lived API tokens, so `nginx` exchanges the web-UI login for a
-short-lived Bearer per call (`POST $NGINX_URL/tokens`). The logical fields
-`nginx.username` and `nginx.password` resolve through the shared 1Password
-registry to the `Nginx Proxy Manager` item in Infrastructure. `$NGINX_URL`
-comes from `config/nginx.sh` (copy it from `config/nginx.sh.example`).
-Needs `curl`, `jq`, and an approved 1Password session.
-
-### remember
-
-Write a Claude memory file and its `MEMORY.md` index entry in one shot, instead
-of the two-step "create the file, then hand-edit the index" loop.
-
-`<type>` is one of `user | feedback | project | reference`. Body comes from
-stdin (or `--body` / `--body-file`); frontmatter is generated from the args.
-`-F`/`--force` overwrites an existing memory (and refreshes its index line
-instead of duplicating it). The memory dir is auto-resolved — `$CLAUDE_MEMORY_DIR`,
-else `$CLAUDE_PROJECT_DIR`, else `$PWD`, encoded to
-`~/.claude/projects/<enc>/memory` — so no `--dir` is needed inside a Claude
-project; pass `--dir` only to override.
-
-```
-echo "rule body here" | remember feedback use-rg-and-fd "Use rg and fd"
-```
-
-**Why it's worth it (measured).** One `remember` call vs the manual Read-index →
-Write-file → Edit-index → verify loop an agent runs by hand, in bytes (a ~4:1
-token proxy, cold-write model). `remember` stays flat because it never reads the
-index; the manual cost grows with `MEMORY.md`:
-
-```
-index   NEW(B)   OLD(B)   ratio
-   10      722     3302    4.5x
-   30      722     5162    7.1x
-  100      722    11675   16.1x
-  300      722    30875   42.7x
-```
-
-Reproduce with `bench/remember-token-bench.sh` (self-contained; asserts
-`remember` is cheaper and runs in CI). The floor is ~1.5× — if the index is
-already in the agent's context and it skips the verify read — so the win is real
-even in the best case for the manual flow, and compounds as memories accumulate.
-
----
-
-### doc-to-pdf
-
-Render a Markdown file to PDF with fully-rendered Mermaid diagrams —
-entirely offline. Markdown via `markdown-it`, Mermaid from the
-locally-pinned bundle, and the system Chrome in headless mode as the
-print engine. No LaTeX toolchain, no Puppeteer download, no network.
-
-Output defaults to the input path with a `.pdf` extension. Falls back
-to Edge or Chromium if Chrome isn't installed; `CHROME_PATH` overrides
-the browser. Deps are pinned in the repo-root `package.json` — run
-`npm ci` once before first use.
-
----
-
-## Archived
-
-Retired scripts live in `archive/`. They are not on `$PATH` (not in the install
-manifest) and are kept only for reference or occasional manual use.
-
-- **`wp-static`** — mirrors a WordPress site into a static directory for
-  Cloudflare Pages / Netlify (wraps `wget --mirror` with WP-aware defaults and a
-  post-processor that fixes shortlinks and strips `?ver=` cache-busters). Used
-  during the WordPress → static migration; kept for re-mirroring the legacy
-  site. Its `wp-static.sh.example` config and `wp-static-postprocess.py` live
-  alongside it in `archive/`.
-- **`grep-vs-rg.sh`** — one-off benchmark comparing `grep` vs `ripgrep` on a
-  directory tree (uses `hyperfine` if present).
-
----
-
-## Finder integration (optional)
-
-The intended pattern is to wrap `encrypt` / `open-age` / `decrypt` in
-small Automator workflows so you can right-click → encrypt or
-double-click a `.age` file:
-
-1. **Automator → New → Quick Action** (for the right-click menu) or
-   **Application** (for double-click default opener).
-2. Workflow receives **files or folders** in **Finder**.
-3. Add a **Run Shell Script** action, shell `/bin/zsh`, pass input as
-   **arguments**:
-
-   ```sh
-   # Quick Actions run with a minimal env — re-export your layout vars
-   # here, or source ~/.zshrc with care.
-   export TOOLS_HOME="$HOME/code/tools"
-   export KEYS_HOME="$HOME/code/keys"
-   export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-
-   for f in "$@"; do
-       "$TOOLS_HOME/bin/encrypt" "$f" >/dev/null 2>&1 || \
-           osascript -e "display notification \"failed: $f\" with title \"Encrypt\""
-   done
-   osascript -e 'display notification "done" with title "Encrypt"'
-   ```
-
-4. Save. The Quick Action shows up in Finder's right-click menu under
-   *Quick Actions*. Bind a keyboard shortcut in **System Settings →
-   Keyboard → Keyboard Shortcuts → Services → Files and Folders**.
-
-5. For double-click on `.age`: save the workflow as an **Application**
-   instead, then `duti -s <bundle-id> .age all` (Automator apps get a
-   bundle id like `com.apple.automator.<app-name>`).
-
-The `.app` / `.workflow` bundles themselves are intentionally not
-tracked in this repo — they're macOS binary plists with localization
-data and personal paths baked in. Build your own from the snippet
-above.
-
----
-
-## Related: vault pre-commit hook
-
-If you use `git-crypt` in your vault repo, a pre-commit hook that
-runs `git-crypt status -f` catches accidentally-unencrypted files
-before they hit history. That hook lives in the vault repo itself,
-not here. After cloning the vault:
-
-```sh
-git config core.hooksPath .githooks
-```
-
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

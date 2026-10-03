@@ -9,12 +9,11 @@
 # read the consumer list and the lock pin from here — one definition, two
 # faces.
 
-# engine_consumers — print the consumer repo paths, one per line. Per-repo
-# env seams (MCP_HOME matches bin/site's; EDU_MCP_HOME / LIFE_MCP_HOME are
-# this file's) let the bats suite point at fixtures, else the sibling
-# checkouts resolve.
+# engine_consumers — print the consumer repo paths, one per line. The env
+# seams MCP_HOME / EDU_MCP_HOME / LIFE_MCP_HOME (lib/tools/capabilities.ts)
+# let the bats suite point at fixtures, else the sibling checkouts resolve.
 engine_consumers() {
-    node "$TOOLS_HOME/lib/tools/capabilities.mjs" paths engine_consumer
+    node "$TOOLS_HOME/lib/tools/capabilities.ts" paths engine_consumer
 }
 
 # engine_lock_pin <repo> — print "<version> @<sha12>" for the locked

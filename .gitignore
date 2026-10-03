@@ -21,8 +21,6 @@ config/secrets.json
 config/adguard.sh
 config/nginx.sh
 
-# User-local brief section emitters — see config/brief.sh.example.
-config/brief.sh
 
 # Automator .app bundles are user-specific and contain compiled stubs +
 # localization data. Adopters should build their own — see README.

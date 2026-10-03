@@ -8,7 +8,7 @@
 
 load helpers
 
-tui() { node "$TOOLS_HOME/lib/brief/tui.mjs"; }
+tui() { node "$TOOLS_HOME/lib/brief/tui.ts"; }
 
 setup_digest() {
     export BRIEF_BIN="$BATS_TEST_TMPDIR/brief-stub"

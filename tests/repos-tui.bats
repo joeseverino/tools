@@ -6,7 +6,7 @@
 load helpers
 
 repos_bin() { "$TOOLS_HOME/bin/repos" "$@"; }
-tui() { node "$TOOLS_HOME/lib/repos/tui.mjs" "$@"; }
+tui() { node "$TOOLS_HOME/lib/repos/tui.ts" "$@"; }
 
 make_commit_ref() {
     local repo="$1" branch="$2" message="$3"
@@ -94,9 +94,9 @@ assert tui["interactive"] is True
 @test "repos tui -h shows the dashboard filters and effect" {
     run repos_bin tui -h
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Usage: repos tui"* ]]
-    [[ "$output" == *"Effect: remote_write · network · interactive"* ]]
-    [[ "$output" == *"--dirty"* ]]
+    [[ "$output" == *"Usage: repos tui"* ]] || return 1
+    [[ "$output" == *"Effect: remote_write · network · interactive"* ]] || return 1
+    [[ "$output" == *"--dirty"* ]] || return 1
     [[ "$output" == *"--root DIR"* ]]
 }
 
@@ -183,7 +183,7 @@ assert json.load(sys.stdin)["repos"] == []
     export REPOS_TUI_KEYS='s'
     run repos_bin tui
     [ "$status" -eq 0 ]
-    [[ "$output" == *"would run shell: cd "* ]]
+    [[ "$output" == *"would run shell: cd "* ]] || return 1
     [[ "$output" == *"dirty-app"* ]]
 }
 

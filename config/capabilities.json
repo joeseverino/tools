@@ -11,6 +11,7 @@
       "describe": ["severino-vault-mcp", "describe"],
       "engine_consumer": true,
       "install": ["uv", "tool", "install", ".", "--force", "--reinstall"],
+      "fingerprint": { "installed": ["severino-vault-mcp", "--fingerprint"], "source": ["uv", "run", "--quiet", "--project", ".", "severino-vault-mcp", "--fingerprint"] },
       "schema_contract": ["severino-vault-mcp", "schema", "--contract"],
       "schema_fingerprint": ["severino-vault-mcp", "schema", "--fingerprint"]
     },

@@ -1,6 +1,6 @@
 %%{init: {'flowchart': {'rankSpacing': 65, 'nodeSpacing': 45}}}%%
 flowchart TB
-    decl["desc_effect &lt;class&gt; [+network] [+interactive]<br/>one line per command — default is read<br/>(drift guards declare once in drift_describe_commands)"]
+    decl["desc_effect &lt;class&gt; [+network] [+interactive]<br/>one line per command, declared explicitly<br/>(a missing declaration fails closed)"]
 
     subgraph ladder["effect — escalating blast radius"]
         direction LR

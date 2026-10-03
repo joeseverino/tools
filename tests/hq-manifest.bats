@@ -49,8 +49,8 @@ SH
     run hq_bin manifest
 
     [ "$status" -ne 0 ]
-    [[ "$output" == *"severino-vault-mcp"* ]]
-    [[ "$output" == *"site reinstall-mcp"* ]]
+    [[ "$output" == *"severino-vault-mcp"* ]] || return 1
+    [[ "$output" == *"tools reinstall severino-vault-mcp"* ]] || return 1
     [[ "$output" != *"usage: severino-vault-mcp"* ]]
 }
 
@@ -74,7 +74,7 @@ SH
     run hq_bin schema
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"wrote"* ]]
+    [[ "$output" == *"wrote"* ]] || return 1
     [ "$(cat "$HQ_LOCAL_PATH/docs_index/schema.json")" = \
         '{"doc_types":["runbook"],"environments":["homelab","other"]}' ]
 }
@@ -112,7 +112,7 @@ SH
     run hq_bin schema
 
     [ "$status" -ne 0 ]
-    [[ "$output" == *"site reinstall-mcp"* ]]
+    [[ "$output" == *"tools reinstall severino-vault-mcp"* ]]
 }
 
 # --- hq doctor (delegates to the MCP manifest report) ------------------------
@@ -135,7 +135,7 @@ SH
     run hq_bin doctor
 
     [ "$status" -eq 1 ]
-    [[ "$output" == *"missing or invalid frontmatter"* ]]
+    [[ "$output" == *"missing or invalid frontmatter"* ]] || return 1
     [[ "$output" == *"05 Writeups/x/notes.md"* ]]
 }
 
@@ -171,6 +171,6 @@ SH
     run hq_bin schema --check
 
     [ "$status" -eq 1 ]
-    [[ "$output" == *"vault Frontmatter Schema doc lists stale enum values"* ]]
+    [[ "$output" == *"vault Frontmatter Schema doc lists stale enum values"* ]] || return 1
     [[ "$output" == *"lab"* ]]
 }

@@ -62,8 +62,8 @@ hq_bin() { "$TOOLS_HOME/bin/hq" "$@"; }
     [ "$(jq -r .arguments.name "$HQ_CALL_LOG")" = "hq.sync" ]
     [ "$(jq -r '.arguments.payload.manifest[0].doc_id' "$HQ_CALL_LOG")" = "rb-one" ]
     [ "$(jq -r '.arguments.payload | has("topology")' "$HQ_CALL_LOG")" = "false" ]
-    [[ "$output" == *"HQ is in sync"* ]]
-    [[ "$output" != *"Topology"* ]]
+    [[ "$output" == *"HQ is in sync"* ]] || return 1
+    [[ "$output" != *"Topology"* ]] || return 1
     [[ "$output" != *"SSH MUST NOT RUN"* ]]
 }
 
@@ -99,6 +99,6 @@ hq_bin() { "$TOOLS_HOME/bin/hq" "$@"; }
 
     [ "$status" -eq 0 ]
     [ "$(jq -r .tool "$HQ_CALL_LOG")" = "describe_capabilities" ]
-    [[ "$output" == *"--name"*"required"* ]]
+    [[ "$output" == *"--name"*"required"* ]] || return 1
     [[ "$output" == *"--status"*"default: 'idea'"* ]]
 }

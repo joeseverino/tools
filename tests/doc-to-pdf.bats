@@ -124,7 +124,7 @@ EOF
     grep -q 'href="https://github.com/joeseverino/cordon/tree/main/reference"' "$html"
     grep -q 'href="#local-section"' "$html"
     grep -q 'href="https://example.com/example"' "$html"
-    ! grep -q 'href="file://' "$html"
+    ! grep -q '<a [^>]*href="file://' "$html" || return 1
     rm -f "$html"
 }
 
@@ -135,7 +135,7 @@ EOF
     local pdf="$BATS_TEST_TMPDIR/inline.pdf"
     local chrome="$BATS_TEST_TMPDIR/chrome"
     local font="$BATS_TEST_TMPDIR/inter.woff2"
-    local npx_log="$BATS_TEST_TMPDIR/npx.log"
+    local mmdc_log="$BATS_TEST_TMPDIR/npx.log"
     mkdir -p "$kit/web" "$kit/mark" "$kit/wordmark" "$bin"
     cat > "$kit/web/tokens.css" <<'EOF'
 :root {
@@ -157,9 +157,9 @@ flowchart LR
     a --> b
 ```
 EOF
-    cat > "$bin/npx" <<'EOF'
+    cat > "$bin/mmdc" <<'EOF'
 #!/usr/bin/env bash
-printf '%s\n' "$*" >> "$NPX_LOG"
+printf '%s\n' "$*" >> "$MMDC_LOG"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -o) out="$2"; shift 2 ;;
@@ -176,14 +176,14 @@ for arg in "$@"; do
     esac
 done
 EOF
-    chmod +x "$bin/npx" "$chrome"
+    chmod +x "$bin/mmdc" "$chrome"
 
-    run env PATH="$bin:$PATH" NPX_LOG="$npx_log" CHROME_PATH="$chrome" \
+    run env MMDC_BIN="$bin/mmdc" DIAGRAM_CHROMIUM="$chrome" MMDC_LOG="$mmdc_log" CHROME_PATH="$chrome" \
         DOCTOPDF_BRAND_KIT="$kit" DOCTOPDF_FONT="$font" DOCTOPDF_KEEP_HTML=1 \
         "$TOOLS_HOME/bin/doc-to-pdf" "$input" "$pdf"
 
     [ "$status" -eq 0 ]
-    grep -q '@mermaid-js/mermaid-cli@11.15.0 mmdc' "$npx_log"
+    grep -q -- '-p .* -w 1100' "$mmdc_log"
     local html
     html="$(printf '%s\n' "$output" | sed -n 's/^doc-to-pdf: kept HTML at //p' | head -1)"
     grep -q 'class="mermaid-diagram"' "$html"

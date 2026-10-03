@@ -158,5 +158,5 @@ board_json="$(svmc task-list ${MCP_FLAGS[@]+"${MCP_FLAGS[@]}"})"
 if (( JSON )); then
     printf '%s\n' "$board_json"
 else
-    printf '%s' "$board_json" | node "$TOOLS_HOME/lib/backlog/render.mjs" "$MODE"
+    printf '%s' "$board_json" | node "$TOOLS_HOME/lib/backlog/render.ts" "$MODE"
 fi

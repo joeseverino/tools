@@ -7,9 +7,7 @@
 set -euo pipefail
 
 source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
-# Optional user-local section emitters (gitignored; see config/brief.sh.example).
 # shellcheck source=/dev/null
-[[ -f "$TOOLS_HOME/config/brief.sh" ]] && source "$TOOLS_HOME/config/brief.sh"
 
 describe_spec() {
     desc_tool "brief" "One emit-once snapshot of repos, vault, writeups, and any plugged-in section."
@@ -21,11 +19,10 @@ describe_spec() {
     desc_opt --json     -- "Machine-readable digest (one JSON object)"
     desc_opt --prs      -- "Include each repo's open PR (number, CI, review) and surface green PRs to land (network — folds in 'repos --prs', the one PR owner)"
     desc_opt --days DAYS -- "Vault recent-changes window in days (default 7)"
-    desc_para "Pure aggregator: it never re-implements a fact. Repo and PR state come from 'repos' (--prs folds in 'repos --prs', the one PR/CI owner — brief runs no gh of its own), and every vault fact (recent changes, docs to review, inbox) comes from 'severino-vault-mcp brief' and 'list-writeups' — the vault's one owner. Additional surfaces plug in as sections: each command listed in BRIEF_SECTION_EMITTERS (config/brief.sh) emits one section document — name, labelled lines, ranked queue rows, next-verb entries — that brief renders generically; the emitter's own repo owns every word of its content. Run 'brief' to orient, 'brief --json' for one parse of everything, 'brief tui' for the cockpit. The 'next' block names the loop verbs from the one classification: ship (dirty), land (green PR, with --prs), resync (merged), plus whatever plugged sections contribute."
+    desc_para "Pure aggregator: it never re-implements a fact. Repo and PR state come from 'repos' (--prs folds in 'repos --prs', the one PR/CI owner — brief runs no gh of its own), and every vault fact (recent changes, docs to review, inbox) comes from 'severino-vault-mcp brief' and 'list-writeups' — the vault's one owner. Additional surfaces plug in as sections: each repository that declares a brief_section command in config/capabilities.json emits one section document — name, labelled lines, ranked queue rows, next-verb entries — that brief renders generically; the emitter's own repo owns every word of its content. Run 'brief' to orient, 'brief --json' for one parse of everything, 'brief tui' for the cockpit. The 'next' block names the loop verbs from the one classification: ship (dirty), land (green PR, with --prs), resync (merged), plus whatever plugged sections contribute."
     desc_example "brief --prs" -- "morning orient with open-PR/CI state and the land verbs"
     desc_example "brief tui" -- "the interactive workspace cockpit"
     desc_env SVMC_BIN -- "Override the severino-vault-mcp binary (tests stub it)"
-    desc_env BRIEF_SECTION_EMITTERS -- "Section emitter commands, one per line (config/brief.sh)"
     desc_cmd tui -- "Open the workspace cockpit — a ranked queue of what needs you, run ship/land/resync"
     desc_effect remote_write +network +interactive
     desc_opt --days DAYS -- "Vault recent-changes window in days (default 7)"
@@ -50,7 +47,7 @@ done
 # The cockpit is a renderer over this same digest; it re-invokes `brief --json
 # --prs` for its data, so it owns no scanning. Pass the vault window through.
 if (( TUI )); then
-    exec node "$TOOLS_HOME/lib/brief/tui.mjs" --days "$DAYS"
+    exec node "$TOOLS_HOME/lib/brief/tui.ts" --days "$DAYS"
 fi
 
 # Each fact from its one owner; a failed emitter degrades to null, never aborts.
@@ -66,26 +63,14 @@ fi
 # $NOTES_HOME so this never reads the MCP's own configured default vault.
 vault_json="$(svmc brief --days "$DAYS" 2>/dev/null || echo 'null')"
 writeups_json="$(svmc list-writeups --filter all 2>/dev/null || echo 'null')"
-# Pluggable sections: each command in BRIEF_SECTION_EMITTERS (one per line,
-# from config/brief.sh) emits ONE section document — {name, lines, queue,
-# next} — that brief renders generically. Domain semantics live entirely in
-# the emitter's own repo; this repo only knows the contract. A failing or
-# absent emitter degrades to nothing.
-sections_json="$(node "$TOOLS_HOME/lib/tools/capabilities.mjs" run-all brief_section 2>/dev/null || echo '[]')"
-if [[ -n "${BRIEF_SECTION_EMITTERS:-}" ]]; then
-    section_objs="${sections_json#[}"
-    section_objs="${section_objs%]}"
-    while IFS= read -r emitter; do
-        [[ -z "$emitter" ]] && continue
-        # shellcheck disable=SC2086  # an emitter line is a command + its args
-        if out="$(eval $emitter 2>/dev/null)" && [[ "$out" == \{* ]]; then
-            section_objs+="${section_objs:+,}$out"
-        fi
-    done <<< "$BRIEF_SECTION_EMITTERS"
-    sections_json="[$section_objs]"
-fi
+# Pluggable sections: each repository that declares brief_section in
+# config/capabilities.json emits ONE section document ({name, lines, queue,
+# next}) that brief renders generically. Domain semantics live in the
+# emitter's own repo; this repo only knows the contract. A failing or absent
+# emitter degrades to nothing.
+sections_json="$(node "$TOOLS_HOME/lib/tools/capabilities.ts" run-all brief_section 2>/dev/null || echo '[]')"
 
 mode="human"; (( JSON )) && mode="json"
 printf '{"repos":%s,"vault":%s,"writeups":%s,"sections":%s}' \
     "$repos_json" "$vault_json" "$writeups_json" "$sections_json" \
-    | node "$TOOLS_HOME/lib/brief/render.mjs" "$mode" "$PRS"
+    | node "$TOOLS_HOME/lib/brief/render.ts" "$mode" "$PRS"

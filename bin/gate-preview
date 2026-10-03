@@ -4,7 +4,6 @@ set -euo pipefail
 
 source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 
-CODE_HOME="${CODE_HOME:-$HOME/Documents/Code}"
 
 # The single source of truth for gate-preview's surface: lib/describe.sh renders
 # both this tool's -h text and its --describe JSON from this one declaration.

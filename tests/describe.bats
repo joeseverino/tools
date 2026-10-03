@@ -148,9 +148,8 @@ assert run["delegates"].startswith("the owning repo")
 '
 }
 
-@test "a non-delegating command omits the delegates key (real tool: encrypt)" {
-    setup_crypt
-    run "$TOOLS_HOME/bin/encrypt" --describe
+@test "a non-delegating command omits the delegates key (real tool: remember)" {
+    run "$TOOLS_HOME/bin/remember" --describe
     [ "$status" -eq 0 ]
     echo "$output" | python3 -c '
 import json,sys
@@ -180,12 +179,12 @@ assert "target" in names and "--fast" in names
 @test "usage renders Usage/Commands/Options sections plus the implicit -h" {
     run render usage
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Usage: demo [options] <file>..."* ]]
-    [[ "$output" == *"Commands:"* ]]
-    [[ "$output" == *"run"* ]]
-    [[ "$output" == *"-c, --copy"* ]]
-    [[ "$output" == *"-h, --help"* ]]
-    [[ "$output" == *"Environment:"* ]]
+    [[ "$output" == *"Usage: demo [options] <file>..."* ]] || return 1
+    [[ "$output" == *"Commands:"* ]] || return 1
+    [[ "$output" == *"run"* ]] || return 1
+    [[ "$output" == *"-c, --copy"* ]] || return 1
+    [[ "$output" == *"-h, --help"* ]] || return 1
+    [[ "$output" == *"Environment:"* ]] || return 1
     [[ "$output" == *"Examples:"* ]]
 }
 
@@ -229,34 +228,34 @@ print("\n".join(sorted(toks)))
 @test "usage_command renders one command's options, args, prose, and examples" {
     run render usage run
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Usage: demo run [options] <target>"* ]]
-    [[ "$output" == *"Run it"* ]]
-    [[ "$output" == *"Arguments:"* ]]
-    [[ "$output" == *"target"* ]]
-    [[ "$output" == *"--fast"* ]]
-    [[ "$output" == *"-h, --help"* ]]
+    [[ "$output" == *"Usage: demo run [options] <target>"* ]] || return 1
+    [[ "$output" == *"Run it"* ]] || return 1
+    [[ "$output" == *"Arguments:"* ]] || return 1
+    [[ "$output" == *"target"* ]] || return 1
+    [[ "$output" == *"--fast"* ]] || return 1
+    [[ "$output" == *"-h, --help"* ]] || return 1
     # command-scoped prose + examples render in the command's focused help…
-    [[ "$output" == *"Detail about the run command."* ]]
-    [[ "$output" == *"Examples:"* ]]
-    [[ "$output" == *"demo run thing"* ]]
+    [[ "$output" == *"Detail about the run command."* ]] || return 1
+    [[ "$output" == *"Examples:"* ]] || return 1
+    [[ "$output" == *"demo run thing"* ]] || return 1
     # …and the tool-level ones do NOT leak into a command's screen.
-    [[ "$output" != *"First paragraph."* ]]
+    [[ "$output" != *"First paragraph."* ]] || return 1
     [[ "$output" != *"demo a.txt"* ]]
 }
 
 @test "main usage stays a scannable command list with a focused-help pointer" {
     run render usage
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Commands:"* ]]
-    [[ "$output" == *"run"* ]]
+    [[ "$output" == *"Commands:"* ]] || return 1
+    [[ "$output" == *"run"* ]] || return 1
     # command-scoped detail is NOT inlined on the main screen…
-    [[ "$output" != *"--fast"* ]]
-    [[ "$output" != *"Detail about the run command."* ]]
-    [[ "$output" != *"demo run thing"* ]]
+    [[ "$output" != *"--fast"* ]] || return 1
+    [[ "$output" != *"Detail about the run command."* ]] || return 1
+    [[ "$output" != *"demo run thing"* ]] || return 1
     # …but the pointer to it is.
-    [[ "$output" == *"demo <command> -h"* ]]
+    [[ "$output" == *"demo <command> -h"* ]] || return 1
     # tool-level prose + examples DO show on the main screen.
-    [[ "$output" == *"First paragraph."* ]]
+    [[ "$output" == *"First paragraph."* ]] || return 1
     [[ "$output" == *"demo a.txt"* ]]
 }
 
@@ -302,7 +301,7 @@ print("\n".join(sorted(toks)))
     command -v zsh >/dev/null 2>&1 || skip "zsh not installed"
     run zsh -c '
         source "$TOOLS_HOME/lib/common.sh"; source "$TOOLS_HOME/lib/describe.sh"
-        usage(){ :; }                      # hermetic: no spec, like lib/drift.sh
+        usage(){ :; }                      # hermetic: no spec
         desc_help_intercept somecmd; rc=$?
         [[ -z "${describe_spec+x}" ]] || { echo "leaked float param"; exit 3; }
         exit $rc'
@@ -310,17 +309,16 @@ print("\n".join(sorted(toks)))
     [ -z "$output" ]
 }
 
-@test "a real tool self-describes (encrypt)" {
-    setup_crypt
-    run "$TOOLS_HOME/bin/encrypt" --describe
+@test "a real tool self-describes (remember)" {
+    run "$TOOLS_HOME/bin/remember" --describe
     [ "$status" -eq 0 ]
     echo "$output" | python3 -c '
 import json,sys
 o=json.load(sys.stdin)
-assert o["ok"] is True and o["name"]=="encrypt"
+assert o["ok"] is True and o["name"]=="remember"
 assert o["effect"]=="local_write"   # leaf tool declares its blast radius
 names={a["name"] for a in o["global_options"]}
-assert "--copy" in names and "--key" in names
+assert "--force" in names and "--dir" in names
 '
 }
 
@@ -328,7 +326,6 @@ assert "--copy" in names and "--key" in names
     # The effect triple is hand-declared, so the cheap honesty guard is that the
     # value is one of the contract's classes (catches a typo like local-write) and
     # the lean boolean tags only ever appear as true. Runs over every real tool.
-    setup_crypt
     for t in "$TOOLS_HOME"/bin/*; do
         "$t" --describe 2>/dev/null | python3 -c '
 import json,sys
@@ -349,7 +346,7 @@ for c in o.get("commands",[]):
 }
 
 @test "every real tool validates against the committed JSON Schema" {
-    run bash -c '"$TOOLS_HOME/bin/tools" describe | node "$TOOLS_HOME/lib/tools/validate-describe.mjs"'
+    run bash -c '"$TOOLS_HOME/bin/tools" describe | node "$TOOLS_HOME/lib/tools/validate-describe.ts"'
     [ "$status" -eq 0 ]
     [[ "$output" == *"valid describe contracts: $(tool_count)"* ]]
 }
@@ -394,7 +391,7 @@ process.stdin.on("end", () => {
   process.stdout.write(JSON.stringify(doc));
 });
 '"'"' |
-        node "$TOOLS_HOME/lib/tools/validate-describe.mjs"
+        node "$TOOLS_HOME/lib/tools/validate-describe.ts"
     '
     [ "$status" -eq 1 ]
     [[ "$output" == *"ends mid-sentence"* ]]
@@ -412,7 +409,7 @@ process.stdin.on("end", () => {
   process.stdout.write(JSON.stringify(doc));
 });
 '"'"' |
-        node "$TOOLS_HOME/lib/tools/validate-describe.mjs"
+        node "$TOOLS_HOME/lib/tools/validate-describe.ts"
     '
     [ "$status" -eq 1 ]
     [[ "$output" == *"duplicate tool order"* ]]
@@ -430,19 +427,19 @@ process.stdin.on("end", () => {
 import sys
 text=open(sys.argv[1]).read()
 block=text.split("<!-- BEGIN GENERATED REPO INVENTORY -->",1)[1].split("<!-- END GENERATED REPO INVENTORY -->",1)[0]
-names=["tools","encrypt","decrypt","open-age","inbox","vault","backup","dns-test",
-       "ts-acl","cf-dns","adguard","nginx","hq","site","brand","remember","doc-to-pdf"]
+names=["tools","inbox","vault","backup","dns-test","hq","brand","remember",
+       "doc-to-pdf","diagram","repos","ship","gate-preview"]
 positions=[block.index("\n    "+name) for name in names]
 assert positions == sorted(positions), positions
-assert "# Cryptography" in block and "# Drift guards" in block
+assert "# Integrations" in block and "# Workspace" in block
 PY'
     [ "$status" -eq 0 ]
 }
 
 @test "README reference renders contract prose, examples, and metavariables" {
-    run bash -c 'grep -q "encrypt -k ~/keys/coworker.pub notes.md" "$TOOLS_HOME/README.md" &&
-                 grep -q -- "--key <PATH>" "$TOOLS_HOME/README.md" &&
-                 grep -q "site featured my-writeup top" "$TOOLS_HOME/README.md"'
+    run bash -c 'grep -q "remember feedback use-rg-and-fd" "$TOOLS_HOME/README.md" &&
+                 grep -q -- "--dir <PATH>" "$TOOLS_HOME/README.md" &&
+                 grep -q "hq create project my-site" "$TOOLS_HOME/README.md"'
     [ "$status" -eq 0 ]
 }
 
@@ -454,7 +451,7 @@ PY'
 printf '%s\n' '{"ok":true,"schema_version":4,"repo":"tools","tools":[{"ok":false,"name":"broken","error":"no contract"}]}'
 EOF
     chmod +x "$fake/tools"
-    run env TOOLS_HOME="$BATS_TEST_TMPDIR" node "$TOOLS_HOME/lib/tools/generate-surfaces.mjs" completions
+    run env TOOLS_HOME="$BATS_TEST_TMPDIR" node "$TOOLS_HOME/lib/tools/generate-surfaces.ts" completions
     [ "$status" -eq 1 ]
     [[ "$output" == *"broken: no contract"* ]]
 }
@@ -467,7 +464,7 @@ EOF
 printf '%s\n' '{"ok":true,"schema_version":4,"repo":"tools","tools":[{"ok":true,"name":"broken"}]}'
 EOF
     chmod +x "$fake/tools"
-    run env TOOLS_HOME="$BATS_TEST_TMPDIR" node "$TOOLS_HOME/lib/tools/generate-surfaces.mjs" completions
+    run env TOOLS_HOME="$BATS_TEST_TMPDIR" node "$TOOLS_HOME/lib/tools/generate-surfaces.ts" completions
     [ "$status" -eq 1 ]
     [[ "$output" == *"broken/"* ]]
 }
@@ -498,7 +495,6 @@ assert "no command" in o["error"] and "restart" in o["error"]
 }
 
 @test "tools describe aggregates every bin/ tool, deterministically" {
-    setup_crypt
     run "$TOOLS_HOME/bin/tools" describe
     [ "$status" -eq 0 ]
     echo "$output" | python3 -c '
@@ -519,9 +515,8 @@ assert binset == set(names), (binset ^ set(names))
     # The help text is rendered by one shared engine (lib/describe.sh); the only
     # per-tool code is the dispatch line that routes the flag to it. This guards
     # that BOTH -h and --help reach that renderer for every tool — a regression
-    # where a shared dispatcher (lib/drift.sh) matched -h but not --help shipped
-    # "unknown command: --help" on the drift guards.
-    setup_crypt
+    # where a shared dispatcher matched -h but not --help shipped
+    # "unknown command: --help".
     for tool in "$TOOLS_HOME"/bin/*; do
         h_out="$("$tool" -h 2>&1)"; h_rc=$?
         hh_out="$("$tool" --help 2>&1)"; hh_rc=$?
@@ -534,17 +529,16 @@ assert binset == set(names), (binset ^ set(names))
 @test "subcommand -h renders focused help from the spec, never runs the command" {
     # `<tool> <cmd> -h` must route to usage_command (the same renderer the main
     # screen uses) and return before any action — a help flag that fell through
-    # to `pull` would hit the network. Drift guards share one dispatcher
-    # (lib/drift.sh), so this covers adguard / ts-acl / cf-dns / nginx at once.
-    run "$TOOLS_HOME/bin/adguard" pull -h
+    # to the action would reach HQ over SSH.
+    run env HQ_CALL=/nonexistent "$TOOLS_HOME/bin/hq" drift -h
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Usage: adguard pull"* ]]
-    [[ "$output" == *"Regenerate the vault cache"* ]]
-    [[ "$output" == *"-h, --help"* ]]
+    [[ "$output" == *"Usage: hq drift"* ]] || return 1
+    [[ "$output" == *"out of sync or unhealthy"* ]] || return 1
+    [[ "$output" == *"-h, --help"* ]] || return 1
     # --help is the same render as -h here too.
-    run "$TOOLS_HOME/bin/adguard" diff --help
+    run env HQ_CALL=/nonexistent "$TOOLS_HOME/bin/hq" call --help
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Usage: adguard diff"* ]]
+    [[ "$output" == *"Usage: hq call"* ]]
 }
 
 @test "spec ↔ dispatch parity is exact, both directions (no orphan command or arm)" {
@@ -554,10 +548,8 @@ assert binset == set(names), (binset ^ set(names))
     # asserts the two sets are EQUAL: a desc_cmd with no dispatch arm (shows in
     # help, errors on run) AND a dispatch arm with no desc_cmd (an undisclosed
     # command) both fail. The arm set is the `case` block right after
-    # desc_help_intercept. Drift guards dispatch in lib/drift.sh (show/diff/pull),
-    # covered by drift.bats instead.
-    setup_crypt
-    for tool in hq site tools brand vault; do
+    # desc_help_intercept.
+    for tool in hq tools brand vault; do
         run python3 - "$TOOLS_HOME/bin/$tool" <<'PY'
 import json, os, re, subprocess, sys
 path = sys.argv[1]
@@ -580,7 +572,6 @@ PY
     # direction: a desc_opt long flag that no parser handles. (The reverse — a
     # parser flag missing from the spec — and full behavioral SOT would need the
     # parser generated from the spec; that's the remaining known gap.)
-    setup_crypt
     for t in "$TOOLS_HOME"/bin/*; do
         head -1 "$t" | grep -q node && continue   # doc-to-pdf carries its own SPEC
         flags=$("$t" --describe 2>/dev/null | python3 -c '
@@ -604,8 +595,55 @@ print("\n".join(sorted(fl)))' 2>/dev/null)
 }
 
 @test "tools describe <tool> delegates to that tool" {
-    setup_crypt
-    run "$TOOLS_HOME/bin/tools" describe encrypt
+    run "$TOOLS_HOME/bin/tools" describe remember
     [ "$status" -eq 0 ]
-    echo "$output" | python3 -c 'import json,sys; assert json.load(sys.stdin)["name"]=="encrypt"'
+    echo "$output" | python3 -c 'import json,sys; assert json.load(sys.stdin)["name"]=="remember"'
+}
+
+# gate_tool — a throwaway tool with one deploy command and one read command, so
+# the effect gate is tested on its own rather than through a real deploy.
+gate_tool() {
+    local tool="$BATS_TEST_TMPDIR/gated"
+    cat > "$tool" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+source "$TOOLS_HOME/lib/init.sh" "" "$@"
+describe_spec() {
+    desc_tool "gated" "A tool with one deploy and one read."
+    desc_inventory "Other" 990
+    desc_synopsis "gated <command>"
+    desc_effect read
+    desc_cmd ship -- "Deploy to production"
+    desc_effect deploy +network
+    desc_cmd look -- "Read something"
+    desc_effect read
+}
+desc_help_intercept "$@"
+case "${1:-}" in
+    ship) echo shipped ;;
+    look) echo looked ;;
+esac
+SH
+    chmod +x "$tool"
+    printf '%s' "$tool"
+}
+
+@test "a deploy command fails closed non-interactively without the bypass" {
+    tool="$(gate_tool)"
+    run "$tool" ship </dev/null
+    [ "$status" -eq 2 ] && [[ "$output" == *"is a deploy"*"TOOLS_ASSUME_YES=1"* ]] && [[ "$output" != *shipped* ]]
+}
+
+@test "a deploy command runs with TOOLS_ASSUME_YES=1 or --yes" {
+    tool="$(gate_tool)"
+    run env TOOLS_ASSUME_YES=1 "$tool" ship </dev/null
+    [ "$status" -eq 0 ] && [ "$output" = "shipped" ] || return 1
+    run "$tool" ship --yes </dev/null
+    [ "$status" -eq 0 ] && [ "$output" = "shipped" ]
+}
+
+@test "a read command is never gated" {
+    tool="$(gate_tool)"
+    run "$tool" look </dev/null
+    [ "$status" -eq 0 ] && [ "$output" = "looked" ]
 }

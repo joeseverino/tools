@@ -13,10 +13,6 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 [[ -n "${NOTES_HOME-}"   ]] && source "$TOOLS_HOME/config/vault.sh"
 # shellcheck source=config/backup.sh.example
 [[ -n "${BACKUPS_HOME-}" ]] && source "$TOOLS_HOME/config/backup.sh"
-# shellcheck source=config/crypt.sh
-[[ -n "${KEYS_HOME-}"    ]] && source "$TOOLS_HOME/config/crypt.sh"
-source "$TOOLS_HOME/lib/key.sh"
-source "$TOOLS_HOME/lib/sdk/secrets.sh"
 source "$TOOLS_HOME/lib/doctor.sh"
 # shellcheck source=lib/tools/describe.sh
 source "$TOOLS_HOME/lib/tools/describe.sh"
@@ -37,19 +33,15 @@ describe_spec() {
     desc_synopsis "tools <command> [options]"
     desc_effect read
 
-    desc_cmd status   -- "One-screen health check across vault, inbox, backup, keys"
+    desc_cmd status   -- "One-screen health check across vault, inbox, and backup"
     desc_effect read +network
     desc_opt --json   -- "Machine-readable output (one JSON object)"
 
     desc_cmd doctor   -- "Verify environment, deps, and installed symlinks"
     desc_effect read +network
-    desc_opt --all    -- "Cross-system rollup: also run hq doctor, hq schema --check, and site doctor (exit 1 if any gate fails)"
-    desc_opt --live   -- "Implies --all; additionally run the drift guards (cf-dns / adguard / ts-acl) — live API reads that require 1Password approval"
+    desc_opt --all    -- "Cross-system rollup: also run hq doctor (exit 1 if any gate fails)"
+    desc_opt --live   -- "Implies --all; also ask HQ for managed resources that have drifted from what it declares (hq drift, over SSH)"
     desc_opt --json   -- "Machine-readable output (one object, \"checks\" array)"
-
-    desc_cmd secrets  -- "Inspect the logical secret registry without reading secret values"
-    desc_effect read
-    desc_pos action +optional "{doctor,inventory}" -- "doctor (default) validates the provider and registry; inventory lists logical ids only"
 
     desc_cmd check    -- "Run the full CI suite locally: lint, tests, bench"
     desc_effect local_write
@@ -59,20 +51,11 @@ describe_spec() {
     desc_cmd new      -- "Scaffold a new tool in bin/ with the house conventions"
     desc_effect local_write
     desc_pos name     -- "Name of the new tool (creates bin/<name>)"
-    desc_opt --drift  -- "Scaffold a drift-guard tool instead (show/diff/pull, with get_token/fetch_live/normalize + a config template)"
     desc_opt --agent  -- "Scaffold a lightweight agent-facing tool that emits the versioned result envelope"
     desc_opt --verify -- "Generate derived surfaces and run the full non-benchmark check after scaffolding"
 
     desc_cmd install  -- "Create symlinks in \$INSTALL_DIR for every tool"
     desc_effect local_write
-
-    desc_cmd key      -- "Cache / forget / test the age key passphrase in Keychain"
-    desc_effect local_write +interactive
-    desc_pos action +optional "{cache,forget,status,test}" -- "Keychain action — cache (store), forget (clear), status (show, default), test (verify it still unlocks \$AGE_KEY)"
-
-    desc_cmd watch    -- "Manage the optional launchd auto-sync agent (off by default)"
-    desc_effect local_write
-    desc_pos action +optional "{enable,disable,status,run-now}" -- "Agent action — enable (install+load), disable (unload+remove), status (loaded? + log tail), run-now (one immediate vault sync)"
 
     desc_cmd describe -- "Emit the command surface of every tool as one JSON document (the emit-once contract)"
     desc_effect read
@@ -110,6 +93,12 @@ describe_spec() {
     desc_opt --json -- "Emit the plan or execution receipts as JSON"
     desc_opt --scope SCOPE "{local,fleet}" -- "Maximum projection scope to derive (default: local)"
     desc_para "Dry-run by default. Repairs are schema-limited to local writes and execute only owner-declared commands; remote writes and deploys cannot enter this generic path."
+
+    desc_cmd reinstall -- "Reinstall a registered uv tool from its checkout and verify it matches the source"
+    desc_effect local_write +network
+    desc_pos repo +optional -- "Repository id from config/capabilities.json (default: every repo that declares an install)"
+    desc_para "Runs each repository's declared install command, then compares the installed fingerprint with one computed from the checkout wherever the repository declares a fingerprint. A mismatch fails, so a stale install cannot pass for current."
+    desc_example "tools reinstall severino-vault-mcp" -- "reinstall the vault MCP and verify it against source"
 
     desc_cmd bump-engine -- "Re-lock severino-vault-engine in every consumer repo and reinstall their uv tools"
     desc_effect local_write +network
@@ -151,20 +140,14 @@ cmd_status() {
         fi
     fi
 
-    local pub_ok=0 key_ok=0
-    [[ -f "${AGE_PUBKEY:-}" ]] && pub_ok=1
-    [[ -f "${AGE_KEY:-}"    ]] && key_ok=1
-
     if (( json )); then
         printf '{"ok":true,"vault":{"ok":%s,"tree":"%s","remote":"%s","path":"%s"},' \
             "$(json_bool "$vault_ok")" "$(json_escape "$tree")" \
             "$(json_escape "$remote")" "$(json_escape "${VAULT:-}")"
         printf '"inbox":{"ok":%s,"pending":%d},' "$(json_bool "$inbox_ok")" "$pending"
-        printf '"backup":{"ok":%s,"git_repo":%s,"last_commit":"%s","last_commit_when":"%s"},' \
+        printf '"backup":{"ok":%s,"git_repo":%s,"last_commit":"%s","last_commit_when":"%s"}}\n' \
             "$(json_bool "$((backup_ok && backup_repo))")" "$(json_bool "$backup_repo")" \
             "$(json_escape "$last_msg")" "$(json_escape "$last_when")"
-        printf '"keys":{"ok":%s,"pub":%s,"private":%s}}\n' \
-            "$(json_bool "$((pub_ok && key_ok))")" "$(json_bool "$pub_ok")" "$(json_bool "$key_ok")"
         return 0
     fi
 
@@ -201,15 +184,6 @@ cmd_status() {
         msg "$RED" "backup" "BACKUPS_HOME not set"
     fi
 
-    if (( pub_ok && key_ok )); then
-        msg "$GREEN" "keys" "pub + private present"
-    else
-        local detail=""
-        (( pub_ok )) || detail+="missing pub "
-        (( key_ok )) || detail+="missing private"
-        msg "$RED" "keys" "$detail"
-    fi
-
     echo
 }
 
@@ -233,7 +207,7 @@ cmd_doctor() {
     (( DOCTOR_JSON )) || echo
 
     # Layout env vars
-    for var in TOOLS_HOME KEYS_HOME NOTES_HOME BACKUPS_HOME; do
+    for var in TOOLS_HOME NOTES_HOME BACKUPS_HOME; do
         if [[ -n "${!var:-}" ]]; then
             check "\$$var" 1 "${!var}" || fail=1
         else
@@ -259,11 +233,9 @@ cmd_doctor() {
     }
     check_path d "VAULT directory" "${VAULT:-}"
     check_path d "INBOX_DIR"       "${INBOX_DIR:-}"
-    check_path f "AGE_PUBKEY"      "${AGE_PUBKEY:-}"
-    check_path f "AGE_KEY"         "${AGE_KEY:-}"
 
     # External deps
-    for cmd in age git rsync; do
+    for cmd in git rsync uv; do
         if command -v "$cmd" >/dev/null; then
             check "$cmd" 1 "$(command -v "$cmd")" || fail=1
         else
@@ -271,29 +243,23 @@ cmd_doctor() {
         fi
     done
 
-    # 1Password is the sole runtime credential provider for Tools. This check
-    # validates installation and the logical registry only; doctor never reads
-    # a secret value or triggers an item access prompt.
+    # 1Password is the credential store; hq reads its env through it. Doctor
+    # never reads a secret or raises an item prompt.
     if command -v op >/dev/null; then
         check "1Password CLI" 1 "$(command -v op)"
     else
         check "1Password CLI" 0 "not installed — install the 1Password CLI" || fail=1
     fi
-    if secrets_registry_check; then
-        check "secrets registry" 1 "$(secrets_inventory | wc -l | tr -d ' ') logical fields"
-    else
-        check "secrets registry" 0 "$TOOLS_SECRETS_REGISTRY is invalid" || fail=1
-    fi
 
-    # Node toolchain — optional: only doc-to-pdf / site manage / site compare
-    # need it, so a missing node warns instead of failing.
+    # Node toolchain — optional: only doc-to-pdf, diagram, and the TUIs need
+    # it, so a missing node warns instead of failing.
     if command -v node >/dev/null; then
         check "node" 1 "$(command -v node)"
         if [[ -f "$TOOLS_HOME/package.json" && ! -d "$TOOLS_HOME/node_modules" ]]; then
-            check_warn "node_modules" "missing — run: npm ci (needed by doc-to-pdf)"
+            check_warn "node_modules" "missing — run: npm ci (needed by doc-to-pdf and diagram)"
         fi
     else
-        check_warn "node" "not installed — doc-to-pdf and site manage/compare need it"
+        check_warn "node" "not installed — doc-to-pdf, diagram, and the TUIs need it"
     fi
 
     # Command-surface contract — every tool must self-describe (the emit-once
@@ -303,8 +269,7 @@ cmd_doctor() {
     # above) doesn't masquerade as a missing contract.
     local desc_missing="" dout
     for name in "${TOOL_NAMES[@]}"; do
-        if dout=$(KEYS_HOME="${KEYS_HOME:-$TOOLS_HOME}" \
-                  NOTES_HOME="${NOTES_HOME:-$TOOLS_HOME}" \
+        if dout=$(NOTES_HOME="${NOTES_HOME:-$TOOLS_HOME}" \
                   BACKUPS_HOME="${BACKUPS_HOME:-$TOOLS_HOME}" \
                   "$TOOLS_HOME/bin/$name" --describe 2>/dev/null) \
             && [[ "$dout" == '{"ok":true'* ]]; then
@@ -324,7 +289,7 @@ cmd_doctor() {
     local contract_scope="local"
     (( run_all )) && contract_scope="fleet"
     (( run_live )) && contract_scope="live"
-    contract_result=$(node "$TOOLS_HOME/lib/tools/contracts.mjs" --check --scope "$contract_scope" --json 2>/dev/null) || true
+    contract_result=$(node "$TOOLS_HOME/lib/tools/contracts.ts" --check --scope "$contract_scope" --json 2>/dev/null) || true
     if [[ -n "$contract_result" ]]; then
         contract_ok=$(node -e 'const x=JSON.parse(process.argv[1]); process.stdout.write(x.ok ? "1" : "0")' "$contract_result")
         contract_detail=$(node -e 'const x=JSON.parse(process.argv[1]); const p=x.projections; process.stdout.write(p.filter(v=>v.ok&&!v.skipped).length+" current, "+p.filter(v=>v.skipped).length+" unavailable")' "$contract_result")
@@ -356,6 +321,23 @@ cmd_doctor() {
         check "engine lock parity" 0 "${engine_detail%, } — run: tools bump-engine" || fail=1
     fi
 
+    # Installed uv tools must match their checkouts, or a stale install answers
+    # for code that has moved on. The fix is the command this points at.
+    local -a installed_line=()
+    local installed_detail="" installed_stale=""
+    while IFS=$'\t' read -r -a installed_line; do
+        case "${installed_line[1]}" in
+            match) installed_detail+="${installed_line[0]} ${installed_line[2]}, " ;;
+            skip)  ;;
+            *)     installed_stale+="${installed_line[0]} (${installed_line[2]}) " ;;
+        esac
+    done < <(node "$TOOLS_HOME/lib/tools/capabilities.ts" fingerprints 2>/dev/null)
+    if [[ -n "$installed_stale" ]]; then
+        check "installed tools" 0 "${installed_stale% } — run: tools reinstall" || fail=1
+    elif [[ -n "$installed_detail" ]]; then
+        check "installed tools" 1 "${installed_detail%, } match source"
+    fi
+
     # Symlinks in install dir (top-level tools + lib helpers)
     for name in "${TOOL_NAMES[@]}"; do
         local link="$INSTALL_DIR/$name"
@@ -385,29 +367,11 @@ cmd_doctor() {
         if (( run_live )); then
             doctor_live_gates || fail=1
         else
-            check_warn "drift guards" "skipped — live API reads (network + 1Password approval); rerun with --live"
+            check_warn "hq drift" "skipped — asks HQ over SSH; rerun with --live"
         fi
     fi
 
     doctor_finish "$fail"
-}
-
-cmd_secrets() {
-    local action="${1:-doctor}"
-    case "$action" in
-        doctor)
-            command -v jq >/dev/null 2>&1 || die "error" "jq is not installed"
-            command -v op >/dev/null 2>&1 || die "error" "1Password CLI is not installed"
-            secrets_registry_check || die "error" "invalid secrets registry: $TOOLS_SECRETS_REGISTRY"
-            msg "$GREEN" "provider" "1Password CLI $(op --version)"
-            msg "$GREEN" "registry" "$(secrets_inventory | wc -l | tr -d ' ') logical fields; values not read"
-            ;;
-        inventory)
-            secrets_registry_check || die "error" "invalid secrets registry: $TOOLS_SECRETS_REGISTRY"
-            secrets_inventory
-            ;;
-        *) die_unknown action "$action" secrets ;;
-    esac
 }
 
 # ---------- install ----------
@@ -462,7 +426,7 @@ cmd_generate() {
     done
     local args=("$target")
     (( check_only )) && args+=(--check)
-    node "$TOOLS_HOME/lib/tools/generate-surfaces.mjs" "${args[@]}"
+    node "$TOOLS_HOME/lib/tools/generate-surfaces.ts" "${args[@]}"
 }
 
 # ---------- contracts (producer → consumer graph) ----------
@@ -483,11 +447,11 @@ cmd_contracts() {
         esac
         shift
     done
-    node "$TOOLS_HOME/lib/tools/contracts.mjs" "${args[@]}"
+    node "$TOOLS_HOME/lib/tools/contracts.ts" "${args[@]}"
 }
 
 cmd_derive() {
-    node "$TOOLS_HOME/lib/tools/derive.mjs" "$@"
+    node "$TOOLS_HOME/lib/tools/derive.ts" "$@"
 }
 
 # ---------- check (the CI suite, runnable locally) ----------
@@ -562,59 +526,45 @@ cmd_check() {
     done
     check "zsh -n" "$step_ok" "$n scripts" || fail=1
 
-    # node --check (lib modules by extension, bin launchers by shebang —
-    # stdin keeps the parse mode independent of node's syntax detection)
-    if command -v node >/dev/null; then
-        step_ok=1; n=0
-        for f in lib/*/*.mjs; do
-            [[ -e "$f" ]] || continue
-            n=$((n+1))
-            if ! err=$(node --check "$f" 2>&1); then
-                msg "$RED" "fail" "node --check $f"
-                printf '%s\n' "$err" | sed 's/^/    /'
-                step_ok=0
-            fi
-        done
-        for f in bin/*; do
-            shebang_has node "$f" || continue
-            n=$((n+1))
-            if ! err=$(node --input-type=module --check < "$f" 2>&1); then
-                msg "$RED" "fail" "node --check $f"
-                printf '%s\n' "$err" | sed 's/^/    /'
-                step_ok=0
-            fi
-        done
-        check "node --check" "$step_ok" "$n scripts" || fail=1
+    # TypeScript: every lib module type-checks under the strict tsconfig (Node
+    # runs the same files directly, so this is the whole compile step).
+    if [[ -x "$TOOLS_HOME/node_modules/.bin/tsc" ]]; then
+        if err=$("$TOOLS_HOME/node_modules/.bin/tsc" -p "$TOOLS_HOME" 2>&1); then
+            check "typecheck" 1 "$(git ls-files 'lib/*.ts' 'lib/**/*.ts' | wc -l | tr -d ' ') modules, strict"
+        else
+            printf '%s\n' "$err" | sed 's/^/    /'
+            check "typecheck" 0 "errors above" || fail=1
+        fi
     else
-        check "node --check" 0 "node not installed" || fail=1
+        check "typecheck" 0 "run npm ci (TypeScript is required)" || fail=1
     fi
 
     # Contract schema + generated consumers. The validator checks every real
-    # emitter against schemas/cordon-v4.json (via lib/tools/describe-schema.mjs) —
+    # emitter against schemas/cordon-v4.json (via lib/tools/describe-schema.ts) —
     # including sibling repos'
     # emitters via --repos, so a drifted `severino-vault-mcp describe` fails here
     # (the cross-repo drift guard). When the sibling isn't installed, --repos just
     # folds in nothing. The generator check keeps completions + README current.
     if command -v node >/dev/null && [[ -d "$TOOLS_HOME/node_modules/ajv" ]]; then
-        if err=$("$TOOLS_HOME/bin/tools" describe --repos | node "$TOOLS_HOME/lib/tools/validate-describe.mjs" 2>&1); then
+        if err=$("$TOOLS_HOME/bin/tools" describe --repos | node "$TOOLS_HOME/lib/tools/validate-describe.ts" 2>&1); then
             check "describe schema" 1 "$err"
         else
             printf '%s\n' "$err" | sed 's/^/    /'
             check "describe schema" 0 "validation errors above" || fail=1
         fi
-        if err=$(node "$TOOLS_HOME/lib/tools/validate-json.mjs" "$TOOLS_HOME/schemas/capabilities-v1.json" < "$TOOLS_HOME/config/capabilities.json" 2>&1); then
+        if err=$(node "$TOOLS_HOME/lib/tools/validate-json.ts" "$TOOLS_HOME/schemas/capabilities-v1.json" < "$TOOLS_HOME/config/capabilities.json" 2>&1); then
             check "capability schema" 1 "fleet manifest valid"
         else
             printf '%s\n' "$err" | sed 's/^/    /'
             check "capability schema" 0 "validation errors above" || fail=1
         fi
-        if err=$(node "$TOOLS_HOME/lib/tools/validate-json.mjs" "$TOOLS_HOME/schemas/contract-graph-v1.json" < "$TOOLS_HOME/config/contracts.json" 2>&1); then
+        if err=$(node "$TOOLS_HOME/lib/tools/validate-json.ts" "$TOOLS_HOME/schemas/contract-graph-v1.json" < "$TOOLS_HOME/config/contracts.json" 2>&1); then
             check "contract graph schema" 1 "producer/consumer graph valid"
         else
             printf '%s\n' "$err" | sed 's/^/    /'
             check "contract graph schema" 0 "validation errors above" || fail=1
         fi
-        if err=$(node "$TOOLS_HOME/lib/tools/contracts.mjs" --check --scope local --json 2>&1); then
+        if err=$(node "$TOOLS_HOME/lib/tools/contracts.ts" --check --scope local --json 2>&1); then
             check "contract projections" 1 "all declared projections current"
         else
             printf '%s\n' "$err" | sed 's/^/    /'
@@ -687,23 +637,19 @@ cmd_check() {
 # ---------- new (scaffold a tool with the house conventions) ----------
 
 cmd_new() {
-    local name="" drift=0 agent=0 verify=0
+    local name="" agent=0 verify=0
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --drift)    drift=1; shift ;;
             --agent)    agent=1; shift ;;
             --verify)   verify=1; shift ;;
             -*)         die_unknown option "$1" new ;;
             *)          name="$1"; shift ;;
         esac
     done
-    [[ -n "$name" ]] || die "usage" "tools new <name> [--drift|--agent] [--verify] (try -h)" 2
-    (( drift + agent <= 1 )) || die "usage" "--drift and --agent are mutually exclusive" 2
+    [[ -n "$name" ]] || die "usage" "tools new <name> [--agent] [--verify] (try -h)" 2
     [[ "$name" =~ ^[a-z][a-z0-9-]*$ ]] || die "usage" "name must be lowercase letters, digits, dashes" 2
     local target="$TOOLS_HOME/bin/$name"
     [[ -e "$target" ]] && die "error" "bin/$name already exists"
-    # Env-var prefix for config vars: cf-dns → CF_DNS, adguard → ADGUARD.
-    local prefix; prefix=$(printf '%s' "$name" | tr '[:lower:]-' '[:upper:]_')
     local order
     order=$("$TOOLS_HOME/bin/tools" describe | node -e '
 let input = "";
@@ -715,11 +661,6 @@ process.stdin.on("end", () => {
   process.stdout.write(String(Math.ceil(max / 10) * 10 + 10));
 });
 ')
-
-    if (( drift )); then
-        new_drift "$name" "$prefix" "$target" "$order" "$verify"
-        return 0
-    fi
 
     if (( agent )); then
         new_agent "$name" "$target" "$order" "$verify"
@@ -815,270 +756,6 @@ EOF
     echo
 }
 
-# Scaffold a drift-guard tool + its config. __NAME__ / __PREFIX__ are filled in
-# after the heredocs are written (the heredocs are quoted, so nothing expands).
-new_drift() {
-    local name="$1" prefix="$2" target="$3" order="$4" verify="${5:-0}"
-
-    cat > "$target" <<'EOF'
-#!/usr/bin/env bash
-# __NAME__ — fetch live state from an API and diff it against the vault mirror.
-# Drift-guard sibling of cf-dns / adguard; show / diff / pull live in lib/drift.sh.
-set -euo pipefail
-
-source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "__NAME__" "$@"
-# shellcheck source=lib/drift.sh
-source "$TOOLS_HOME/lib/drift.sh"
-
-# TODO: API base for the service.
-API="https://api.example.com"
-
-# The infra-dataset id whose JSON cache this guard owns (registered in the vault
-# at 02 Infrastructure/_infra-datasets.json). drift.sh reads/writes the cache
-# through the vault MCP.
-DRIFT_DATASET_ID="${__PREFIX___DATASET_ID:-__NAME__}"
-
-# show/diff/pull + -h + --describe are all served by drift_main from this one
-# declaration; drift_describe_commands emits the shared show/diff/pull surface.
-describe_spec() {
-    desc_tool "__NAME__" "Fetch live state from an API and diff it against the vault cache."
-    desc_inventory "Drift guards" __ORDER__
-    desc_synopsis "__NAME__ <command>"
-    # Tool and command effects are declared once by the shared surface.
-    drift_describe_commands
-    desc_env __PREFIX___DATASET_ID -- "infra-dataset id for the cache (default __NAME__)"
-}
-
-# Resolve the credential through the shared logical-secret registry. Add the
-# logical id -> op:// reference once in config/secrets.json; never call `op`
-# directly or add a second credential backend in a tool.
-get_token() {
-    secret_read __NAME__.token
-}
-
-# Fetch live state and reduce to the normalized, sorted set.
-# TODO: point at the real endpoint; paginate if the API does.
-fetch_live() {
-    local token; token=$(get_token)
-    curl -fsS "$API/TODO" \
-         -H "Authorization: Bearer $token" \
-         -H "Accept: application/json" 2>/dev/null \
-        | normalize \
-        || die "error" "live fetch failed"
-}
-
-# Normalize a raw API response (stdin) to the diffable shape. Must be idempotent
-# on its own output — drift.sh re-runs it over the cached value.
-# TODO: project to the meaningful fields and sort deterministically.
-normalize() {
-    jq -S 'map({TODO: .}) | sort_by(tostring)'
-}
-
-# lib/drift.sh provides show / diff / pull / dispatch over DRIFT_DATASET_ID.
-drift_main "$@"
-EOF
-    sed -i '' -e "s/__NAME__/$name/g" -e "s/__PREFIX__/$prefix/g" \
-        -e "s/__ORDER__/$order/g" "$target"
-    chmod +x "$target"
-
-    local cfg="$TOOLS_HOME/config/$name.sh"
-    if [[ ! -e "$cfg" ]]; then
-        cat > "$cfg" <<'EOF'
-# shellcheck shell=bash
-# config/__NAME__.sh — __NAME__ drift checker configuration
-#
-# Sourced by `__NAME__`. Each variable can be overridden per-invocation.
-
-: "${NOTES_HOME:?set in ~/.zshrc}"
-
-# Vault doc holding the machine-readable mirror, and the heading whose fenced
-# ```json block `diff`/`pull` read and rewrite.
-: "${__PREFIX___VAULT_DOC:=$NOTES_HOME/TODO.md}"
-: "${__PREFIX___VAULT_HEADING:=## Canonical Records (__NAME__)}"
-EOF
-        sed -i '' -e "s/__NAME__/$name/g" -e "s/__PREFIX__/$prefix/g" "$cfg"
-    fi
-
-    echo
-    msg "$GREEN" "created" "bin/$name (drift guard) + config/$name.sh"
-    msg "$DIM"   "next"    "1. fill the TODOs: API base, logical secret id, fetch_live endpoint, normalize jq"
-    msg "$DIM"   "next"    "2. register the logical id in config/secrets.json and the dataset in the vault"
-    if (( verify )); then
-        msg "$DIM" "verify" "generating surfaces and running tools check --no-bench"
-        cmd_generate all
-        cmd_check --no-bench
-        msg "$DIM" "next" "3. seed the vault block via: $name pull"
-        msg "$DIM" "next" "4. tools install"
-    else
-        msg "$DIM" "next" "3. tools generate; seed the vault block via: $name pull"
-        msg "$DIM" "next" "4. tools install && tools check"
-    fi
-    echo
-}
-
-# ---------- watch (opt-in launchd auto-sync) ----------
-
-WATCH_LABEL="${TOOLS_WATCH_LABEL:-com.tools.vault-sync}"
-WATCH_PLIST="$HOME/Library/LaunchAgents/$WATCH_LABEL.plist"
-WATCH_LOG_DIR="$TOOLS_HOME/.logs"
-WATCH_LOG="$WATCH_LOG_DIR/vault-sync.log"
-WATCH_INTERVAL="${TOOLS_WATCH_INTERVAL:-900}"  # 15 minutes
-
-watch_enable() {
-    mkdir -p "$(dirname "$WATCH_PLIST")" "$WATCH_LOG_DIR"
-    cat > "$WATCH_PLIST" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>$WATCH_LABEL</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/bin/zsh</string>
-        <string>-lc</string>
-        <string>$TOOLS_HOME/bin/vault sync 2>&amp;1 | sed "s/^/[\$(date +%Y-%m-%dT%H:%M:%S)] /" &gt;&gt; $WATCH_LOG; exit 0</string>
-    </array>
-    <key>StartInterval</key>
-    <integer>$WATCH_INTERVAL</integer>
-    <key>RunAtLoad</key>
-    <false/>
-    <key>StandardOutPath</key>
-    <string>$WATCH_LOG_DIR/vault-sync.stdout.log</string>
-    <key>StandardErrorPath</key>
-    <string>$WATCH_LOG_DIR/vault-sync.stderr.log</string>
-</dict>
-</plist>
-EOF
-    launchctl unload "$WATCH_PLIST" 2>/dev/null || true
-    if launchctl load "$WATCH_PLIST"; then
-        echo
-        msg "$GREEN" "enabled" "vault sync every $((WATCH_INTERVAL/60)) min"
-        msg "$DIM"   "plist"   "$WATCH_PLIST"
-        msg "$DIM"   "log"     "$WATCH_LOG"
-        echo
-    else
-        die "error" "launchctl load failed"
-    fi
-}
-
-watch_disable() {
-    if [[ ! -f "$WATCH_PLIST" ]]; then
-        echo
-        msg "$YELLOW" "disabled" "no agent installed"
-        echo
-        return 0
-    fi
-    launchctl unload "$WATCH_PLIST" 2>/dev/null || true
-    rm -f "$WATCH_PLIST"
-    echo
-    msg "$GREEN" "disabled" "agent removed"
-    echo
-}
-
-watch_status() {
-    echo
-    # Optional migration helper: if you previously used a different label,
-    # set TOOLS_LEGACY_WATCH_LABEL to the old name to get a one-line nag
-    # with the unload command. Unset (the default) means no check.
-    if [[ -n "${TOOLS_LEGACY_WATCH_LABEL-}" ]]; then
-        local legacy="$HOME/Library/LaunchAgents/$TOOLS_LEGACY_WATCH_LABEL.plist"
-        if [[ -f "$legacy" ]]; then
-            msg "$YELLOW" "legacy" "old plist found: $legacy"
-            msg "$DIM"    "hint"   "launchctl unload \"$legacy\" && rm \"$legacy\" && tools watch enable"
-        fi
-    fi
-    if [[ -f "$WATCH_PLIST" ]] && launchctl list "$WATCH_LABEL" >/dev/null 2>&1; then
-        msg "$GREEN" "watch" "loaded ${DIM}(every $((WATCH_INTERVAL/60)) min)${RESET}"
-    elif [[ -f "$WATCH_PLIST" ]]; then
-        msg "$YELLOW" "watch" "plist exists but not loaded"
-    else
-        msg "$DIM" "watch" "not enabled"
-        echo
-        return 0
-    fi
-    if [[ -f "$WATCH_LOG" ]]; then
-        local lines
-        lines=$(wc -l < "$WATCH_LOG" | tr -d ' ')
-        msg "$DIM" "log" "$WATCH_LOG ($lines lines)"
-        if (( lines > 0 )); then
-            echo
-            tail -n 3 "$WATCH_LOG" | sed 's/^/    /'
-        fi
-    fi
-    echo
-}
-
-cmd_watch() {
-    case "${1:-}" in
-        enable)      watch_enable ;;
-        disable)     watch_disable ;;
-        status)      watch_status ;;
-        run-now)     "$TOOLS_HOME/bin/vault" sync ;;
-        "")          usage_command watch ;;
-        *)           die_unknown "watch command" "$1" watch ;;
-    esac
-}
-
-# ---------- key (SSH passphrase cached in macOS Keychain) ----------
-# Keychain + unlock logic lives in lib/key.sh; this is the user-facing CLI.
-
-cmd_key() {
-    [[ -n "${AGE_KEY:-}" ]] || die "error" "AGE_KEY not set (KEYS_HOME missing?)"
-    case "${1:-status}" in
-        cache)
-            local pass
-            pass=$(key_prompt)
-            [[ -n "$pass" ]] || die "error" "no passphrase entered"
-            if ! key_validate "$pass"; then
-                die "error" "passphrase does not unlock $AGE_KEY"
-            fi
-            key_store "$pass"
-            echo
-            msg "$GREEN" "cached" "passphrase stored in login Keychain ${DIM}(service: $KEY_SERVICE)${RESET}"
-            echo
-            ;;
-        forget)
-            echo
-            if key_has; then
-                key_forget
-                msg "$GREEN" "forgotten" "passphrase removed from Keychain"
-            else
-                msg "$DIM" "forgotten" "no cached passphrase"
-            fi
-            echo
-            ;;
-        status)
-            echo
-            if key_has; then
-                msg "$GREEN" "key" "passphrase cached ${DIM}(decrypt runs silently)${RESET}"
-            else
-                msg "$YELLOW" "key" "no cached passphrase ${DIM}(run: tools key cache)${RESET}"
-            fi
-            echo
-            ;;
-        test)
-            echo
-            if ! key_has; then
-                msg "$YELLOW" "key" "no cached passphrase"
-                echo
-                return 1
-            fi
-            local pass; pass=$(key_get)
-            if key_validate "$pass"; then
-                msg "$GREEN" "key" "cached passphrase unlocks $AGE_KEY"
-            else
-                msg "$RED" "key" "cached passphrase does NOT match $AGE_KEY ${DIM}(run: tools key cache to refresh)${RESET}"
-                echo
-                return 1
-            fi
-            echo
-            ;;
-        "")        usage_command key ;;
-        *)         die_unknown "key command" "$1" key ;;
-    esac
-}
-
 # ---------- bump-engine (move the vault-engine consumer fleet together) ----------
 # Consumer list + lock parse live in lib/tools/engine.sh, shared with the
 # doctor's "engine lock parity" check — one definition, two faces.
@@ -1093,11 +770,12 @@ cmd_bump_engine() {
         shift
     done
     command -v "$uv" >/dev/null || die "error" "uv not installed"
-    local -a repos=()
-    local repo name before after changed=0
-    while IFS= read -r repo; do repos+=("$repo"); done < <(engine_consumers)
-    for repo in "${repos[@]}"; do
-        name="$(basename "$repo")"
+    local -a repos=() ids=()
+    local repo name before after changed=0 i
+    while IFS=$'\t' read -r name repo; do ids+=("$name"); repos+=("$repo"); done \
+        < <(node "$TOOLS_HOME/lib/tools/capabilities.ts" pairs engine_consumer)
+    for i in "${!repos[@]}"; do
+        repo="${repos[$i]}" name="${ids[$i]}"
         [[ -f "$repo/uv.lock" ]] || die "error" "no uv.lock at $repo (set MCP_HOME / EDU_MCP_HOME / LIFE_MCP_HOME)"
         before="$(engine_lock_pin "$repo")"
         msg "$DIM" "step" "$name: uv lock --upgrade-package severino-vault-engine"
@@ -1110,8 +788,7 @@ cmd_bump_engine() {
             changed=1
         fi
         if (( ! lock_only )); then
-            msg "$DIM" "step" "$name: uv tool install --reinstall ."
-            (cd "$repo" && "$uv" tool install --reinstall .)
+            reinstall_repo "$name" || die "error" "$name: reinstall failed"
         fi
     done
     local pin_first pin_this skew=0 detail=""
@@ -1130,6 +807,46 @@ cmd_bump_engine() {
     msg "$GREEN" "engine" "all ${#repos[@]} consumers pin severino-vault-engine ${pin_first:-nothing}"
 }
 
+# ---------- reinstall (uv tools from their checkouts) ----------
+# The install command and fingerprint come from config/capabilities.json; one
+# path serves `tools reinstall`, `tools bump-engine`, and the doctor check.
+
+reinstall_repo() {
+    local id="$1" plan path verdict
+    plan="$(node "$TOOLS_HOME/lib/tools/capabilities.ts" install "$id")" \
+        || die "error" "$id declares no install in config/capabilities.json"
+    path="${plan%%$'\t'*}"
+    local -a argv=()
+    IFS=$'\t' read -r -a argv <<<"${plan#*$'\t'}"
+    [[ -d "$path" ]] || die "error" "$id checkout not found: $path"
+    [[ "${argv[0]}" == uv ]] && argv[0]="${UV_BIN:-uv}"
+    command -v "${argv[0]}" >/dev/null || die "error" "$id installs with ${argv[0]}, which is not installed"
+    msg "$DIM" "step" "$id: ${argv[*]}"
+    (cd "$path" && "${argv[@]}")
+    verdict="$(node "$TOOLS_HOME/lib/tools/capabilities.ts" fingerprints "$id")"
+    case "$(cut -f2 <<<"$verdict")" in
+        match) msg "$GREEN" "reinstalled" "$id $(cut -f3 <<<"$verdict")" ;;
+        skip)  msg "$GREEN" "reinstalled" "$id" ;;
+        *)     msg "$RED" "stale" "$id: $(cut -f3 <<<"$verdict")"; return 1 ;;
+    esac
+}
+
+cmd_reinstall() {
+    local -a ids=()
+    local id
+    if [[ $# -gt 0 ]]; then
+        [[ "$1" == -* ]] && die_unknown option "$1" reinstall
+        ids=("$1")
+    else
+        while IFS= read -r id; do ids+=("$id"); done \
+            < <(node "$TOOLS_HOME/lib/tools/capabilities.ts" ids install)
+    fi
+    local fail=0
+    for id in "${ids[@]}"; do reinstall_repo "$id" || fail=1; done
+    (( ! fail )) || die "error" "an installed tool still differs from its source" 1
+    msg "$DIM" "note" "reconnect long-running MCP clients only if their tool schema must refresh"
+}
+
 # All help + the machine surface render from the one spec via the shared
 # intercept (main `-h`, `--describe`, focused `<cmd> -h`) — so even
 # `tools status -h` / `tools install -h` render help instead of acting.
@@ -1137,17 +854,15 @@ desc_help_intercept "$@"
 case "${1:-}" in
     status)        shift; cmd_status   "$@" ;;
     doctor)        shift; cmd_doctor   "$@" ;;
-    secrets)       shift; cmd_secrets  "$@" ;;
     check)         shift; cmd_check    "$@" ;;
     new)           shift; cmd_new      "$@" ;;
     install)       shift; cmd_install  "$@" ;;
-    watch)         shift; cmd_watch    "$@" ;;
-    key)           shift; cmd_key      "$@" ;;
     describe)      shift; cmd_describe "$@" ;;
     tui)           shift; cmd_describe --tui "$@" ;;
     generate)      shift; cmd_generate "$@" ;;
     contracts)     shift; cmd_contracts "$@" ;;
     derive)        shift; cmd_derive "$@" ;;
+    reinstall)     shift; cmd_reinstall "$@" ;;
     bump-engine)   shift; cmd_bump_engine "$@" ;;
     *)             die_unknown command "$1" ;;
 esac

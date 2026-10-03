@@ -120,7 +120,7 @@ advance_origin() {
     # Exact format, not just a prefix: the echoed value must be ONLY the branch
     # name — no git "Dropped refs/stash" chatter leaking in (a git-version-
     # sensitive stdout leak that passes locally but failed on CI).
-    [[ "$output" =~ ^ship/[0-9]{8}-[0-9]{6}$ ]]
+    [[ "$output" =~ ^ship/[0-9]{8}-[0-9]{6}$ ]] || return 1
     [ "$(git symbolic-ref --short HEAD)" != "main" ]
     [ -f d.txt ]                       # the edit rode onto the fresh branch
 }
@@ -132,7 +132,7 @@ advance_origin() {
     advance_origin
     run git_rebranch main ship
     [ "$status" -eq 0 ]
-    [[ "$output" == ship/* ]]
+    [[ "$output" == ship/* ]] || return 1
     git checkout -q "$output"
     [ -f mine.txt ]                    # my commit was carried
     [ -f b.txt ]                       # ...onto current origin/main (has the moved file)

@@ -1,18 +1,24 @@
 {
   "name": "severino-tools",
-  "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Shared Node dependencies for the Severino toolchain's node-based commands (doc-to-pdf, etc.). Tool implementations live under lib/<tool>/ and resolve these via Node's upward node_modules lookup.",
+  "description": "Node dependencies for the toolchain's TypeScript modules under lib/ (doc-to-pdf, diagram, the TUIs, the contract validators).",
   "engines": {
-    "node": ">=18"
+    "node": ">=24.21.0"
+  },
+  "packageManager": "npm@11.19.0",
+  "scripts": {
+    "typecheck": "tsc -p ."
   },
   "dependencies": {
+    "@mermaid-js/mermaid-cli": "11.17.0",
     "ajv": "8.20.0",
     "highlight.js": "11.11.1",
-    "markdown-it": "15.0.1"
+    "markdown-it": "15.0.2"
   },
   "devDependencies": {
-    "cordon-spec": "1.4.0"
+    "@types/node": "24.19.1",
+    "cordon-spec": "1.4.0",
+    "typescript": "6.0.3"
   }
 }

@@ -8,14 +8,14 @@ load helpers
     # naive `msg "$RED" "$1" "$2"` expands an unset $2 and crashes.
     run bash -uc 'source "$TOOLS_HOME/lib/common.sh"; die "lone message"'
     [ "$status" -eq 1 ]
-    [[ "$output" == *"error"* ]]
+    [[ "$output" == *"error"* ]] || return 1
     [[ "$output" == *"lone message"* ]]
 }
 
 @test "die keeps the (label, body, code) convention for multi-arg calls" {
     run bash -uc 'source "$TOOLS_HOME/lib/common.sh"; die "usage" "bad args" 2'
     [ "$status" -eq 2 ]
-    [[ "$output" == *"usage"* ]]
+    [[ "$output" == *"usage"* ]] || return 1
     [[ "$output" == *"bad args"* ]]
 }
 

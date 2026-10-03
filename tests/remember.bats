@@ -27,7 +27,7 @@ setup() {
     remember_bin user dupe "Dupe" -b "one" --dir "$MEMORY_DIR"
     run remember_bin user dupe "Dupe" -b "two" --dir "$MEMORY_DIR"
     [ "$status" -ne 0 ]
-    [[ "$output" == *"--force"* ]]
+    [[ "$output" == *"--force"* ]] || return 1
     grep -q "one" "$MEMORY_DIR/user_dupe.md"
 }
 
@@ -47,7 +47,7 @@ setup() {
     [ "$status" -eq 0 ]
     [ ! -f "$MEMORY_DIR/user_gone.md" ]
     [ -f "$MEMORY_DIR/user_keep.md" ]
-    ! grep -q "user_gone.md" "$MEMORY_DIR/MEMORY.md"
+    ! grep -q "user_gone.md" "$MEMORY_DIR/MEMORY.md" || return 1
     grep -q "user_keep.md" "$MEMORY_DIR/MEMORY.md"
 }
 
@@ -73,11 +73,11 @@ setup() {
 @test "list and forget on a missing memory dir stay clean errors" {
     run remember_bin --list --dir "$BATS_TEST_TMPDIR/nope"
     [ "$status" -ne 0 ]
-    [[ "$output" == *"not found"* ]]
+    [[ "$output" == *"not found"* ]] || return 1
     [ ! -d "$BATS_TEST_TMPDIR/nope" ]
 
     run remember_bin --forget ghost --dir "$BATS_TEST_TMPDIR/nope"
     [ "$status" -ne 0 ]
-    [[ "$output" == *"not found"* ]]
+    [[ "$output" == *"not found"* ]] || return 1
     [ ! -d "$BATS_TEST_TMPDIR/nope" ]
 }

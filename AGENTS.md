@@ -5,7 +5,10 @@ to this file, so Claude Code and any AGENTS.md-aware tool read the same source.
 Read this before editing; it answers the questions agents otherwise re-derive
 from the code every session.
 
-Small bash/zsh/node tools that share one look and feel.
+Small bash/zsh tools with TypeScript modules under `lib/` (Node 24 runs them
+directly), sharing one look and feel. The toolchain owns nothing another system
+owns: infrastructure facts are HQ's (`hq call`, `hq drift`), publishing is the
+site repo's, and vault reads and writes go through the vault MCP.
 
 ## Reusable SDK boundary
 
@@ -13,8 +16,8 @@ This repo is also the lightweight SDK for sibling CLIs, one-off scripts, and
 agent utilities. Stable public modules live under `lib/sdk/`; `common.sh` is a
 compatibility aggregator, not a destination for new domain helpers. Import the
 narrowest module possible. Shell commands use `lib/sdk.sh` when they need the
-Cordon runtime; Node commands use `process.mjs` / `result.mjs`; every vault CLI
-crossing uses `svmc.sh` or `svmc.mjs`.
+Cordon runtime; Node commands use `process.ts` / `result.ts`; every vault CLI
+crossing uses `svmc.sh` or `svmc.ts`.
 
 Generic structured output uses `schemas/result-v1.json`. Repository capabilities
 are declared once in `config/capabilities.json` and validated against
@@ -44,14 +47,14 @@ emitter is `severino-vault-mcp`'s `cli_introspect.describe_parser`.)
   (`usage_command`); for a **leaf tool** (no `desc_cmd`) it claims only the
   unambiguous `-h`/`--help`/`--describe` meta-flags and hands back, because a
   leaf's bare / `help` invocation is the tool's own to define (`backup` runs,
-  `encrypt` errors with its usage). So a leaf tool with its own options
-  (`encrypt`, `decrypt`, `inbox`, `remember`, `backup`, `open-age`) drops the
+  `diagram` errors with its usage). So a leaf tool with its own options
+  (`inbox`, `remember`, `backup`, `diagram`) drops the
   hand-rolled `--describe)` / `-h)` arms and uses the same one line; adding or
   removing a `desc_cmd` re-routes dispatch with no second edit. No tool
   hand-routes help, and a help flag can never fall through to run an action
-  (`hq restart -h`, `adguard pull -h`, `site doctor -h` all *render*, never
+  (`hq restart -h`, `hq drift -h`, `tools reinstall -h` all *render*, never
   execute). The `case` after it is pure command→action wiring — the only thing
-  not derivable from the spec (`cmd_*` vs `run_npm` vs aliases); `describe.bats`
+  not derivable from the spec (`cmd_*` vs aliases); `describe.bats`
   guards that every declared command has a dispatch arm so the two sets can't
   drift. New tools get this form from `tools new`. The lone zsh tool,
   `dns-test`, uses this same one dispatch line (`lib/describe.sh` is bash+zsh
@@ -66,24 +69,23 @@ emitter is `severino-vault-mcp`'s `cli_introspect.describe_parser`.)
   a fixed choice set; `+variadic` rides into JSON for completion consumers.
   Keep the data model honest: structured → structured primitives
   (flags`→desc_opt`, args`→desc_pos`, examples`→desc_example`), `desc_para` for
-  genuine prose only; interactive UIs (the `site manage` / compare viewers)
-  self-document their keymaps rather than restating them in CLI help.
+  genuine prose only; interactive UIs (the `--tui` explorers) self-document
+  their keymaps rather than restating them in CLI help.
   **A `desc_para` call is ONE logical paragraph — a single unwrapped string, not
   a hard-wrapped source line.** Every renderer (`-h`, the README, the `--tui`
   expand pane) reflows it to its own width, so presentation line-breaks must
   never be baked into the source of truth; declare multiple `desc_para`s for
   multiple paragraphs (the renderers space them), never an empty `desc_para ""`
   separator. The validator fails closed on a paragraph that ends mid-sentence or
-  is empty (`lib/tools/describe-schema.mjs`, guarded by `describe.bats`).
+  is empty (`lib/tools/describe-schema.ts`, guarded by `describe.bats`).
 - **Flags owned by another repo are pointed at, never restated.** `hq create`'s
-  flags live in HQ's `manage.py`, and site's `scaffold-*`/`draft-alt`/`diagnose`
-  flags live in the site repo's `package.json` scripts. Those commands declare
+  fields are HQ's `project.upsert` / `asset.upsert` input schemas. Such commands declare
   **`desc_delegate "<owner>"`** (after the `desc_cmd`) instead of enumerating
   flags — a *structured* ownership marker that renders in the focused `-h`
   ("Flags are owned elsewhere: …") **and** rides into the JSON as `delegates`, so
   an agent sees ownership without reading handlers. `hq create <kind> -h` also
-  falls through to `manage.py` (the help flag isn't the *2nd* arg, so the
-  intercept skips it) — the owner renders its own live list.
+  falls through to HQ (the help flag isn't the *2nd* arg, so the intercept
+  skips it) and renders the owner's live field list.
 - **Unknown input is self-service and derived — `die_unknown`.** `die_unknown
   <kind> <token> [<cmd>]` (in `common.sh`) replaces every hand-written
   "unknown … (try `tool -h`)": it prints the error and then *shows* the valid
@@ -92,10 +94,8 @@ emitter is `severino-vault-mcp`'s `cli_introspect.describe_parser`.)
   strings to drift between `-h`/`--help`.
 - **Wiring.** Source `lib/init.sh` (it sources `lib/describe.sh`), define
   `describe_spec`, and put `desc_help_intercept "$@"` above the dispatch `case`.
-  Drift guards get show/diff/pull from `drift_describe_commands` and the whole
-  surface from `drift_main` (it calls the intercept) for free. `bin/doc-to-pdf`
-  (node) carries its own `SPEC` object that renders both its `--help` and
-  `--describe`.
+  `bin/doc-to-pdf` is a launcher for `lib/doc-to-pdf/index.ts`, which carries
+  its own `SPEC` object that renders both its `--help` and `--describe`.
 - **Effect = the risk signal an agent can't read off the flags — `desc_effect`.**
   Every command (and leaf tool) carries a Cordon blast-radius class on the ladder
   `read → local_write → vault_write → remote_write → deploy`, plus the `+network`
@@ -107,9 +107,7 @@ emitter is `severino-vault-mcp`'s `cli_introspect.describe_parser`.)
   leaf — scoped like `desc_opt`. Missing or duplicate declarations fail closed
   before rendering or gating, so an omitted classification can never become an
   inferred read. It renders a terse `Effect:` line in the focused `-h`, a colored
-  chip in `--tui`, and rides into the JSON. The drift guards declare theirs
-  **once** in `drift_describe_commands` (show/diff read+network, pull
-  vault_write+network), so all four inherit. This is what lets an agent risk-gate
+  chip in `--tui`, and rides into the JSON. This is what lets an agent risk-gate
   `hq restart` (`deploy`) vs `vault status` (`read`) before running either.
 - **Contract.** This repo emits the **complete** [Cordon `schema_version 4`](https://github.com/joeseverino/cordon#the-contract)
   document — every optional field included (`paras`/`examples`/`delegates`,
@@ -147,8 +145,8 @@ emitter is `severino-vault-mcp`'s `cli_introspect.describe_parser`.)
 
 `tools describe --tui` (shorthand **`tools tui`**) is the interactive consumer of
 the contract above: a full-screen Node explorer over the same `tools describe`
-JSON (`lib/tools/describe-tui.mjs`), sharing the `site manage` look + polish bar
-(see `[[feedback_tui_polish]]`). The three tiers stay cleanly separated: `-h`
+JSON (`lib/tools/describe-tui.ts`), sharing the look and polish bar of every
+TUI here through `lib/tui.ts`. The three tiers stay cleanly separated: `-h`
 (clean text) · `--describe` (JSON) · `--tui` (this). `tools tui` is a thin
 dispatch alias to `cmd_describe --tui` — the same renderer, one less thing to
 type; both stay in sync because there is only one implementation.
@@ -173,14 +171,14 @@ type; both stay in sync because there is only one implementation.
   instead of truncating to a `-h` pointer. `e`/Esc closes it, `Enter`/`c` copies.
   This is the consumer that the one-logical-paragraph `desc_para` rule feeds:
   the overlay reflows real paragraphs to the pane width.
-- **Reuse, don't fork — shared `lib/tui.mjs`.** The visual language and input
+- **Reuse, don't fork — shared `lib/tui.ts`.** The visual language and input
   plumbing (palette, grapheme-aware width/clip, `lineEditor`, `fitFrame`, the
   alt-screen/title polish bar, the escape-sequence input pump + replay key map)
-  live in **`lib/tui.mjs`**, imported by both `manage-tui.mjs` and
-  `describe-tui.mjs` — one implementation of the look, not two that drift. A new
-  Node TUI imports it; it does **not** copy these helpers. `tests/describe-tui.bats`
-  mirrors `site-manage.bats`'s `*_SMOKE` (static frame) / `*_KEYS` (replay)
-  harness; `site-manage.bats` is the regression net for changes to `lib/tui.mjs`.
+  live in **`lib/tui.ts`**, imported by `describe-tui.ts`, `brief/tui.ts`, and
+  `repos/tui.ts` — one implementation of the look, not copies that drift. A new
+  Node TUI imports it; it does **not** copy these helpers. Each TUI has a
+  `*_SMOKE` (static frame) / `*_KEYS` (replay) harness; `describe-tui.bats`,
+  `brief-tui.bats`, and `repos-tui.bats` are the regression net for `lib/tui.ts`.
 - Decision record (the "render-many" consumers):
   `read_doc('report-emit-once-render-many')`.
 
@@ -205,20 +203,17 @@ type; both stay in sync because there is only one implementation.
 - `bin/` — exactly one executable per tool, nothing else. `tools install`,
   the completions, `tools doctor`, and CI all discover tools by globbing
   `bin/*`.
-- `lib/` — shared helpers flat (`common.sh`, `init.sh`, `key.sh`,
-  `drift.sh`, `doctor.sh`); tool-specific support files under `lib/<tool>/`
-  (e.g. `lib/site/`, `lib/doc-to-pdf/`). `drift.sh` is the shared core for
-  the drift-guard tools (`ts-acl`, `cf-dns`, `adguard`, `nginx`): they
-  provide `get_token`/`fetch_live`/`normalize` + config (a `DRIFT_DATASET_ID`)
-  and call `drift_main`. The cache is a JSON file owned by the vault's
-  infra-dataset registry: `diff` reads it via `severino-vault-mcp infra <id>`,
-  and a successful `pull` writes it via `infra-write <id>` — one MCP call that
-  writes the JSON cache, regenerates the doc's table, and stamps `last_reviewed`
-  (a pull is a review). The guard never touches vault files directly.
-  `doctor.sh` owns the
-  `check`/`check_warn`/`gate`/`doctor_finish` plumbing and the gate registry
-  behind `tools doctor --all` / `--live` (a gate's only contract: exit 0 when
-  healthy).
+- `lib/` — shared shell helpers flat (`common.sh`, `init.sh`, `doctor.sh`,
+  `git.sh`, `describe.sh`), the SDK under `lib/sdk/` (shell and TypeScript), and
+  tool-specific support under `lib/<tool>/` (e.g. `lib/hq/`, `lib/doc-to-pdf/`).
+  Node modules are TypeScript, type-checked under the strict `tsconfig.json` by
+  `tools check`. `doctor.sh` owns the `check`/`check_warn`/`gate`/`doctor_finish`
+  plumbing and the gate registry behind `tools doctor --all` / `--live` (a gate's
+  only contract: exit 0 when healthy).
+- `config/capabilities.json` — the one declaration of each sibling repository:
+  path, install command, fingerprint, describe surface, `brief` section.
+  `tools reinstall`, `tools bump-engine`, `tools doctor`, `brief`, and the
+  contract graph all read it. Never add a second hardcoded repo list.
 - `config/` — per-tool defaults derived from layout env vars. Files ending
   `.example` are templates; their gitignored copies are user-specific.
 - `schemas/` — machine-enforced cross-tool contracts. Keep executable schemas
@@ -227,45 +222,35 @@ type; both stay in sync because there is only one implementation.
   single source of the command-surface contract) — edit it there, then re-vendor.
   `tools contracts --check` and the CI gate compare this copy against the pinned
   `cordon-spec` package, so the copy cannot silently drift.
-- `tests/` — bats suite. Hermetic: throwaway keys, tmpdirs, no Keychain.
+- `tests/` — bats suite. Hermetic: tmpdirs, stubbed `gh`, `uv`, `mmdc`, and
+  HQ transport; never the real network. CI runs it.
 - `bench/` — every measured claim in the README has a script here that
-  asserts it; they run in CI.
+  asserts it; `tools check` runs them.
 
 ## Calling severino-vault-mcp from this repo
 
-We own the MCP (`~/Documents/Code/Assets/severino-vault-mcp/`). Shell tools call
+We own the MCP (`$CODE_HOME/Assets/severino-vault-mcp/`). Shell tools call
 it as a plain CLI — **don't** hand-edit vault frontmatter or shell out to `yq`;
 the MCP is the schema-validated, atomic writer.
 
 Every shell call goes through the shared **`svmc()`** adapter in
 `lib/sdk/svmc.sh` (also re-exported by `lib/common.sh` for compatibility), and
-Node consumers use `lib/sdk/svmc.mjs`. Both pin `SVMC_VAULT_PATH` to
+Node consumers use `lib/sdk/svmc.ts`. Both pin `SVMC_VAULT_PATH` to
 `$NOTES_HOME` AND names the binary in one place via `$SVMC_BIN` (the test seam),
 so a call site can neither read the MCP's own configured default vault nor dodge
 the hermetic stub:
 
 ```bash
-svmc <subcommand> [args] [--pretty]     # bin/site, bin/backlog, bin/brief, …
+svmc <subcommand> [args] [--pretty]     # bin/backlog, bin/brief, bin/hq, …
 ```
 
 Add new call sites through the matching adapter, never inline — an inline `severino-vault-mcp`
 call silently falls back to the MCP's own configured default vault (and bypasses
 `$SVMC_BIN`). One boundary, every consumer (emit once, derive everywhere).
 
-The console script is on PATH (`uv tool install`). Existing subcommands:
-`touch-reviewed <relative-path>` (set `last_reviewed` to today); the
-infra-dataset layer `infra [<id>] [--refresh]` (read a dataset's cache, or
-live) and `infra-write <id>` (stdin JSON → write the dataset's JSON cache,
-regenerate the doc table, stamp `last_reviewed` — the drift guards' pull
-writer); `topology --emit ...` and `topology-write` (the authored inventory's
-validated write — regenerates `Topology.md` + the figure); plus
-`prepare-writeup-publish`,
-`list-writeups`, `technology-catalog`, `validate-all-writeups`,
-`reorder-featured`, `update-writeup`, `writeup-dashboard`,
-`apply-writeup-plan`, `hq-manifest`, `schema`, `doctor`. Each prints JSON and
-exits 0/1 on `ok`. `bin/site` is the reference caller; the drift guards read
-via `infra` and write via `infra-write` (binary overridable via
-`$DRIFT_REVIEW_BIN` so bats can stub it).
+The console script is on PATH (`uv tool install`); `severino-vault-mcp --help`
+lists its subcommands. Each prints JSON and exits 0/1 on `ok`. Infrastructure
+facts are not the MCP's: ask HQ (`hq call`, `hq drift`).
 
 **Shared frontmatter schema:** the MCP's `schema.py` is the one canonical enum
 contract; `severino-vault-mcp schema --json` emits it. `hq schema` regenerates
@@ -273,25 +258,25 @@ HQ's committed `docs_index/schema.json` from it, and `hq schema --check` fails o
 drift (CI / pre-deploy, including the vault's Frontmatter Schema doc). Don't
 hand-maintain enum lists anywhere downstream.
 
-**No hand-rolled logic in `bin/hq`:** `hq doctor` reports the vault↔HQ gap via
-`svmc hq-manifest --report` (not a re-walk), and `hq validate` calls HQ's
-`audit_registry` tool through `lib/hq-call` -- the operator's transport to HQ's
-MCP tool surface over the host shell, never a shared token (and never an inline
-ORM script).
-Keep the contract/logic in the owning MCP or HQ application service; `bin/hq`
-just transports and formats emitted JSON.
+**No hand-rolled logic in `bin/hq`:** every HQ read and write is an HQ tool
+called through `lib/hq-call`, the operator's transport to HQ's MCP tool surface
+over the host shell (their own SSH certificate, never a shared token, never an
+inline ORM script). `hq call <tool> [json]` exposes that surface directly;
+`hq drift` reads HQ's own reconciliation verdict. Keep the logic in HQ or the
+MCP; `bin/hq` transports, and `lib/hq/report.ts` formats what they emit.
 
 **Cross-repo JSON contract** (keep both sides in sync):
 - One JSON object per call; exit 0 on success, 1 on failure.
 - Failures use a single `{"ok": false, "error": "<message>"}` envelope
-  (singular `error`). `lib/site/manage-tui.mjs` reads `json.error`; preserve
-  that shape when adding or changing MCP tools.
+  (singular `error`). Consumers read `json.error`; preserve that shape when
+  adding or changing MCP tools.
 
 **To expose another MCP tool to the shell:** add a subparser + handler in the
 MCP's `src/severino_vault_mcp/__main__.py` (mirror an existing block), then
-`site reinstall-mcp`. `site` runs the *installed* console script, so a stale
-`uv tool` install is real drift — `site doctor`'s `--fingerprint` check catches
-it (installed fingerprint vs source).
+`tools reinstall severino-vault-mcp`. Tools run the *installed* console script,
+so a stale `uv tool` install is real drift; `tools doctor` catches it by
+comparing the installed fingerprint with the one the checkout reports, both
+computed by the MCP's own code.
 
 ## Conventions (enforced by review, checked by CI)
 
@@ -305,10 +290,11 @@ it (installed fingerprint vs source).
   gates it).
 - `dns-test` is the lone zsh exception to the bash rule (but it self-describes
   from the same engine — `lib/describe.sh` is bash+zsh safe).
-- Node code is ESM (`.mjs`), deps pinned in the root `package.json`,
-  resolved by upward `node_modules` lookup. **Node is the JSON tool in `bin/site`**
-  (URL-encoding, payloads, MCP-output parsing); `jq` belongs to the drift
-  guards in `lib/drift.sh`. Keep each file on one parser.
+- Node code is TypeScript under `lib/`, run directly by Node 24 (no build) and
+  type-checked strictly: no explicit `any`, no `@ts-*` suppressions, casts only
+  where parsed JSON meets a declared shape. Dependencies are pinned exactly in
+  the root `package.json`. JSON in shell is `jq`; there is no Python at runtime
+  (`marks` is the exception until it moves to severino-life).
 - Adding a tool: drop it in `bin/`, then run `tools generate`. The generated
   `completions/_tools-suite` and README CLI reference/inventory both consume
   `--describe`; never hand-edit either generated block.
@@ -341,7 +327,7 @@ that split when extending it, don't add a second scanner or a second merge path.
   `repos --json`. `branch_state` is the owned branch-safety verdict (above), a
   network-free hint by default and corrected to `pr` under `--prs`. `--prs` folds
   each repo's open-PR state (number, CI rollup, review) in via one `gh pr view` per
-  repo with a remote (network; parallel fan-out → `lib/repos/pr.mjs` projects the
+  repo with a remote (network; parallel fan-out → `lib/repos/pr.ts` projects the
   blobs back in one pass). `--fetch` refreshes remote-tracking refs first so
   `behind`/`upstream_gone`/`branch_state` are true *now*, not as of the last manual
   fetch — the unfetched counts are stale, so trust them only with `--fetch`.
@@ -351,7 +337,7 @@ that split when extending it, don't add a second scanner or a second merge path.
 - **`lib/git.sh` owns every *write* mechanic.** Commit/push/PR/merge/sync live
   there, not inlined in a driver. The single merge mechanic is **`git_merge_pr`**
   (`--squash|--merge|--rebase` + optional `--admin`); `git_land` (require-green
-  policy, used by `bin/site`) and `bin/land` (explicit green-gate + `--admin`
+  policy) and `bin/land` (explicit green-gate + `--admin`
   policy) both ride it. Add a new git/PR mechanic here and call it from the driver.
 - **`land` is the merge beat** (`ship → land → resync`): merges the open PR for the
   current branch and deletes it. Dry-run + single-repo by default, fleet behind
@@ -376,30 +362,16 @@ that split when extending it, don't add a second scanner or a second merge path.
   copy a string). It re-invokes `brief --json --prs` via `$BRIEF_BIN` (tests feed a
   canned digest stub — no repos/vault/gh). `brief` is a leaf-with-subcommand
   (`desc_leaf_commands` + `desc_cmd tui`), so bare `brief` still runs the briefing.
-- **The action runner is shared (`lib/tui.mjs`), not per-TUI.** `runForegroundAction`
+- **The action runner is shared (`lib/tui.ts`), not per-TUI.** `runForegroundAction`
   (the raw-mode/alt-screen/`waitForReturn` dance) and `spawnDetached`/`spawnInherit`
-  live in `lib/tui.mjs`; both `repos tui` and `brief tui` import them. A new TUI
+  live in `lib/tui.ts`; both `repos tui` and `brief tui` import them. A new TUI
   imports the runner — it does not reimplement the spawn dance, exactly as it
   imports the palette/width helpers.
 
-## Site visual comparison
-
-When reviewing a local site change against production, use the viewer:
-
-```sh
-site compare /route/to/check/ --no-open
-```
-
-Then open the printed localhost URL with the available browser automation tool.
-Don't build an ad hoc iframe page or open two unrelated tabs. The viewer gives
-labeled DEV/LIVE panes, a synchronized divider, linked scrolling, route nav,
-reload, and side swapping. The Astro dev server must be running (`site dev`)
-unless the requested dev URL is already up.
-
 ## Verify (do this before claiming a change works)
 
-`tools check` runs everything CI runs: shebang-driven `bash -n`/`zsh -n`/
-`node --check`, shellcheck, JSON Schema validation for every describe
+`tools check` runs everything CI runs and more: `bash -n`/`zsh -n`, the strict
+TypeScript type-check, shellcheck, JSON Schema validation for every describe
 contract, generated-surface drift checks, the bats suite, and the bench
 assertions.
 `--no-bench` skips the slow step. **`tools check --ci`** runs that same gate
@@ -412,13 +384,13 @@ harness (`tests/helpers.bash`); `ship --check` runs `tools check --ci`. Set
 `TOOLS_CI_BATS_VERSION` to fail the gate on a bats version other than CI's.
 `tools status --json` / `tools doctor --json`
 give machine-readable state. `tools doctor --all` is the cross-system rollup
-(hq doctor, hq schema --check, site doctor); `--live` adds the drift guards
-(network + 1Password approval).
+(`hq doctor`); `--live` adds `hq drift` (HQ's reconciliation verdict, over SSH).
 
 For a fast inner loop while editing one area:
-- `bats tests/<file>.bats` — hermetic, ~seconds. Run it after editing `bin/site`
-  or `lib/*.sh`; it catches integration regressions (e.g. a broken MCP call)
-  that reading the diff will not.
+- `bats tests/<file>.bats` — hermetic, ~seconds. Run it after editing a tool or
+  `lib/*.sh`; it catches integration regressions (e.g. a broken MCP call) that
+  reading the diff will not.
+- `npm run typecheck` — the strict TypeScript check alone.
 - `shellcheck -x bin/<tool> lib/*.sh` — matches CI lint.
 
 ## Cautions (time-savers learned the hard way)
@@ -428,28 +400,24 @@ For a fast inner loop while editing one area:
   the new `svmc()` body, creating `svmc() { svmc …; }` infinite recursion). The
   bats suite caught it. Prefer targeted edits, or re-grep + run bats after a
   bulk replace.
-- `encrypt`/`decrypt`/`open-age`/`lib/key.sh` handle key material — keep temp
-  files mode 600, keep the exit traps, and use plain `if` (not `[[ ]] &&`) as
-  the last statement in trap handlers under `set -e`.
-- `config/backup.sh` and `config/site.sh` are user-local; never commit or lint
+- Use plain `if` (not `[[ ]] &&`) as the last statement in trap handlers under
+  `set -e`.
+- `config/backup.sh` and `config/hq.sh` are user-local; never commit or lint
   them in CI (non-reproducible).
 - **`die` (common.sh) writes to stderr** — so a `die` inside a `x=$(some_fn)`
   caller is shown, not captured into the value (the silent `set -e` abort that
-  once bit the drift guards). Callers never need `die … >&2`; don't re-add it.
+  once hid failures). Callers never need `die … >&2`; don't re-add it.
 - **`${FLAG:+x}` is wrong for 0/1 flags** — `"0"` is non-empty, so it always
-  substitutes. This bypassed the decrypt Keychain cache on every call for
-  weeks. Use `if (( FLAG ))`. Related: `if ! cmd; then case $? in` is dead
+  substitutes. Use `if (( FLAG ))`. Related: `if ! cmd; then case $? in` is dead
   code — `!` negates `$?` to 0; capture with `|| rc=$?` instead.
-- Keychain access in `lib/key.sh` goes through `$KEY_SECURITY_BIN`
-  (default `/usr/bin/security`) so bats can stub it — keep new call sites on
-  the variable. GitHub access goes through `$GH_BIN` (default `gh`) the same way
-  — see the Workspace-loop section.
-- **Bats 1.13 fails a test only on its *last* command** — there is no per-line
-  errexit. A stack of bare `[[ … ]]` assertions does *not* all gate: every line
-  but the last can be false and the test still passes (this masked stale
-  assertions in `repos-tui.bats`). When a test must assert several things, chain
-  them into ONE statement (`grep -qF a <<<"$output" && grep -qF b …`) or pipe to a
-  single `python3 -c 'assert …'`, so each part actually gates. Watch for `grep`
+- External binaries the suite must stub are named through a variable: `$GH_BIN`
+  (gh), `$UV_BIN` (uv), `$MMDC_BIN` (mermaid-cli), `$HQ_CALL` (the HQ
+  transport), `$SVMC_BIN` (the vault MCP). Keep new call sites on the variable.
+- **A `[[ … ]]` or `! cmd` before a test's last line never fails it.** Bash
+  exempts both from errexit, so a false one is silently ignored (82 such
+  assertions once hid a stale test and an over-broad check). `[ … ]` and plain
+  commands such as `grep` do gate. Give every non-final `[[ ]]` or `!` line a
+  `|| return 1`, or chain the assertions into one statement. Watch for `grep`
   eating a leading-dash needle (`grep -qF -- "--admin"`).
 - Don't vendor external projects into `lib/` — tools that outgrow a script live
   in their own repo and are launched by path.

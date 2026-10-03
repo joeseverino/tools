@@ -56,7 +56,7 @@ EOF
 @test "repo --describe emits the contract" {
     run repo --describe
     [ "$status" -eq 0 ]
-    [[ "$output" == *'"repo"'* ]]
+    [[ "$output" == *'"repo"'* ]] || return 1
     [[ "$output" == *'"remote_write"'* ]]
 }
 
@@ -133,7 +133,7 @@ EOF
 @test "repo new --dry-run creates nothing" {
     run repo new ghost --dry-run
     [ "$status" -eq 0 ]
-    [[ "$output" == *"dry-run"* ]]
+    [[ "$output" == *"dry-run"* ]] || return 1
     [ ! -e "$CODE_HOME/Projects/ghost" ]
     [ ! -f "$STUB_LOG" ]
 }
@@ -161,7 +161,7 @@ EOF
     echo "original" > "$NOTES_HOME/01 Projects/kept/index.md"
     run repo register kept
     [ "$status" -eq 0 ]
-    [[ "$output" == *"kept"* ]]
+    [[ "$output" == *"kept"* ]] || return 1
     [ "$(cat "$NOTES_HOME/01 Projects/kept/index.md")" = "original" ]
 }
 
