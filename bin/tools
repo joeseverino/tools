@@ -16,8 +16,6 @@ source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" "" "$@"
 source "$TOOLS_HOME/lib/doctor.sh"
 # shellcheck source=lib/tools/describe.sh
 source "$TOOLS_HOME/lib/tools/describe.sh"
-# shellcheck source=lib/tools/engine.sh
-source "$TOOLS_HOME/lib/tools/engine.sh"
 
 TOOL_NAMES=()
 for file in "$TOOLS_HOME/bin"/*; do
@@ -99,12 +97,6 @@ describe_spec() {
     desc_pos repo +optional -- "Repository id from config/capabilities.json (default: every repo that declares an install)"
     desc_para "Runs each repository's declared install command, then compares the installed fingerprint with one computed from the checkout wherever the repository declares a fingerprint. A mismatch fails, so a stale install cannot pass for current."
     desc_example "tools reinstall severino-vault-mcp" -- "reinstall the vault MCP and verify it against source"
-
-    desc_cmd bump-engine -- "Re-lock severino-vault-engine in every consumer repo and reinstall their uv tools"
-    desc_effect local_write +network
-    desc_opt --lock-only -- "Update the uv.lock files but skip the uv tool reinstalls"
-    desc_para "The one flow for moving the fleet to a newer vault-engine: each consumer repo (the vault MCPs and the life CLI) gets 'uv lock --upgrade-package severino-vault-engine', then its uv tool reinstalled so the running servers match the new pin. The lock edits are left uncommitted — ship each consumer repo's bump through its own PR flow. 'tools doctor' gates the invariant this maintains: every consumer pins the same engine commit (engine lock parity)."
-    desc_example "tools bump-engine" -- "move every declared engine consumer to current main and reinstall"
 
     desc_env TOOLS_HOME        -- "Read from ~/.zshrc; root of this repo"
     desc_env TOOLS_INSTALL_DIR -- "Override install target (default: ~/.local/bin)"
@@ -296,32 +288,7 @@ cmd_doctor() {
     fi
     check "contract projections" "$contract_ok" "${contract_detail:-contract graph unavailable}" || fail=1
 
-    # Every vault-engine consumer must pin the SAME engine commit — skew means
-    # a schema/core change reached one consumer and not the others silently.
-    # The consumer list and lock parse live in lib/tools/engine.sh, shared with
-    # `tools bump-engine` (the fix this check points at).
-    local -a engine_repos=()
-    local engine_repo engine_pin engine_first="" engine_skew=0 engine_missing="" engine_detail=""
-    while IFS= read -r engine_repo; do engine_repos+=("$engine_repo"); done < <(engine_consumers)
-    for engine_repo in "${engine_repos[@]}"; do
-        if [[ ! -f "$engine_repo/uv.lock" ]]; then
-            engine_missing+="$(basename "$engine_repo") "
-            continue
-        fi
-        engine_pin="$(engine_lock_pin "$engine_repo")"
-        engine_detail+="$(basename "$engine_repo") pins ${engine_pin:-nothing}, "
-        if [[ -z "$engine_first" ]]; then engine_first="$engine_pin"; fi
-        if [[ -z "$engine_pin" || "$engine_pin" != "$engine_first" ]]; then engine_skew=1; fi
-    done
-    if [[ -n "$engine_missing" ]]; then
-        check_warn "engine lock parity" "uv.lock not found for: ${engine_missing% }— parity not checked"
-    elif (( ! engine_skew )); then
-        check "engine lock parity" 1 "all ${#engine_repos[@]} consumers pin severino-vault-engine $engine_first"
-    else
-        check "engine lock parity" 0 "${engine_detail%, } — run: tools bump-engine" || fail=1
-    fi
-
-    # Installed uv tools must match their checkouts, or a stale install answers
+    # Installed tools must match their checkouts, or a stale install answers
     # for code that has moved on. The fix is the command this points at.
     local -a installed_line=()
     local installed_detail="" installed_stale=""
@@ -756,60 +723,9 @@ EOF
     echo
 }
 
-# ---------- bump-engine (move the vault-engine consumer fleet together) ----------
-# Consumer list + lock parse live in lib/tools/engine.sh, shared with the
-# doctor's "engine lock parity" check — one definition, two faces.
-
-cmd_bump_engine() {
-    local lock_only=0 uv="${UV_BIN:-uv}"
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --lock-only) lock_only=1 ;;
-            *) die_unknown option "$1" bump-engine ;;
-        esac
-        shift
-    done
-    command -v "$uv" >/dev/null || die "error" "uv not installed"
-    local -a repos=() ids=()
-    local repo name before after changed=0 i
-    while IFS=$'\t' read -r name repo; do ids+=("$name"); repos+=("$repo"); done \
-        < <(node "$TOOLS_HOME/lib/tools/capabilities.ts" pairs engine_consumer)
-    for i in "${!repos[@]}"; do
-        repo="${repos[$i]}" name="${ids[$i]}"
-        [[ -f "$repo/uv.lock" ]] || die "error" "no uv.lock at $repo (set MCP_HOME / LIFE_MCP_HOME)"
-        before="$(engine_lock_pin "$repo")"
-        msg "$DIM" "step" "$name: uv lock --upgrade-package severino-vault-engine"
-        (cd "$repo" && "$uv" lock --upgrade-package severino-vault-engine)
-        after="$(engine_lock_pin "$repo")"
-        if [[ "$after" == "$before" ]]; then
-            msg "$GREEN" "ok" "$name already pins ${after:-nothing}"
-        else
-            msg "$GREEN" "bumped" "$name: ${before:-nothing} -> $after"
-            changed=1
-        fi
-        if (( ! lock_only )); then
-            reinstall_repo "$name" || die "error" "$name: reinstall failed"
-        fi
-    done
-    local pin_first pin_this skew=0 detail=""
-    pin_first="$(engine_lock_pin "${repos[0]}")"
-    for repo in "${repos[@]}"; do
-        pin_this="$(engine_lock_pin "$repo")"
-        detail+="$(basename "$repo") pins ${pin_this:-nothing}, "
-        [[ "$pin_this" != "$pin_first" ]] && skew=1
-    done
-    if (( skew )); then
-        die "error" "consumers still disagree after the bump: ${detail%, }" 1
-    fi
-    if (( changed )); then
-        msg "$YELLOW" "note" "uv.lock changed — ship each consumer repo's lock bump through its own PR flow"
-    fi
-    msg "$GREEN" "engine" "all ${#repos[@]} consumers pin severino-vault-engine ${pin_first:-nothing}"
-}
-
-# ---------- reinstall (uv tools from their checkouts) ----------
+# ---------- reinstall (installed tools from their checkouts) ----------
 # The install command and fingerprint come from config/capabilities.json; one
-# path serves `tools reinstall`, `tools bump-engine`, and the doctor check.
+# path serves `tools reinstall` and the doctor check.
 
 reinstall_repo() {
     local id="$1" plan path verdict
@@ -863,6 +779,5 @@ case "${1:-}" in
     contracts)     shift; cmd_contracts "$@" ;;
     derive)        shift; cmd_derive "$@" ;;
     reinstall)     shift; cmd_reinstall "$@" ;;
-    bump-engine)   shift; cmd_bump_engine "$@" ;;
     *)             die_unknown command "$1" ;;
 esac

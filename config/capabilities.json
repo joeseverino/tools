@@ -12,14 +12,10 @@
         "severino-vault-mcp",
         "describe"
       ],
-      "engine_consumer": true,
       "install": [
-        "uv",
-        "tool",
-        "install",
-        ".[life]",
-        "--force",
-        "--reinstall"
+        "sh",
+        "-c",
+        "go build -trimpath -ldflags=\"-s -w\" -o \"$HOME/.local/bin/severino-vault-mcp\" ./cmd/severino-vault-mcp"
       ],
       "fingerprint": {
         "installed": [
@@ -27,12 +23,9 @@
           "--fingerprint"
         ],
         "source": [
-          "uv",
+          "go",
           "run",
-          "--quiet",
-          "--project",
-          ".",
-          "severino-vault-mcp",
+          "./cmd/severino-vault-mcp",
           "--fingerprint"
         ]
       },
@@ -58,7 +51,6 @@
         "life",
         "brief-section"
       ],
-      "engine_consumer": true,
       "install": [
         "uv",
         "tool",
