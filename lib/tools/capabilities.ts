@@ -1,10 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { isRecord } from '../sdk/guards.ts';
 import { runJson } from '../sdk/process.ts';
 import { codeHome, toolsHome } from '../sdk/paths.ts';
 
-const manifestPath = process.env.TOOLS_CAPABILITIES || path.join(toolsHome, 'config/capabilities.json');
+const manifestPath = process.env['TOOLS_CAPABILITIES'] || path.join(toolsHome, 'config/capabilities.json');
 
 // A non-empty argv: [bin, ...args].
 export type Command = [string, ...string[]];
@@ -36,22 +37,38 @@ export type VerdictStatus = 'match' | 'stale' | 'missing' | 'skip';
 export type Verdict = [id: string, status: VerdictStatus, detail: string];
 
 export function isCommand(value: unknown): value is Command {
-  return Array.isArray(value) && value.length > 0;
+  return Array.isArray(value) && value.length > 0 && value.every((part) => typeof part === 'string');
+}
+
+function isCommandPair(value: unknown): value is Fingerprint {
+  return isRecord(value) && isCommand(value['installed']) && isCommand(value['source']);
+}
+
+function isRepository(value: unknown): value is Repository {
+  return isRecord(value)
+    && typeof value['id'] === 'string'
+    && typeof value['path'] === 'string'
+    && (value['fingerprint'] === undefined || isCommandPair(value['fingerprint']));
+}
+
+function isManifest(value: unknown): value is CapabilitiesManifest {
+  return isRecord(value)
+    && value['capabilities_version'] === 1
+    && Array.isArray(value['repositories'])
+    && value['repositories'].every(isRepository);
 }
 
 export function loadCapabilities(): CapabilitiesManifest {
-  const data = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as CapabilitiesManifest;
-  if (data.capabilities_version !== 1 || !Array.isArray(data.repositories)) {
-    throw new Error(`unsupported capabilities manifest: ${manifestPath}`);
-  }
+  const data: unknown = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  if (!isManifest(data)) throw new Error(`unsupported capabilities manifest: ${manifestPath}`);
   return data;
 }
 
 function repoPath(repo: Repository): string {
   const overrides: Record<string, string | undefined> = {
-    'severino-vault-mcp': process.env.MCP_HOME,
-    'severino-life': process.env.LIFE_MCP_HOME,
-    'vault-engine': process.env.VAULT_ENGINE_HOME,
+    'severino-vault-mcp': process.env['MCP_HOME'],
+    'severino-life': process.env['LIFE_MCP_HOME'],
+    'vault-engine': process.env['VAULT_ENGINE_HOME'],
   };
   const override = overrides[repo.id];
   return override || path.join(codeHome, repo.path);
@@ -99,7 +116,7 @@ export function fingerprintVerdicts(onlyId?: string): Verdict[] {
     const report = (command: Command, options: { cwd?: string }): string => {
       const [bin, ...args] = command;
       const run = spawnSync(bin, args, { encoding: 'utf8', ...options });
-      return run.status === 0 ? run.stdout.trim().split('\n').pop() ?? '' : '';
+      return run.status === 0 ? run.stdout.trim().split('\n').at(-1) ?? '' : '';
     };
     const installed = report(fp.installed, {});
     const source = report(fp.source, { cwd });
@@ -148,4 +165,4 @@ function main() {
   process.exitCode = 2;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main();
+if (import.meta.main) main();

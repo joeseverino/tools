@@ -7,8 +7,9 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { codeHome } from '../sdk/paths.ts';
+import { pathToFileURL } from 'node:url';
+import { parseArgs } from 'node:util';
+import { codeHome, toolsHome } from '../sdk/paths.ts';
 import {
   cssString,
   svgDataUrl,
@@ -31,8 +32,6 @@ interface GithubContext {
   branch: string;
   relative: string;
 }
-
-const toolsHome = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 function die(msg: string): never {
   console.error(`doc-to-pdf: ${msg}`);
@@ -159,6 +158,19 @@ const SPEC = {
   commands: [],
 };
 
+function parseCli(args: string[]) {
+  return parseArgs({
+    args,
+    options: {
+      describe: { type: 'boolean', default: false },
+      pretty: { type: 'boolean', default: false },
+      help: { type: 'boolean', short: 'h', default: false },
+    },
+    allowPositionals: true,
+    strict: true,
+  });
+}
+
 function renderUsage() {
   const pos = SPEC.positionals
     .map((p) => (p.required ? `<${p.name}>` : `[${p.name}]`))
@@ -166,21 +178,27 @@ function renderUsage() {
   return `Usage: ${SPEC.name} ${pos}\n${SPEC.description}`;
 }
 
-const args = process.argv.slice(2).filter((a) => a !== '--');
-if (args[0] === '--describe') {
-  const pretty = args.includes('--pretty');
-  console.log(pretty ? JSON.stringify(SPEC, null, 2) : JSON.stringify(SPEC));
+let cli: ReturnType<typeof parseCli>;
+try {
+  cli = parseCli(process.argv.slice(2).filter((a) => a !== '--'));
+} catch (error) {
+  console.error(`doc-to-pdf: ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(2);
+}
+const { values: flags, positionals } = cli;
+if (flags.describe) {
+  console.log(flags.pretty ? JSON.stringify(SPEC, null, 2) : JSON.stringify(SPEC));
   process.exit(0);
 }
-if (args.length === 0 || args[0] === '-h' || args[0] === '--help') {
+if (positionals.length === 0 || flags.help) {
   console.log(renderUsage());
-  process.exit(args.length === 0 ? 1 : 0);
+  process.exit(positionals.length === 0 && !flags.help ? 1 : 0);
 }
 
-const input = path.resolve(args[0] ?? '');
+const input = path.resolve(positionals[0] ?? '');
 if (!fs.existsSync(input)) die(`input not found: ${input}`);
-const output = args[1]
-  ? path.resolve(args[1])
+const output = positionals[1]
+  ? path.resolve(positionals[1])
   : path.join(path.dirname(input), `${path.basename(input, path.extname(input))}.pdf`);
 const sourceName = path.basename(input);
 const sourceTitle = path.basename(input, path.extname(input));
@@ -188,18 +206,15 @@ const githubContext = githubDocumentContext(input);
 const provenance = documentProvenance(input, githubContext);
 
 
-const brandHome = process.env.BRAND_HOME || path.join(codeHome, 'Assets', 'severino-brand');
+const brandHome = process.env['BRAND_HOME'] || path.join(codeHome, 'Assets', 'severino-brand');
 const brandKit = path.resolve(
-  process.env.DOCTOPDF_BRAND_KIT
+  process.env['DOCTOPDF_BRAND_KIT']
     || path.join(brandHome, 'kits', 'joe-severino'),
 );
-// Font resolution: explicit override wins (and fails loud if broken); the
-// legacy brand-kit path is honored when present; otherwise fall back to the
-// engine's vendored Inter — severino-brand stopped shipping fonts when the
-// branding engine adopted a bundled default, so a bare kit is the normal case.
+// DOCTOPDF_FONT wins and must exist; then the brand kit's font; then the vendored Inter.
 const brandKitFont = path.join(brandHome, 'brand', 'fonts', 'inter', 'inter-variable-latin.woff2');
 const brandFont = path.resolve(
-  process.env.DOCTOPDF_FONT
+  process.env['DOCTOPDF_FONT']
     || (fs.existsSync(brandKitFont) ? brandKitFont : vendoredFont('inter-variable-latin.woff2')),
 );
 const brandTokens = readRequired(path.join(brandKit, 'web', 'tokens.css'), 'brand tokens');
@@ -211,7 +226,7 @@ const brandWordmark = readRequired(
 const wordmarkUrl = svgDataUrl(brandWordmark);
 const interUrl = fileDataUrl(brandFont, 'font/woff2', 'brand font');
 
-const chrome = findChromium(process.env.CHROME_PATH);
+const chrome = findChromium(process.env['CHROME_PATH']);
 if (!chrome) die('no Chrome/Edge/Chromium found. Set CHROME_PATH to a Chromium binary.');
 
 // Pull Mermaid fences out before Markdown rendering. They are rendered by the
@@ -236,9 +251,9 @@ if (diagramDir) {
     encoding: 'utf8',
     env: {
       ...process.env,
-      TOOLS_HOME: process.env.TOOLS_HOME || toolsHome,
-      DIAGRAM_BRAND_KIT: process.env.DIAGRAM_BRAND_KIT || brandKit,
-      DIAGRAM_FONT: process.env.DIAGRAM_FONT || brandFont,
+      TOOLS_HOME: toolsHome,
+      DIAGRAM_BRAND_KIT: process.env['DIAGRAM_BRAND_KIT'] || brandKit,
+      DIAGRAM_FONT: process.env['DIAGRAM_FONT'] || brandFont,
     },
   });
   if (result.status !== 0) {
@@ -274,9 +289,9 @@ const md = new MarkdownIt({
     }).value;
   },
 });
-const defaultLinkOpen = md.renderer.rules.link_open
+const defaultLinkOpen = md.renderer.rules['link_open']
   || ((tokens, index, options, _env, self) => self.renderToken(tokens, index, options));
-md.renderer.rules.link_open = (tokens, index, options, env, self) => {
+md.renderer.rules['link_open'] = (tokens, index, options, env, self) => {
   const token = tokens[index];
   const hrefIndex = token ? token.attrIndex('href') : -1;
   const attr = token?.attrs?.[hrefIndex];
@@ -389,7 +404,7 @@ const html = `<!doctype html>
 <body><main>${body}</main>
 </body></html>`;
 
-const keepHtml = !!process.env.DOCTOPDF_KEEP_HTML;
+const keepHtml = !!process.env['DOCTOPDF_KEEP_HTML'];
 
 try {
   printHtmlToPdf({

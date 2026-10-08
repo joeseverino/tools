@@ -22,8 +22,9 @@ Bug reports and PRs welcome. A few ground rules:
   discover it automatically. Tool-specific support files go in
   `lib/<tool>/`; only code shared by two or more tools belongs flat in
   `lib/`. Then `tools generate` rebuilds the completions and README reference.
-- Behavior that matters gets a bats test in `tests/`. Tests must stay
-  hermetic: tmpdirs, stubbed binaries, no network.
+- Behavior that matters gets a bats test in `tests/`. Pure TypeScript
+  functions get a `node --test` test in `tests/unit/` (`npm test`). Tests must
+  stay hermetic: tmpdirs, stubbed binaries, no network.
 
 ## Scope
 

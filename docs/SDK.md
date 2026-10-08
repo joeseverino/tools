@@ -10,9 +10,11 @@ SDK standardizes mechanics; it never owns domain vocabulary.
 schemas/                 language-neutral contracts
 lib/sdk/core.sh          shell output, errors, JSON scalars, result envelopes
 lib/sdk.sh               shell command runtime (core + Cordon emitter)
-lib/sdk/process.ts       argument-safe sync/async process execution
-lib/sdk/result.ts        result-v1 constructors and rendering
-lib/sdk/svmc.{sh,ts}     governed vault CLI crossing
+lib/sdk/process.ts       argument-safe sync/async process execution, JSON with a validate guard
+lib/sdk/guards.ts        isRecord, isStringArray, parseJson: JSON boundaries stay `unknown` until checked
+lib/sdk/cli.ts           CliError, exit-code mapping, reportError, runCli
+lib/sdk/color.ts         terminal colour through util.styleText (off when not a TTY or NO_COLOR is set)
+lib/sdk/svmc.sh          governed vault CLI crossing
 lib/sdk/paths.ts         CODE_HOME and TOOLS_HOME, derived once
 config/capabilities.json fleet capability declarations
 config/contracts.json    producer → consumer contract graph
@@ -46,17 +48,24 @@ receipt, and next-action fields without every script inventing an envelope.
 
 ## Node utility
 
-```js
+```ts
 import { runJson } from './lib/sdk/process.ts';
-import { success, failure, writeResult } from './lib/sdk/result.ts';
+import { isRecord } from './lib/sdk/guards.ts';
 
-const result = runJson('some-command', ['--json']);
-writeResult(result.ok ? success(result.json) : failure('command_failed', result.error));
+const result = runJson('some-command', ['--json'], {}, isRecord);
+if (!result.ok || !result.json) process.exitCode = 1;
 ```
 
-Use `svmc(args)` from `lib/sdk/svmc.ts` for vault governance. It owns binary
-selection, vault-path propagation, argument-safe execution, JSON parsing, and
-the MCP `{ok,error}` convention.
+`runJson` and `spawnJson` take an optional guard as the last argument. A
+guard that rejects the parsed value turns the result into a failure, so callers
+read typed JSON without a cast.
+
+Node entry points keep `process.exit` out of helpers: helpers throw `CliError`
+(or any `Error`), and the entry point reports it with `reportError`, which sets
+`process.exitCode`. `util.parseArgs` rejections map to exit code 2.
+
+Vault governance goes through `lib/sdk/svmc.sh`, which owns binary selection
+and vault-path propagation.
 
 The SDK holds no credentials. Anything that needs one goes to the system that
 owns it: HQ through `hq call`, a secret through 1Password at the point of use.

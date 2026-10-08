@@ -8,25 +8,26 @@
 //
 // Usage: json.ts --record-dir DIR --scan-count N [--root R]... [--icloud] [--pr-dir DIR]
 import { readFileSync } from 'node:fs';
+import { parseArgs } from 'node:util';
 import { parseRecord, buildRepo } from './record.ts';
 import { projectPr, readPrBlob } from './pr.ts';
 
-const args = process.argv.slice(2);
-const roots: string[] = [];
-let recordDir = '';
-let prDir = '';
-let scanCount = 0;
-let icloud = false;
-for (let i = 0; i < args.length; i += 1) {
-  switch (args[i]) {
-    case '--record-dir': recordDir = args[i += 1] ?? ''; break;
-    case '--scan-count': scanCount = Number(args[i += 1]) || 0; break;
-    case '--root': roots.push(args[i += 1] ?? ''); break;
-    case '--pr-dir': prDir = args[i += 1] ?? ''; break;
-    case '--icloud': icloud = true; break;
-    default: break;
-  }
-}
+const { values } = parseArgs({
+  args: process.argv.slice(2),
+  options: {
+    'record-dir': { type: 'string', default: '' },
+    'scan-count': { type: 'string', default: '0' },
+    root: { type: 'string', multiple: true, default: [] },
+    'pr-dir': { type: 'string', default: '' },
+    icloud: { type: 'boolean', default: false },
+  },
+  strict: true,
+});
+const recordDir = values['record-dir'];
+const scanCount = Number(values['scan-count']) || 0;
+const roots = values.root;
+const prDir = values['pr-dir'];
+const icloud = values.icloud;
 const prs = Boolean(prDir);
 
 const repos: ReturnType<typeof buildRepo>[] = [];

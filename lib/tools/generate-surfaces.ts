@@ -3,12 +3,15 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { parseArgs } from 'node:util';
+import { CliError, reportError } from '../sdk/cli.ts';
+import { isRecord } from '../sdk/guards.ts';
+import { toolsHome as root } from '../sdk/paths.ts';
+import { runJson } from '../sdk/process.ts';
 import { validateContracts } from './describe-schema.ts';
 
-const root = process.env.TOOLS_HOME || path.resolve(import.meta.dirname, '../..');
-const args = process.argv.slice(2);
-const check = args.includes('--check');
-const requested = args.find((arg) => !arg.startsWith('-')) || 'all';
+let check = false;
+let requested = 'all';
 const validTargets = new Set(['all', 'completions', 'readme']);
 
 interface ArgBase {
@@ -73,32 +76,27 @@ interface Aggregate {
   tools: Tool[];
 }
 
-if (!validTargets.has(requested)) {
-  console.error(`unknown generation target: ${requested}`);
-  process.exit(2);
+function isAggregate(value: unknown): value is Aggregate {
+  return isRecord(value) && typeof value['ok'] === 'boolean' && Array.isArray(value['tools']) && value['tools'].every(isRecord);
 }
 
-const aggregate = JSON.parse(execFileSync(path.join(root, 'bin/tools'), ['describe'], {
-  encoding: 'utf8',
-  env: { ...process.env, TOOLS_HOME: root },
-})) as Aggregate;
-if (!aggregate.ok || !Array.isArray(aggregate.tools)) {
-  console.error('tools describe did not return a valid aggregate');
-  process.exit(1);
-}
-const failed = aggregate.tools.filter((tool) => tool.ok !== true);
-if (failed.length) {
-  for (const tool of failed) {
-    console.error(`${tool.name || '(unknown)'}: ${tool.error || 'describe contract failed'}`);
+function loadTools(): Tool[] {
+  if (!validTargets.has(requested)) throw new CliError(`unknown generation target: ${requested}`, 2);
+
+  const described = runJson(path.join(root, 'bin/tools'), ['describe'], { env: { TOOLS_HOME: root } }, isAggregate);
+  if (described.code !== 0) throw new CliError(described.error);
+  const aggregate = described.json;
+  if (!aggregate?.ok) throw new CliError('tools describe did not return a valid aggregate');
+  const failed = aggregate.tools.filter((tool) => tool.ok !== true);
+  if (failed.length) {
+    throw new CliError(failed.map((tool) => `${tool.name || '(unknown)'}: ${tool.error || 'describe contract failed'}`).join('\n'));
   }
-  process.exit(1);
+  const validation = validateContracts(aggregate);
+  if (!validation.ok) throw new CliError(validation.errors.join('\n'));
+  return [...aggregate.tools].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
 }
-const validation = validateContracts(aggregate);
-if (!validation.ok) {
-  for (const error of validation.errors) console.error(error);
-  process.exit(1);
-}
-const tools = [...aggregate.tools].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+
+let tools: Tool[] = [];
 
 function zsh(value: unknown): string {
   return String(value).replaceAll('\\', '\\\\').replaceAll("'", "'\\''").replaceAll('[', '\\[').replaceAll(']', '\\]');
@@ -358,11 +356,28 @@ function updateReadme(reference: string, inventory: string): boolean {
   return updateFile(file, next);
 }
 
-let ok = true;
-if (requested === 'all' || requested === 'completions') {
-  ok = updateFile(path.join(root, 'completions/_tools-suite'), renderCompletion()) && ok;
+function main(): void {
+  const { values, positionals } = parseArgs({
+    args: process.argv.slice(2),
+    options: { check: { type: 'boolean', default: false } },
+    allowPositionals: true,
+    strict: true,
+  });
+  check = values.check;
+  requested = positionals[0] ?? 'all';
+  tools = loadTools();
+  let ok = true;
+  if (requested === 'all' || requested === 'completions') {
+    ok = updateFile(path.join(root, 'completions/_tools-suite'), renderCompletion()) && ok;
+  }
+  if (requested === 'all' || requested === 'readme') {
+    ok = updateReadme(renderReadmeReference(), renderReadmeInventory()) && ok;
+  }
+  if (!ok) process.exitCode = 1;
 }
-if (requested === 'all' || requested === 'readme') {
-  ok = updateReadme(renderReadmeReference(), renderReadmeInventory()) && ok;
+
+try {
+  main();
+} catch (error) {
+  reportError(error);
 }
-if (!ok) process.exit(1);

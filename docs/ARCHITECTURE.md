@@ -16,7 +16,7 @@ the contract that ties them together. House rules for editing live in
 | `lib/` | Stable narrow SDK modules under `lib/sdk/`; `common.sh` as the compatibility aggregator; shared engines (`describe.sh`, `tui.ts`); tool-specific support under `lib/<tool>/`. |
 | `config/` | Per-tool defaults from layout env vars. `*.example` are templates; their gitignored copies are user-specific. |
 | `schemas/` | Machine-enforced cross-tool contracts. Runtime verification inputs, not prose documentation. |
-| `tests/` | Hermetic bats suite: tmpdirs and stubbed binaries, never the network. CI runs it. |
+| `tests/` | Hermetic bats suite: tmpdirs and stubbed binaries, never the network. CI runs it. `tests/unit/` holds `node --test` tests for the TypeScript helpers, run by `npm test` and by `unit.bats`. |
 | `bench/` | Every measured README claim has a script here; `tools check` runs them. |
 | `docs/` | This map, the contract deep-dive, and `docs/diagrams/` (mermaid sources + rendered PNGs). |
 
@@ -59,8 +59,8 @@ rejects missing metadata and duplicate positions. Every command also carries an
 
 Tools' shared mechanics are a small SDK for this repo, sibling repos, one-off
 scripts, and agent utilities. Shell consumers import `lib/sdk/core.sh`,
-`lib/sdk/svmc.sh`, or `lib/sdk.sh`; Node consumers import `lib/sdk/process.ts`,
-`result.ts`, and `svmc.ts`. Existing commands keep sourcing `common.sh`, which
+`lib/sdk/svmc.sh`, or `lib/sdk.sh`; Node consumers import `lib/sdk/process.ts`
+and the other narrow modules beside it. Existing commands keep sourcing `common.sh`, which
 is now only a compatibility aggregator over those narrow modules.
 
 Structured utilities use the versioned `result-v1` envelope. Fleet capabilities
@@ -114,8 +114,8 @@ fetches a provider or keeps a cache of one.
 
 We own `severino-vault-mcp` but call it as a plain, schema-validated CLI — never
 hand-editing vault frontmatter or shelling out to `yq`. Shell and Node callers
-go through `lib/sdk/svmc.sh` and `lib/sdk/svmc.ts`, respectively; both set the
-vault path and binary override consistently. The MCP is the one
+go through `lib/sdk/svmc.sh`, which sets the vault path and binary override
+consistently. The MCP is the one
 canonical writer and the one canonical frontmatter schema (`hq schema`
 regenerates HQ's copy from it). It emits the **same `describe` contract** this
 repo defines (a subset + the shared `schema_version` and `effect`), so

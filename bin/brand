@@ -87,7 +87,7 @@ cmd_status() {
     echo
     msg "$RESET" "brand" "$BRAND_HOME"
     local ver
-    ver=$(node -p "require('$BRAND_HOME/node_modules/branding-engine/package.json').version" 2>/dev/null || true)
+    ver=$(node "$TOOLS_HOME/lib/tools/package-version.ts" "$BRAND_HOME/node_modules/branding-engine/package.json" 2>/dev/null || true)
     msg "$RESET" "engine" "branding-engine ${ver:-unknown}"
     if [[ -d "$BRAND_HOME/.git" ]]; then
         local tree; tree=$(vault_tree "$BRAND_HOME")

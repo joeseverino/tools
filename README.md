@@ -92,8 +92,8 @@ tools/
   `tools check` validates the whole toolchain, sibling emitters included,
   against it.
 - **The SDK.** Other repos source [`lib/sdk.sh`](lib/sdk.sh) or import the
-  TypeScript modules under `lib/sdk/` for the same declarations, result
-  envelopes, and process helpers. `tools new <name> --agent` scaffolds a
+  TypeScript modules under `lib/sdk/` for the same declarations and process
+  helpers; shell utilities emit the result envelopes. `tools new <name> --agent` scaffolds a
   conformant tool.
 
 Layout rules:
@@ -160,7 +160,8 @@ it.
 
 `tools check` is the gate, and CI runs the same suite: ShellCheck, a strict
 TypeScript type-check, contract and schema validation, the generated-surface
-check, and the bats tests. `tools check --ci` runs it hermetically, as CI does.
+check, and the bats tests, which include the `node --test` unit tests in
+`tests/unit/` (`npm test` runs them alone). `tools check --ci` runs it hermetically, as CI does.
 Releases are cut by release-please from conventional commits.
 
 ## Tools

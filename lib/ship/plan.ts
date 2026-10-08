@@ -11,9 +11,9 @@
 // (repos/project.ts).
 import { projectReposStdin } from "../repos/project.ts";
 
-const includeCleanBranch = process.env.SHIP_INCLUDE_CLEAN_BRANCH === "1";
+const includeCleanBranch = process.env['SHIP_INCLUDE_CLEAN_BRANCH'] === "1";
 
-projectReposStdin((r) => {
+await projectReposStdin((r) => {
   const uncommitted = (r.dirty || 0) + (r.untracked || 0);
   const localOk = !!r.local_ok;
   const unpushed = (r.ahead || 0) > 0 || (r.has_remote && !r.upstream && !localOk);

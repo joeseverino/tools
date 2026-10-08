@@ -8,7 +8,8 @@
   },
   "packageManager": "npm@11.19.0",
   "scripts": {
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p .",
+    "test": "node --test tests/unit/*.test.ts"
   },
   "dependencies": {
     "@mermaid-js/mermaid-cli": "12.0.0",

@@ -18,20 +18,6 @@ load helpers
     [ "$status" -eq 0 ]
 }
 
-@test "Node result SDK emits envelopes valid against the same schema" {
-    run bash -c 'node --input-type=module -e '\''
-      import { success, writeResult } from "./lib/sdk/result.ts";
-      writeResult(success({ value: 1 }, { warnings: ["partial sync"] }));
-    '\'' | node "$TOOLS_HOME/lib/tools/validate-json.ts" "$TOOLS_HOME/schemas/result-v1.json"'
-    [ "$status" -eq 0 ]
-
-    run bash -c 'node --input-type=module -e '\''
-      import { failure, writeResult } from "./lib/sdk/result.ts";
-      writeResult(failure("stale_plan", "reload", { retryable: true }));
-    '\'' | node "$TOOLS_HOME/lib/tools/validate-json.ts" "$TOOLS_HOME/schemas/result-v1.json"'
-    [ "$status" -eq 0 ]
-}
-
 @test "die_unknown degrades cleanly without the describe runtime" {
     run bash -c 'source "$TOOLS_HOME/lib/sdk/core.sh"; die_unknown flag --nope'
     [ "$status" -eq 2 ]

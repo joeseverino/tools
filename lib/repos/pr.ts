@@ -16,18 +16,18 @@
 // json.ts (the --json surface), so the PR shape is derived in one place.
 
 import { readdirSync, readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { isRecord, parseJson } from '../sdk/guards.ts';
 
 interface CheckEntry { conclusion?: unknown; state?: unknown; status?: unknown }
 
 // A `gh pr view --json` blob; only the fields projectPr reads.
 export interface GhPrBlob {
-  number?: number;
-  isDraft?: boolean;
-  state?: string;
+  number?: number | null;
+  isDraft?: boolean | null;
+  state?: string | null;
   statusCheckRollup?: unknown;
-  reviewDecision?: string;
-  url?: string;
+  reviewDecision?: string | null;
+  url?: string | null;
 }
 
 export interface Pr { number: number; state: string; ci: string; review: string; url: string }
@@ -64,13 +64,30 @@ export function projectPr(raw: GhPrBlob | null | undefined): Pr {
   };
 }
 
+const optional = (value: unknown, type: 'string' | 'number' | 'boolean'): boolean =>
+  value == null || typeof value === type;
+
+function isGhPrBlob(value: unknown): value is GhPrBlob {
+  return isRecord(value)
+    && optional(value['number'], 'number')
+    && optional(value['isDraft'], 'boolean')
+    && optional(value['state'], 'string')
+    && optional(value['reviewDecision'], 'string')
+    && optional(value['url'], 'string');
+}
+
 // Read a fanned-out gh blob for index <idx> from <dir>, or null if absent/garbage.
 export function readPrBlob(dir: string, idx: string | number): GhPrBlob | null {
-  try { return JSON.parse(readFileSync(`${dir}/${idx}.json`, 'utf8') || 'null') as GhPrBlob | null; } catch { return null; }
+  try {
+    const blob = parseJson(readFileSync(`${dir}/${idx}.json`, 'utf8') || 'null');
+    return isGhPrBlob(blob) ? blob : null;
+  } catch {
+    return null;
+  }
 }
 
 function main(dir: string | undefined) {
-  if (!dir) process.exit(0);
+  if (!dir) return;
   for (const file of readdirSync(dir).sort()) {
     if (!file.endsWith('.json')) continue;
     const idx = file.replace(/\.json$/, '');
@@ -79,4 +96,4 @@ function main(dir: string | undefined) {
   }
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) main(process.argv[2]);
+if (import.meta.main) main(process.argv[2]);

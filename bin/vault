@@ -141,14 +141,8 @@ vault_daily() {
     result="$(printf '%s' "$block" | svmc daily-write ${write_args[@]+"${write_args[@]}"})" \
         || die "error" "daily-write failed (is the MCP installed? site reinstall-mcp)"
 
-    # Parse the MCP's {ok,...} envelope — node is the JSON tool (repo convention).
     local line kind detail state
-    # shellcheck disable=SC2016  # the node script is literal — no shell expansion
-    line="$(printf '%s' "$result" | node -e '
-let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{
-  let j={};try{j=JSON.parse(s)}catch{};
-  if(j.ok){process.stdout.write(`ok\t${j.wrote||""}\t${j.created?"created":"updated"}`)}
-  else{process.stdout.write(`err\t${j.error||"failed"}`)}});')"
+    line="$(printf '%s' "$result" | node "$TOOLS_HOME/lib/vault/daily-result.ts")"
     IFS=$'\t' read -r kind detail state <<<"$line"
     if [[ "$kind" == "ok" ]]; then
         msg "$GREEN" "daily" "$state brief region → $detail"
