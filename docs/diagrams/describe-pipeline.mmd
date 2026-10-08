@@ -1,16 +1,16 @@
 %%{init: {'flowchart': {'rankSpacing': 75, 'nodeSpacing': 55}}}%%
 flowchart TB
-    spec["describe_spec()<br/>desc_tool · desc_cmd · desc_opt · desc_pos<br/>desc_effect · desc_para · desc_example · desc_delegate"]
+    spec["ToolSpec (lib/&lt;tool&gt;/main.ts)<br/>commands · options · positionals · effect<br/>paras · examples · delegates"]
 
-    subgraph engine["lib/describe.sh — one engine (bash + zsh safe)"]
-        run["desc_help_intercept → describe_reset → run spec → render"]
+    subgraph engine["lib/sdk — one engine (surface.ts · usage.ts · tool.ts)"]
+        run["runTool → intercept → deploy gate → render or dispatch"]
     end
     spec ==>|"the single source of truth"| engine
 
     subgraph renderers["Renderers — pure, derived, no prose parsed"]
-        usage["usage()<br/>git-style main -h"]
-        focused["usage_command()<br/>focused &lt;cmd&gt; -h"]
-        json["describe_emit<br/>--describe JSON · schema_version 4 · carries effect"]
+        usage["renderUsage<br/>git-style main -h"]
+        focused["renderUsageFor<br/>focused &lt;cmd&gt; -h"]
+        json["renderContract<br/>--describe JSON · schema_version 4 · carries effect"]
     end
     engine --> usage
     engine --> focused

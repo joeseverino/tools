@@ -1,6 +1,6 @@
 %%{init: {'flowchart': {'rankSpacing': 65, 'nodeSpacing': 45}}}%%
 flowchart TB
-    decl["desc_effect &lt;class&gt; [+network] [+interactive]<br/>one line per command, declared explicitly<br/>(a missing declaration fails closed)"]
+    decl["effect: &lt;class&gt;, network?, interactive?<br/>required on every command and leaf tool<br/>(a missing declaration does not compile)"]
 
     subgraph ladder["effect — escalating blast radius"]
         direction LR
@@ -27,7 +27,7 @@ flowchart TB
     gate -->|"read"| free["run freely"]
     gate -->|"vault_write · remote_write · deploy"| confirm["confirm / dry-run first"]
 
-    enum["describe.bats<br/>guards every effect against the enum"]
+    enum["describe.bats and surface.test.ts<br/>guard every effect against the enum"]
     enum -.->|"keeps the hand-declared data honest"| j
 
     %% semantic heat ramp: cool (safe) → hot (irreversible). The one place hue = meaning.

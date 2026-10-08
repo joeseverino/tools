@@ -1,7 +1,8 @@
 # Architecture
 
-The personal CLI toolchain: small bash/zsh tools with TypeScript modules under
-`lib/`, sharing one look and feel and one help/JSON contract. It owns nothing
+The personal CLI toolchain: TypeScript tools under `lib/<tool>/`, each behind a
+four-line launcher in `bin/`, sharing one look and feel and one help/JSON
+contract. It owns nothing
 another system owns: infrastructure is HQ's, publishing is the site repo's, and
 vault writes are the MCP's. This doc is the map;
 [`command-surface-contract.md`](command-surface-contract.md) is the deep dive on
@@ -12,8 +13,8 @@ the contract that ties them together. House rules for editing live in
 
 | Dir | What |
 |---|---|
-| `bin/` | Exactly one executable per tool, nothing else. `tools install`, `tools describe`, `tools doctor`, and CI discover tools by globbing `bin/*`. |
-| `lib/` | Stable narrow SDK modules under `lib/sdk/`; `common.sh` as the compatibility aggregator; shared engines (`describe.sh`, `tui.ts`); tool-specific support under `lib/<tool>/`. |
+| `bin/` | Exactly one four-line node launcher per tool, nothing else. `tools install`, `tools describe`, `tools doctor`, and CI discover tools by globbing `bin/*`. |
+| `lib/` | One directory per tool (`lib/<tool>/main.ts` exports the tool, siblings hold pure logic); the framework and SDK under `lib/sdk/`; git and PR mechanics in `lib/git/`; the shared TUI toolkit `tui.ts`; the shell authoring surface (`describe.sh`, `init.sh`, `common.sh`) for shell consumers. |
 | `config/` | Per-tool defaults from layout env vars. `*.example` are templates; their gitignored copies are user-specific. |
 | `schemas/` | Machine-enforced cross-tool contracts. Runtime verification inputs, not prose documentation. |
 | `tests/` | Hermetic bats suite: tmpdirs and stubbed binaries, never the network. CI runs it. `tests/unit/` holds `node --test` tests for the TypeScript helpers, run by `npm test` and by `unit.bats`. |
@@ -22,20 +23,21 @@ the contract that ties them together. House rules for editing live in
 
 ## The emit-once command surface
 
-Every tool declares its command surface **once**, in a `describe_spec()` function
-(the `desc_*` DSL in `lib/describe.sh`). From that single declaration, one engine
-renders every view — the human `-h` screens, the `--describe` JSON contract, the
-`--tui` explorer, and the federated `tools describe` document. No tool
-hand-writes help; no prose is parsed, so the human help and the machine JSON
-cannot drift.
+Every tool declares its command surface **once**, as a typed `ToolSpec`
+(`lib/sdk/surface.ts`). From that single declaration, one engine renders every
+view: the human `-h` screens, the `--describe` JSON contract, the `--tui`
+explorer, and the federated `tools describe` document. No tool hand-writes help;
+no prose is parsed, so the human help and the machine JSON cannot drift.
 
 ![the describe pipeline](diagrams/describe-pipeline.png)
 
 This is the spine of the repo. A new tool becomes self-helping and
-self-describing the moment it defines `describe_spec` and puts
-`desc_help_intercept "$@"` above its dispatch `case`. The `case` after it is the
-only thing not derivable from the spec — pure command→action wiring — and
-`describe.bats` guards that the two sets can't drift.
+self-describing the moment it exports a `ToolDefinition` and its launcher calls
+`runTool`. The handlers are the only thing not derivable from the spec, and
+`runTool` refuses to start when a spec command has no handler or a handler has
+no spec command. Shell tools in sibling repos declare the same surface with the
+`desc_*` DSL; `lib/describe.sh` streams it to `lib/sdk/spec-cli.ts`, which
+renders through the same code.
 
 **The docs are derived too — by the same host.** The README CLI
 reference/inventory and the zsh completion file are not hand-written: `tools
@@ -58,10 +60,10 @@ rejects missing metadata and duplicate positions. Every command also carries an
 ## The reusable SDK substrate
 
 Tools' shared mechanics are a small SDK for this repo, sibling repos, one-off
-scripts, and agent utilities. Shell consumers import `lib/sdk/core.sh`,
-`lib/sdk/svmc.sh`, or `lib/sdk.sh`; Node consumers import `lib/sdk/process.ts`
-and the other narrow modules beside it. Existing commands keep sourcing `common.sh`, which
-is now only a compatibility aggregator over those narrow modules.
+scripts, and agent utilities. Node consumers import the narrow modules under
+`lib/sdk/` (`tool.ts`, `process.ts`, `output.ts`, and the rest); shell consumers
+source `lib/sdk/core.sh`, `lib/sdk/svmc.sh`, or `lib/sdk.sh`. `common.sh`
+aggregates the shell modules for the bats harness.
 
 Structured utilities use the versioned `result-v1` envelope. Fleet capabilities
 (describe/brief emitters, engine consumers, schema and install surfaces) live in
@@ -114,8 +116,8 @@ fetches a provider or keeps a cache of one.
 
 We own `severino-vault-mcp` but call it as a plain, schema-validated CLI — never
 hand-editing vault frontmatter or shelling out to `yq`. Shell and Node callers
-go through `lib/sdk/svmc.sh`, which sets the vault path and binary override
-consistently. The MCP is the one
+go through `lib/sdk/svmc.ts` (or `svmc.sh`), which sets the vault path and binary
+override consistently. The MCP is the one
 canonical writer and the one canonical frontmatter schema (`hq schema`
 regenerates HQ's copy from it). It emits the **same `describe` contract** this
 repo defines (a subset + the shared `schema_version` and `effect`), so
@@ -123,7 +125,7 @@ repo defines (a subset + the shared `schema_version` and `effect`), so
 
 ## Verification
 
-`tools check` runs everything CI runs (`bash -n` / `zsh -n`, the strict
+`tools check` runs everything CI runs (`bash -n` / `zsh -n` over remaining shell, the strict
 TypeScript type-check, shellcheck, contract validation, the bats suite) plus the
 bench assertions (`--no-bench` skips them). `tools doctor --all` is the
 cross-system rollup (`hq doctor`); `--live` adds `hq drift`. `tools status

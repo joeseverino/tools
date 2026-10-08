@@ -1,28 +1,20 @@
-// hq/report.ts — the JSON shaping and plain-text reports behind `hq`: the
-// create request, the sync summary and state record, the doctor and validate
-// reports, and `hq create <kind> -h`.
-//
-// Usage: report.ts <command> [args...]; JSON arrives on stdin or as arguments.
+// The JSON shaping and plain-text reports behind `hq`: the create request, the
+// sync summary and state record, the doctor and validate reports, and
+// `hq create <kind> -h`.
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { CliError, reportError } from '../sdk/cli.ts';
+import { CliError } from '../sdk/cli.ts';
 import { isRecord, isStringArray } from '../sdk/guards.ts';
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
-
-const [command = '', ...args] = process.argv.slice(2);
-
-function stdin(): string {
-  return readFileSync(0, 'utf8');
-}
 
 function fail(message: string, code = 2): never {
   throw new CliError(`hq: ${message}`, code);
 }
 
-function stdinJson(): unknown {
+export function parseInput(text: string): unknown {
   try {
-    return JSON.parse(stdin());
+    return JSON.parse(text);
   } catch (error) {
     return fail(`invalid JSON: ${error instanceof Error ? error.message : String(error)}`, 1);
   }
@@ -31,8 +23,6 @@ function stdinJson(): unknown {
 function optionalNumber(value: unknown): boolean {
   return value === undefined || typeof value === 'number';
 }
-
-// ---- create ------------------------------------------------------------------
 
 const ALIASES: Record<string, Record<string, string>> = {
   project: { technologies: 'technologies_used', repo: 'repository_url', url: 'public_url' },
@@ -45,8 +35,8 @@ const ALIASES: Record<string, Record<string, string>> = {
   },
 };
 
-// The human `hq create` surface as one canonical MCP request.
-function createRequest(argv: string[]): void {
+/** The human `hq create` surface as one canonical MCP request. */
+export function createRequest(argv: readonly string[]): unknown {
   const [kind = '', slug, ...rest] = argv;
   const aliases = ALIASES[kind];
   if (!aliases || slug === undefined) fail('usage: hq create {project,asset} <slug> [--field value ...]');
@@ -58,12 +48,11 @@ function createRequest(argv: string[]): void {
     const key = flag.slice(2).replaceAll('-', '_');
     payload[aliases[key] ?? key] = rest.shift() ?? '';
   }
-  process.stdout.write(`${JSON.stringify({ tool: 'execute_capability', arguments: { name: `${kind}.upsert`, payload } })}\n`);
+  return { tool: 'execute_capability', arguments: { name: `${kind}.upsert`, payload } };
 }
 
-// A JSON value as Python's repr would print it, which is how the field
-// defaults have always been shown.
-function pyRepr(value: Json): string {
+// Field defaults are shown the way Python's repr prints them.
+export function pyRepr(value: Json): string {
   if (value === null) return 'None';
   if (value === true) return 'True';
   if (value === false) return 'False';
@@ -87,8 +76,7 @@ function isCapability(value: unknown): value is Capability {
     && isRecord(value['input_schema']);
 }
 
-function createHelp(kind: string): void {
-  const catalog = stdinJson();
+export function createHelp(catalog: unknown, kind: string): string {
   if (!isRecord(catalog) || !Array.isArray(catalog['capabilities']) || !catalog['capabilities'].every(isCapability)) {
     return fail('capability catalog has an unexpected shape', 1);
   }
@@ -107,10 +95,8 @@ function createHelp(kind: string): void {
     else if (spec.type) detail.push(spec.type);
     lines.push(`  ${`--${field.replaceAll('_', '-')}`.padEnd(28)} ${detail.join('; ')}`);
   }
-  process.stdout.write(`${lines.join('\n')}\n`);
+  return `${lines.join('\n')}\n`;
 }
-
-// ---- sync ----------------------------------------------------------------------
 
 interface SyncStats {
   created?: number;
@@ -136,12 +122,9 @@ function isSyncStats(value: unknown): value is SyncStats {
     && (value['orphans'] === undefined || isStringArray(value['orphans']));
 }
 
-function syncSummary(manifestPath: string, rawStats: string, pruneFlag: string): void {
-  const manifest: unknown = JSON.parse(readFileSync(manifestPath, 'utf8'));
+export function syncSummary(manifest: unknown, stats: unknown, prune: boolean): string {
   if (!Array.isArray(manifest)) return fail('manifest is not a list', 1);
-  const stats: unknown = JSON.parse(rawStats);
   if (!isSyncStats(stats)) return fail('sync stats have an unexpected shape', 1);
-  const prune = pruneFlag === '1';
   const missing = stats.missing_relations ?? 0;
   const orphans = stats.orphans ?? [];
   const out = [`Docs      ${manifest.length} indexed`];
@@ -173,19 +156,21 @@ function syncSummary(manifestPath: string, rawStats: string, pruneFlag: string):
     out.push('Cleanup   no orphans');
   }
   out.push(missing || (orphans.length && !prune) ? 'Done      synced with cleanup needed' : 'Done      HQ is in sync');
-  process.stdout.write(`${out.join('\n')}\n`);
+  return `${out.join('\n')}\n`;
 }
 
-// What shipped: the manifest's hash plus the exact inputs, so `vault status`
-// and `hq doctor` can tell when HQ is stale.
-function syncState(manifestPath: string, statePath: string, vault: string, dirs: string, head: string): void {
-  const sha = createHash('sha256').update(readFileSync(manifestPath)).digest('hex');
-  const syncedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+// The manifest's hash plus the exact inputs, so `vault status` and `hq doctor`
+// can tell when HQ is stale.
+export function stateRecord(manifest: Buffer, vault: string, dirs: string, head: string, now: Date): string {
+  const sha = createHash('sha256').update(manifest).digest('hex');
+  const syncedAt = now.toISOString().replace(/\.\d{3}Z$/, 'Z');
   const state = { manifest_sha256: sha, vault, vault_dirs: dirs, vault_head: head, synced_at: syncedAt };
-  writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
+  return `${JSON.stringify(state, null, 2)}\n`;
 }
 
-// ---- doctor / validate -------------------------------------------------------
+export function syncState(manifestPath: string, statePath: string, vault: string, dirs: string, head: string): void {
+  writeFileSync(statePath, stateRecord(readFileSync(manifestPath), vault, dirs, head, new Date()));
+}
 
 interface DoctorReport {
   count?: number;
@@ -204,14 +189,12 @@ function isDoctorReport(value: unknown): value is DoctorReport {
     && (value['duplicates'] === undefined || (Array.isArray(value['duplicates']) && value['duplicates'].every(isDuplicate)));
 }
 
-function doctor(): void {
-  const r = stdinJson();
+export function doctorReport(r: unknown): { text: string; code: number } {
   if (!isDoctorReport(r)) return fail('doctor report has an unexpected shape', 1);
   const missing = r.missing_frontmatter ?? [];
   const dups = r.duplicates ?? [];
   if (!missing.length && !dups.length) {
-    process.stdout.write(`ok: ${r.count ?? 0} indexed docs have valid frontmatter\n`);
-    return;
+    return { text: `ok: ${r.count ?? 0} indexed docs have valid frontmatter\n`, code: 0 };
   }
   const out: string[] = [];
   if (dups.length) {
@@ -222,8 +205,7 @@ function doctor(): void {
     out.push(`${missing.length} doc(s) missing or invalid frontmatter:`);
     for (const p of missing) out.push(`  - ${p}`);
   }
-  process.stdout.write(`${out.join('\n')}\n`);
-  process.exitCode = 1;
+  return { text: `${out.join('\n')}\n`, code: 1 };
 }
 
 interface RegistryReport {
@@ -241,8 +223,7 @@ function isRegistryReport(value: unknown): value is RegistryReport {
     && isStringArray(value['orphan_assets']);
 }
 
-function validate(): void {
-  const r = stdinJson();
+export function validateReport(r: unknown): string {
   if (!isRegistryReport(r)) return fail('registry report has an unexpected shape', 1);
   const out = [`Projects  ${r.projects_total} total, ${r.orphan_projects.length} with zero docs`];
   for (const slug of r.orphan_projects) out.push(`          orphan: ${slug}`);
@@ -251,19 +232,5 @@ function validate(): void {
   out.push(`Registry  ${r.orphan_projects.length || r.orphan_assets.length
     ? 'review orphans above — stale slug from a rename, or a duplicate row'
     : 'ok — every Project and Asset is referenced by at least one doc'}`);
-  process.stdout.write(`${out.join('\n')}\n`);
-}
-
-try {
-  switch (command) {
-    case 'create-request': createRequest(args); break;
-    case 'create-help': createHelp(args[0] ?? ''); break;
-    case 'sync-summary': syncSummary(args[0] ?? '', args[1] ?? '{}', args[2] ?? '0'); break;
-    case 'sync-state': syncState(args[0] ?? '', args[1] ?? '', args[2] ?? '', args[3] ?? '', args[4] ?? ''); break;
-    case 'doctor': doctor(); break;
-    case 'validate': validate(); break;
-    default: fail(`unknown report: ${command}`);
-  }
-} catch (error) {
-  reportError(error);
+  return `${out.join('\n')}\n`;
 }

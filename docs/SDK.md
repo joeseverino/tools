@@ -8,20 +8,87 @@ SDK standardizes mechanics; it never owns domain vocabulary.
 
 ```text
 schemas/                 language-neutral contracts
-lib/sdk/core.sh          shell output, errors, JSON scalars, result envelopes
-lib/sdk.sh               shell command runtime (core + Cordon emitter)
+lib/sdk/surface.ts       typed tool spec, Cordon contract rendering
+lib/sdk/usage.ts         help screens rendered from a spec
+lib/sdk/tool.ts          runTool: help/--describe interception, deploy gate, dispatch
+lib/sdk/cli.ts           CliError, die, exit-code mapping, reportError
+lib/sdk/output.ts        status lines, header/footer, byte-padded label columns
+lib/sdk/color.ts         terminal colour through util.styleText (off when not a TTY or NO_COLOR is set)
 lib/sdk/process.ts       argument-safe sync/async process execution, JSON with a validate guard
 lib/sdk/guards.ts        isRecord, isStringArray, parseJson: JSON boundaries stay `unknown` until checked
-lib/sdk/cli.ts           CliError, exit-code mapping, reportError, runCli
-lib/sdk/color.ts         terminal colour through util.styleText (off when not a TTY or NO_COLOR is set)
-lib/sdk/svmc.sh          governed vault CLI crossing
 lib/sdk/paths.ts         CODE_HOME and TOOLS_HOME, derived once
+lib/sdk/config.ts        config/<name>.sh read through bash (local file, else .example)
+lib/sdk/svmc.ts          governed vault CLI crossing
+lib/sdk/result.ts        result-v1 envelope
+lib/sdk/ci.ts            the CI-equivalent environment
+lib/sdk/which.ts         command -v
+lib/sdk/report.ts        named checks and gates for health reports
+lib/sdk/spec-cli.ts      renderer behind the shell authoring DSL
+lib/sdk/{core,svmc,ci}.sh, lib/sdk.sh, lib/describe.sh   shell twins for shell consumers
 config/capabilities.json fleet capability declarations
 config/contracts.json    producer → consumer contract graph
 ```
 
-`lib/common.sh` remains a compatibility aggregator for the existing suite. New
-consumers import the narrowest module they need.
+New consumers import the narrowest module they need. `lib/common.sh` aggregates
+the shell twins for the bats harness.
+
+## A typed tool
+
+```ts
+// lib/inspect-widget/main.ts
+import { resultOk } from '../sdk/result.ts';
+import type { ToolSpec } from '../sdk/surface.ts';
+import type { Handler, ToolDefinition } from '../sdk/tool.ts';
+
+export const spec: ToolSpec = {
+  name: 'inspect-widget',
+  description: 'Inspect one widget.',
+  group: 'Other',
+  order: 900,
+  effect: 'read',
+  synopsis: ['inspect-widget <id>'],
+  positionals: [{ name: 'id', help: 'Widget identifier' }],
+};
+
+const run: Handler = (args) => {
+  process.stdout.write(resultOk({ id: args[0] ?? '' }));
+  return 0;
+};
+
+export const tool: ToolDefinition = { spec, run };
+```
+
+```text
+#!/usr/bin/env node
+import { runTool } from "../lib/sdk/tool.ts";
+import { tool } from "../lib/inspect-widget/main.ts";
+await runTool(tool);
+```
+
+`tools new <name> --agent` scaffolds this shape. A tool with subcommands lists
+them in `spec.commands` and supplies `commands: { name: handler }`; `runTool`
+refuses to start when the two sets differ. The handler emits
+`schemas/result-v1.json`, so agents receive stable success, failure, warning,
+receipt, and next-action fields without every script inventing an envelope.
+
+## Node utility
+
+```ts
+import { runJson } from './lib/sdk/process.ts';
+import { isRecord } from './lib/sdk/guards.ts';
+
+const result = runJson('some-command', ['--json'], {}, isRecord);
+if (!result.ok || !result.json) process.exitCode = 1;
+```
+
+`runJson` and `spawnJson` take an optional guard as the last argument. A
+guard that rejects the parsed value turns the result into a failure, so callers
+read typed JSON without a cast.
+
+Helpers keep `process.exit` out of the way: they throw `CliError` (or call
+`die` / `usageError`), and `runTool` reports it, setting `process.exitCode`.
+`util.parseArgs` rejections map to exit code 2, and `parsing(rt, ...)` turns an
+unknown flag into the shared usage error that prints the valid surface.
 
 ## Shell utility
 
@@ -42,30 +109,10 @@ desc_help_intercept "$@"
 result_ok "{\"id\":\"$(json_escape "$1")\"}"
 ```
 
-`tools new <name> --agent` scaffolds this shape. The handler emits
-`schemas/result-v1.json`, so agents receive stable success, failure, warning,
-receipt, and next-action fields without every script inventing an envelope.
-
-## Node utility
-
-```ts
-import { runJson } from './lib/sdk/process.ts';
-import { isRecord } from './lib/sdk/guards.ts';
-
-const result = runJson('some-command', ['--json'], {}, isRecord);
-if (!result.ok || !result.json) process.exitCode = 1;
-```
-
-`runJson` and `spawnJson` take an optional guard as the last argument. A
-guard that rejects the parsed value turns the result into a failure, so callers
-read typed JSON without a cast.
-
-Node entry points keep `process.exit` out of helpers: helpers throw `CliError`
-(or any `Error`), and the entry point reports it with `reportError`, which sets
-`process.exitCode`. `util.parseArgs` rejections map to exit code 2.
-
-Vault governance goes through `lib/sdk/svmc.sh`, which owns binary selection
-and vault-path propagation.
+The `desc_*` calls only collect records; `lib/sdk/spec-cli.ts` renders them
+through the same code as the typed tools. Vault governance goes through
+`lib/sdk/svmc.ts` (or `svmc.sh` from shell), which owns binary selection and
+vault-path propagation.
 
 The SDK holds no credentials. Anything that needs one goes to the system that
 owns it: HQ through `hq call`, a secret through 1Password at the point of use.

@@ -1,44 +1,26 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { ciRollup, projectPr } from '../../lib/repos/pr.ts';
+import { ciRollup, parsePrBlob, projectPr } from '../../lib/repos/pr.ts';
 import { planRows, reposFrom } from '../../lib/repos/project.ts';
-import { RECORD_FIELDS, buildRepo, parseRecord } from '../../lib/repos/record.ts';
+import { buildRepo } from '../../lib/repos/record.ts';
+import type { ParsedRecord } from '../../lib/repos/record.ts';
+import { isRecord, parseJson } from '../../lib/sdk/guards.ts';
 
-function recordLine(overrides: Record<string, string> = {}): string {
-  const defaults: Record<string, string> = {
-    name: 'tools', root: 'assets', path: '/code/tools', git: '1', branch: 'main', remote: 'git@x:y/z.git',
-    has_remote: '1', dirty: '2', untracked: '1', ahead: '3', behind: '0', upstream: '1',
-    upstream_name: 'origin/main', upstream_track: '[ahead 3]', upstream_gone: '0', sha: 'abc1234',
+function makeRecord(overrides: Partial<ParsedRecord> = {}): ParsedRecord {
+  return {
+    name: 'tools', root: 'assets', path: '/code/tools', git: true, branch: 'main', remote: 'git@x:y/z.git',
+    has_remote: true, dirty: 2, untracked: 1, ahead: 3, behind: 0, upstream: true,
+    upstream_name: 'origin/main', upstream_track: '[ahead 3]', upstream_gone: false, sha: 'abc1234',
     date: '2026-10-01', subject: 'feat: x', lang: 'ts', pm: 'npm', package_manager: 'npm@11', nvmrc: '24',
-    node_modules: '1', node_modules_size: '"4.2M"', ci: '1', icloud_dups: '5', stash: '0', local_ok: '0',
-    needs_ship: '1', needs_resync: '0', needs_attention: '1', branch_state: 'current',
+    node_modules: true, node_modules_size: '4.2M', ci: 1, icloud_dups: 5, stash: 0, local_ok: false,
+    needs_ship: true, needs_resync: false, needs_attention: true, branch_state: 'current',
+    ...overrides,
   };
-  const merged = { ...defaults, ...overrides };
-  return RECORD_FIELDS.map((field) => merged[field.key] ?? '').join('\x1f') + '\x1f\n';
 }
 
-test('parseRecord coerces each field by its declared type', () => {
-  const rec = parseRecord(recordLine());
-  assert.equal(rec.name, 'tools');
-  assert.equal(rec.git, true);
-  assert.equal(rec.dirty, 2);
-  assert.equal(rec.node_modules_size, '4.2M');
-  assert.equal(rec.upstream_gone, false);
-  assert.equal(rec.needs_attention, true);
-});
-
-test('parseRecord tolerates a short line and a bad raw field', () => {
-  const rec = parseRecord('name\x1froot\x1f/p');
-  assert.equal(rec.name, 'name');
-  assert.equal(rec.dirty, 0);
-  assert.equal(rec.git, false);
-  assert.equal(rec.node_modules_size, null);
-  assert.equal(parseRecord(recordLine({ node_modules_size: 'oops{' })).node_modules_size, null);
-  assert.equal(parseRecord(recordLine({ node_modules_size: 'null' })).node_modules_size, null);
-});
-
 test('buildRepo nests last_commit and gates icloud_dups and pr', () => {
-  const rec = parseRecord(recordLine());
+  const rec = makeRecord();
   const plain = buildRepo(rec);
   assert.deepEqual(plain.last_commit, { sha: 'abc1234', date: '2026-10-01', subject: 'feat: x' });
   assert.equal('icloud_dups' in plain, false);
@@ -53,6 +35,15 @@ test('buildRepo nests last_commit and gates icloud_dups and pr', () => {
 
   const merged = buildRepo(rec, { pr: { number: 9, state: 'merged', ci: 'passing', review: 'none', url: 'u' } });
   assert.equal(merged.branch_state, 'current');
+});
+
+test('buildRepo emits exactly the properties of the published repos schema', () => {
+  const schema = parseJson(readFileSync(new URL('../../schemas/repos.schema.json', import.meta.url), 'utf8'));
+  const defs = isRecord(schema) && isRecord(schema['$defs']) ? schema['$defs'] : {};
+  const repo = isRecord(defs['repo']) ? defs['repo'] : {};
+  const properties = isRecord(repo['properties']) ? Object.keys(repo['properties']).sort() : [];
+  const built = Object.keys(buildRepo(makeRecord(), { icloud: true, pr: { number: 1, state: 'open', ci: 'none', review: 'none', url: '' } })).sort();
+  assert.deepEqual(built, properties);
 });
 
 test('ciRollup: failing beats pending beats passing; empty is none', () => {
@@ -72,6 +63,10 @@ test('projectPr degrades a missing PR to the no-PR default', () => {
   const pr = projectPr({ number: 4, state: 'OPEN', reviewDecision: 'APPROVED', url: 'u', statusCheckRollup: [] });
   assert.deepEqual(pr, { number: 4, state: 'open', ci: 'none', review: 'approved', url: 'u' });
   assert.equal(projectPr({ number: 4, reviewDecision: null }).review, 'none');
+  assert.equal(parsePrBlob(''), null);
+  assert.equal(parsePrBlob('not json'), null);
+  assert.equal(parsePrBlob('{"number":"x"}'), null);
+  assert.equal(parsePrBlob('{"number":3,"state":"OPEN"}')?.number, 3);
 });
 
 test('reposFrom and planRows read a repos payload defensively', () => {

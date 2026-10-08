@@ -64,7 +64,7 @@ export function loadCapabilities(): CapabilitiesManifest {
   return data;
 }
 
-function repoPath(repo: Repository): string {
+export function repoPath(repo: Repository): string {
   const overrides: Record<string, string | undefined> = {
     'severino-vault-mcp': process.env['MCP_HOME'],
     'severino-life': process.env['LIFE_MCP_HOME'],
@@ -82,6 +82,17 @@ export function capabilityPaths(capability: string): RepositoryEntry[] {
 
 export function repositoryEntries(): RepositoryEntry[] {
   return loadCapabilities().repositories.map((repo) => ({ id: repo.id, path: repoPath(repo) }));
+}
+
+export interface InstallPlan {
+  path: string;
+  command: Command;
+}
+
+export function installPlan(id: string): InstallPlan | null {
+  const repo = loadCapabilities().repositories.find((entry) => entry.id === id);
+  const command = repositoryCapability(id, 'install');
+  return repo && command ? { path: repoPath(repo), command } : null;
 }
 
 export function repositoryCapability(id: string, capability: string): Command | null {
@@ -143,10 +154,9 @@ function main() {
     return;
   }
   if (action === 'install' && capability) {
-    const repo = loadCapabilities().repositories.find((entry) => entry.id === capability);
-    const command = repositoryCapability(capability, 'install');
-    if (!repo || !command) { process.exitCode = 1; return; }
-    process.stdout.write([repoPath(repo), ...command].join('\t') + '\n');
+    const plan = installPlan(capability);
+    if (!plan) { process.exitCode = 1; return; }
+    process.stdout.write([plan.path, ...plan.command].join('\t') + '\n');
     return;
   }
   if (action === 'fingerprints') {

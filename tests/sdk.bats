@@ -128,6 +128,6 @@ JSON
 }
 
 @test "common remains a compatibility aggregator over narrow SDK modules" {
-    run bash -c 'source "$TOOLS_HOME/lib/common.sh"; type result_ok; type svmc; type vault_tree; type ci_shell_env; type hq_sync_freshness'
+    run bash -c 'source "$TOOLS_HOME/lib/common.sh"; type result_ok; type svmc; type ci_shell_env'
     [ "$status" -eq 0 ]
 }

@@ -247,7 +247,7 @@ function dirtyCount(r: TuiRepo) {
 
 // The ship / resync classification is owned by `repos --json` (emit-once); the
 // TUI consumes the emitted flags and never re-derives them, so there is exactly
-// one definition of "needs ship" / "needs resync" (in bin/repos), not a second
+// one definition of "needs ship" / "needs resync" (needsFlags in lib/repos/collect.ts), not a second
 // formula here that could silently drift.
 function needsShip(r: TuiRepo) {
   return r.needsShip;

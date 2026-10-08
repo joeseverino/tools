@@ -1,15 +1,14 @@
-#!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
 import { codeHome } from '../sdk/paths.ts';
 
-function token(css: string, name: string): string {
+export function token(css: string, name: string): string {
   const match = css.match(new RegExp(`--${name}\\s*:\\s*(#[0-9a-f]{3,8})\\s*;`, 'i'));
   if (!match) throw new Error(`brand token --${name} not found`);
   return match[1] ?? '';
 }
 
-function rgb(value: string): number[] {
+export function rgb(value: string): number[] {
   const digits = value.slice(1);
   const expanded = digits.length === 3
     ? [...digits].map((digit) => digit + digit).join('')
@@ -17,7 +16,7 @@ function rgb(value: string): number[] {
   return [0, 2, 4].map((offset) => parseInt(expanded.slice(offset, offset + 2), 16));
 }
 
-function mix(foreground: string, background: string, amount: number): string {
+export function mix(foreground: string, background: string, amount: number): string {
   const front = rgb(foreground);
   const back = rgb(background);
   const weight = amount / 100;
@@ -27,22 +26,6 @@ function mix(foreground: string, background: string, amount: number): string {
     .join('')}`;
 }
 
-
-const brandHome = process.env['BRAND_HOME'] || path.join(codeHome, 'Assets', 'severino-brand');
-const brandKit = path.resolve(
-  process.env['DIAGRAM_BRAND_KIT']
-    || path.join(brandHome, 'kits', 'joe-severino'),
-);
-// DIAGRAM_FONT wins and must exist; then the brand kit's font; then the vendored Inter.
-const brandKitFont = path.join(brandHome, 'brand', 'fonts', 'inter', 'inter-variable-latin.woff2');
-const brandFont = path.resolve(
-  process.env['DIAGRAM_FONT']
-    || (fs.existsSync(brandKitFont)
-      ? brandKitFont
-      : path.join(import.meta.dirname, '..', 'pdf-engine', 'fonts', 'inter-variable-latin.woff2')),
-);
-const tokensPath = path.join(brandKit, 'web', 'tokens.css');
-
 function readOrThrow(file: string, what: string): Buffer {
   try {
     return fs.readFileSync(file);
@@ -51,7 +34,17 @@ function readOrThrow(file: string, what: string): Buffer {
   }
 }
 
-function buildConfig(): object {
+export function buildConfig(env: NodeJS.ProcessEnv = process.env): object {
+  const brandHome = env['BRAND_HOME'] || path.join(codeHome, 'Assets', 'severino-brand');
+  const brandKit = path.resolve(env['DIAGRAM_BRAND_KIT'] || path.join(brandHome, 'kits', 'joe-severino'));
+  const brandKitFont = path.join(brandHome, 'brand', 'fonts', 'inter', 'inter-variable-latin.woff2');
+  const brandFont = path.resolve(
+    env['DIAGRAM_FONT']
+      || (fs.existsSync(brandKitFont)
+        ? brandKitFont
+        : path.join(import.meta.dirname, '..', 'pdf-engine', 'fonts', 'inter-variable-latin.woff2')),
+  );
+  const tokensPath = path.join(brandKit, 'web', 'tokens.css');
   const css = readOrThrow(tokensPath, 'brand tokens').toString('utf8');
 
   const accent = token(css, 'brand-accent');
@@ -104,11 +97,4 @@ function buildConfig(): object {
       titleColor: ink,
     },
   };
-}
-
-try {
-  console.log(JSON.stringify(buildConfig(), null, 2));
-} catch (error) {
-  console.error(`diagram: ${error instanceof Error ? error.message : String(error)}`);
-  process.exitCode = 1;
 }

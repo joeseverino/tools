@@ -13,7 +13,6 @@ import { paint } from '../sdk/color.ts';
 import type { Style } from '../sdk/color.ts';
 import { isRecord, parseJson } from '../sdk/guards.ts';
 
-// One task row as task-list emits it; only the fields this view reads.
 interface Task {
   project: string;
   status: string;
@@ -49,8 +48,6 @@ function cell(s: unknown, w: number): string {
   return str + (pad > 0 ? " ".repeat(pad) : "");
 }
 
-// One task line. `showProject` adds the project cell (the flat list); the board
-// drops it (the group header already names the project).
 function row(t: Task, { showProject = false }: { showProject?: boolean } = {}): string {
   const flags = t.stale ? `  ${paint('yellow', `stale ${t.age_days}d`)}` : "";
   const meta = [t.priority, t.effort].filter(Boolean).join(" · ");
@@ -76,7 +73,7 @@ function renderList(tasks: Task[], staleDays: number): string {
 
 function renderBoard(tasks: Task[], staleDays: number): string {
   if (!tasks.length) return header(0) + `  ${paint('dim', 'none')}`;
-  // Group by project; the cross-cutting bucket sorts last, projects A→Z.
+  // The cross-cutting bucket sorts last.
   const groups: Record<string, Task[]> = {};
   for (const t of tasks) (groups[t.project] ||= []).push(t);
   const order = Object.keys(groups).sort((a, b) =>
@@ -92,19 +89,25 @@ function renderBoard(tasks: Task[], staleDays: number): string {
   return out.join("\n");
 }
 
-await runCli(async () => {
-  const { positionals } = parseArgs({ args: process.argv.slice(2), allowPositionals: true, strict: true });
-  const mode = positionals[0] === "list" ? "list" : "board";
+export type BoardMode = 'board' | 'list';
 
-  const data = parseJson(await text(process.stdin));
+/** The terminal view of one task-list payload; code 1 when the MCP reported an error. */
+export function renderTaskList(mode: BoardMode, data: unknown): { text: string; code: number } {
   const payload = isRecord(data) ? data : {};
   if (payload['ok'] === false) {
-    const message = typeof payload['error'] === 'string' && payload['error'] ? payload['error'] : "task-list failed";
-    process.stdout.write(`\n  ${paint('red', 'error')}      ${message}\n\n`);
-    process.exitCode = 1;
-    return;
+    const message = typeof payload['error'] === 'string' && payload['error'] ? payload['error'] : 'task-list failed';
+    return { text: `\n  ${paint('red', 'error')}      ${message}\n\n`, code: 1 };
   }
   const tasks = Array.isArray(payload['tasks']) ? payload['tasks'].filter(isTask) : [];
   const staleDays = typeof payload['stale_days'] === 'number' && payload['stale_days'] ? payload['stale_days'] : 14;
-  process.stdout.write((mode === "list" ? renderList : renderBoard)(tasks, staleDays) + "\n");
-});
+  return { text: `${(mode === 'list' ? renderList : renderBoard)(tasks, staleDays)}\n`, code: 0 };
+}
+
+if (import.meta.main) {
+  await runCli(async () => {
+    const { positionals } = parseArgs({ args: process.argv.slice(2), allowPositionals: true, strict: true });
+    const { text: output, code } = renderTaskList(positionals[0] === 'list' ? 'list' : 'board', parseJson(await text(process.stdin)));
+    process.stdout.write(output);
+    process.exitCode = code;
+  });
+}

@@ -91,3 +91,9 @@ export function spawnJson(bin: string, args: string[] = [], options: SpawnJsonOp
     });
   });
 }
+
+/** Runs a command attached to this process's terminal and returns its exit status. */
+export function runInherit(bin: string, args: readonly string[] = [], options: Omit<SpawnSyncOptionsWithStringEncoding, 'encoding' | 'stdio'> = {}): number {
+  const proc = spawnSync(bin, [...args], { ...options, env: { ...process.env, ...(options.env || {}) }, stdio: 'inherit' });
+  return proc.status ?? 1;
+}

@@ -10,9 +10,5 @@
 source "$TOOLS_HOME/lib/sdk/core.sh"
 # shellcheck source=lib/sdk/svmc.sh
 source "$TOOLS_HOME/lib/sdk/svmc.sh"
-# shellcheck source=lib/sdk/vault.sh
-source "$TOOLS_HOME/lib/sdk/vault.sh"
 # shellcheck source=lib/sdk/ci.sh
 source "$TOOLS_HOME/lib/sdk/ci.sh"
-# shellcheck source=lib/sdk/hq-state.sh
-source "$TOOLS_HOME/lib/sdk/hq-state.sh"

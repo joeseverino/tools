@@ -1,8 +1,9 @@
 #!/usr/bin/env bats
-# describe.bats — the emit-once command-surface contract (lib/describe.sh) and
-# the `tools describe` aggregator. The load-bearing test is the round-trip
-# invariant: because -h and --describe both render from one describe_spec, the
-# set of options/commands in the rendered usage must equal the set in the JSON.
+# describe.bats — the shell authoring DSL (lib/describe.sh, rendered by
+# lib/sdk/spec-cli.ts) and the `tools describe` aggregator. The load-bearing
+# test is the round-trip invariant: because -h and --describe both render from
+# one spec, the set of options/commands in the rendered usage must equal the
+# set in the JSON.
 
 load helpers
 
@@ -512,8 +513,8 @@ assert binset == set(names), (binset ^ set(names))
 }
 
 @test "every tool answers -h and --help identically (one renderer, both flags routed)" {
-    # The help text is rendered by one shared engine (lib/describe.sh); the only
-    # per-tool code is the dispatch line that routes the flag to it. This guards
+    # The help text is rendered by one shared engine; the only per-tool code is the
+    # dispatch that routes the flag to it. This guards
     # that BOTH -h and --help reach that renderer for every tool — a regression
     # where a shared dispatcher matched -h but not --help shipped
     # "unknown command: --help".
@@ -539,59 +540,6 @@ assert binset == set(names), (binset ^ set(names))
     run env HQ_CALL=/nonexistent "$TOOLS_HOME/bin/hq" call --help
     [ "$status" -eq 0 ]
     [[ "$output" == *"Usage: hq call"* ]]
-}
-
-@test "spec ↔ dispatch parity is exact, both directions (no orphan command or arm)" {
-    # The spec (describe_spec) is the command-surface DATA; the dispatch `case`
-    # is the behavior wiring (which differs per command — cmd_*, run_npm, aliases
-    # — so it can't be derived). The only shared token is the command name. This
-    # asserts the two sets are EQUAL: a desc_cmd with no dispatch arm (shows in
-    # help, errors on run) AND a dispatch arm with no desc_cmd (an undisclosed
-    # command) both fail. The arm set is the `case` block right after
-    # desc_help_intercept.
-    for tool in hq tools brand vault; do
-        run python3 - "$TOOLS_HOME/bin/$tool" <<'PY'
-import json, os, re, subprocess, sys
-path = sys.argv[1]
-src = open(path).read()
-spec = {c["name"] for c in
-        json.loads(subprocess.run([path, "--describe"], capture_output=True, text=True).stdout)["commands"]}
-block = src[src.rindex('desc_help_intercept "$@"'):].split("\nesac", 1)[0]
-arms = set(re.findall(r'^\s*([a-z][a-z0-9-]*)\)\s', block, re.M))
-if spec != arms:
-    print(f"{os.path.basename(path)}: spec-only={sorted(spec-arms)} arm-only={sorted(arms-spec)}")
-    sys.exit(1)
-PY
-        [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-    done
-}
-
-@test "every declared flag is referenced in the parser (spec can't run ahead of code)" {
-    # describe_spec is the documentation source; each handler still parses argv
-    # separately, so the two CAN drift. This is the cheap guard for the common
-    # direction: a desc_opt long flag that no parser handles. (The reverse — a
-    # parser flag missing from the spec — and full behavioral SOT would need the
-    # parser generated from the spec; that's the remaining known gap.)
-    for t in "$TOOLS_HOME"/bin/*; do
-        head -1 "$t" | grep -q node && continue   # doc-to-pdf carries its own SPEC
-        flags=$("$t" --describe 2>/dev/null | python3 -c '
-import json,sys
-try: o=json.load(sys.stdin)
-except Exception: sys.exit(0)
-fl=set()
-def go(a):
-    for x in a:
-        for f in x.get("flags",[]):
-            if f.startswith("--"): fl.add(f)
-go(o.get("global_options",[]))
-for c in o.get("commands",[]): go(c.get("args",[]))
-print("\n".join(sorted(fl)))' 2>/dev/null)
-        while IFS= read -r f; do
-            [ -n "$f" ] || continue
-            grep -qF -- "$f" "$t" \
-                || { echo "$(basename "$t"): declares $f but the parser never references it"; return 1; }
-        done <<<"$flags"
-    done
 }
 
 @test "tools describe <tool> delegates to that tool" {

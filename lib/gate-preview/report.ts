@@ -1,11 +1,6 @@
-#!/usr/bin/env node
-// gate-preview/report.ts: the JSON shaping behind `gate-preview`.
-//
-//   paths                     repos --json on stdin  -> one repo path per line
-//   verdict                   checks-engine --json on stdin -> "ok" | "RED a,b" | "ERROR no verdict"
-//   rows <name|verdict>...    the per-repo rows as one {ok, repos} JSON document
-import { text } from 'node:stream/consumers';
-import { isRecord, isStringArray, parseJson } from '../sdk/guards.ts';
+// JSON shaping behind `gate-preview`: repo paths from `repos --json`, a verdict
+// string per checks-engine report, and the per-repo rows document.
+import { isRecord, isStringArray } from '../sdk/guards.ts';
 
 export function repoPaths(payload: unknown): string[] {
   const repos = isRecord(payload) ? payload['repos'] ?? payload : payload;
@@ -27,22 +22,4 @@ export function rowsOf(rows: string[]): { ok: boolean; repos: Row[] } {
     return { repo, ok: verdict === 'ok', ...(verdict.startsWith('RED') ? { failed: verdict.slice(4).split(',') } : {}) };
   });
   return { ok: repos.every((row) => row.ok), repos };
-}
-
-if (import.meta.main) {
-  const [command, ...args] = process.argv.slice(2);
-  switch (command) {
-    case 'paths':
-      for (const path of repoPaths(parseJson(await text(process.stdin)))) console.log(path);
-      break;
-    case 'verdict':
-      console.log(verdictOf(parseJson(await text(process.stdin))));
-      break;
-    case 'rows':
-      console.log(JSON.stringify(rowsOf(args)));
-      break;
-    default:
-      console.error('usage: report.ts <paths|verdict|rows> [args...]');
-      process.exitCode = 2;
-  }
 }

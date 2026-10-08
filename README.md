@@ -2,10 +2,10 @@
 
 My personal macOS command-line toolchain: vault capture and sync, the
 commit-to-merge loop across every repo, HQ operations, diagrams, and PDFs. Each
-tool is one script in `bin/` that declares its command surface once, and its
-help, shell completions, the reference below, and a machine-readable spec all
-render from that declaration, each command carrying its blast radius so an
-agent can check it before acting.
+tool is a launcher in `bin/` over a TypeScript module in `lib/<tool>/` that
+declares its command surface once, and its help, shell completions, the
+reference below, and a machine-readable spec all render from that declaration,
+each command carrying its blast radius so an agent can check it before acting.
 
 The toolchain stays thin by owning nothing another system already owns.
 Infrastructure facts belong to [Severino HQ](https://github.com/joeseverino/severino-hq),
@@ -21,9 +21,10 @@ shared runtime other repos use). House rules for editing are in
 
 ## Requirements
 
-- macOS, with `bash` 4 or newer (`brew install bash`) and `zsh` 5.
-- `git`, `rsync`, `jq`, and `uv`.
-- Node 24 (the version in `.nvmrc`). The modules under `lib/` are TypeScript,
+- macOS, with `bash` (the shell-sourced `config/*.sh` files, `lib/hq-call`, and
+  the test harness use it) and `zsh` 5 for completions.
+- `git`, `rsync`, `jq` (the hq bats suite), and `uv`.
+- Node 24 (the version in `.nvmrc`). The tools under `lib/` are TypeScript,
   which Node runs directly. Run `npm ci` once for their pinned dependencies.
 - A local Chromium, Chrome, or Edge for `doc-to-pdf` and `diagram`. Neither
   downloads a browser.
@@ -91,15 +92,15 @@ tools/
   [cordon](https://github.com/joeseverino/cordon)'s command-surface schema, and
   `tools check` validates the whole toolchain, sibling emitters included,
   against it.
-- **The SDK.** Other repos source [`lib/sdk.sh`](lib/sdk.sh) or import the
-  TypeScript modules under `lib/sdk/` for the same declarations and process
-  helpers; shell utilities emit the result envelopes. `tools new <name> --agent` scaffolds a
-  conformant tool.
+- **The SDK.** Other repos import the TypeScript modules under `lib/sdk/` (the
+  typed command framework, process helpers, the result envelope) or, for shell
+  utilities, source [`lib/sdk.sh`](lib/sdk.sh), whose `desc_*` declarations render
+  through the same code. `tools new <name> --agent` scaffolds a conformant tool.
 
 Layout rules:
 
-- **`bin/` is the public surface.** One executable per tool and nothing else;
-  install, completions, and CI discover tools by listing `bin/`.
+- **`bin/` is the public surface.** One four-line launcher per tool and nothing
+  else; install, completions, and CI discover tools by listing `bin/`.
 - **`lib/` splits shared from tool-specific.** Shared code sits flat or in
   `lib/sdk/`; anything one tool owns lives in `lib/<tool>/`, so its footprint is
   obvious and removable.
@@ -109,7 +110,7 @@ Layout rules:
 ## Install
 
 ```sh
-brew install bash zsh git rsync jq uv
+brew install zsh git rsync jq uv
 git clone https://github.com/joeseverino/tools ~/Code/Assets/tools
 export TOOLS_HOME=~/Code/Assets/tools        # in ~/.zshrc
 cd "$TOOLS_HOME" && npm ci
