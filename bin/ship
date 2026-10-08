@@ -28,7 +28,7 @@ ship_gate_cmd() {
         [[ -f "$p/yarn.lock" ]]                       && runner=(yarn)
         [[ -f "$p/bun.lockb" || -f "$p/bun.lock" ]]   && runner=(bun run)
         local script
-        script="$(node -e 'try{const s=(require(process.argv[1]).scripts)||{};process.stdout.write(s.check?"check":(s.test?"test":""))}catch(e){}' "$p/package.json" 2>/dev/null || true)"
+        script="$(node "$TOOLS_HOME/lib/ship/gate-script.ts" "$p/package.json" 2>/dev/null || true)"
         [[ -n "$script" ]] && { SHIP_GATE=("${runner[@]}" "$script"); return 0; }
     fi
     return 1

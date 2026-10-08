@@ -2,9 +2,10 @@
 // so rendering needs no browser download and no network.
 import { findChromium } from '../pdf-engine/index.ts';
 
-const executablePath = findChromium(process.env.DIAGRAM_CHROMIUM);
-if (!executablePath) {
+const executablePath = findChromium(process.env['DIAGRAM_CHROMIUM']);
+if (executablePath) {
+  process.stdout.write(JSON.stringify({ executablePath, headless: 'shell' }) + '\n');
+} else {
   console.error('diagram: no Chromium, Chrome, or Edge found (set DIAGRAM_CHROMIUM)');
-  process.exit(1);
+  process.exitCode = 1;
 }
-process.stdout.write(JSON.stringify({ executablePath, headless: 'shell' }) + '\n');

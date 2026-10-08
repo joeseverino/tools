@@ -6,7 +6,7 @@
 // resync's filter and columns.
 import { projectReposStdin } from "../repos/project.ts";
 
-projectReposStdin((r) => {
+await projectReposStdin((r) => {
   if (!r.git || !r.has_remote) return null;
   return [r.name, r.path, (r.dirty || 0) + (r.untracked || 0)];
 });

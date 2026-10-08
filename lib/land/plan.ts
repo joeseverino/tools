@@ -7,7 +7,7 @@
 import { projectReposStdin } from "../repos/project.ts";
 import type { Pr } from "../repos/pr.ts";
 
-projectReposStdin((r) => {
+await projectReposStdin((r) => {
   const pr: Partial<Pr> = r.pr || {};
   if (pr.state !== "open") return null;
   return [r.name, r.path, pr.number, pr.ci, pr.url];

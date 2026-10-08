@@ -38,10 +38,7 @@ repos_json="$("$TOOLS_HOME/bin/repos" --json)"
 gated=()
 while IFS= read -r p; do
     [[ -f "$p/cordon.checks.json" || -f "$p/scripts/check.sh" ]] && gated+=("$p")
-done < <(node -e '
-    const d = JSON.parse(require("fs").readFileSync(0, "utf8"));
-    for (const r of d.repos ?? d) console.log(r.path);
-' <<<"$repos_json")
+done < <(node "$TOOLS_HOME/lib/gate-preview/report.ts" paths <<<"$repos_json")
 
 (( ${#gated[@]} )) || die "error" "no gated repos found"
 
@@ -50,7 +47,7 @@ fail_total=0
 for repo in "${gated[@]}"; do
     name="$(basename "$repo")"
     verdict="$(node "$ENGINE" --root "$repo" --json 2>/dev/null || true)"
-    ok="$(node -e 'try{const v=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(v.ok?"ok":"RED "+v.failed.join(","))}catch{console.log("ERROR no verdict")}' <<<"$verdict")"
+    ok="$(node "$TOOLS_HOME/lib/gate-preview/report.ts" verdict <<<"$verdict")"
     [[ "$ok" == ok ]] || fail_total=$((fail_total + 1))
     rows+=("$name|$ok")
     if (( ! JSON_MODE )); then
@@ -63,13 +60,7 @@ for repo in "${gated[@]}"; do
 done
 
 if (( JSON_MODE )); then
-    node -e '
-        const rows = process.argv.slice(1).map((r) => {
-            const [repo, verdict] = r.split("|");
-            return { repo, ok: verdict === "ok", ...(verdict.startsWith("RED") ? { failed: verdict.slice(4).split(",") } : {}) };
-        });
-        console.log(JSON.stringify({ ok: rows.every((r) => r.ok), repos: rows }));
-    ' "${rows[@]}"
+    node "$TOOLS_HOME/lib/gate-preview/report.ts" rows "${rows[@]}"
 else
     echo
     if (( fail_total )); then

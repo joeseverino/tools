@@ -64,7 +64,7 @@ cmd_describe() {
             sig=$({ cat "$TOOLS_HOME"/bin/* "$TOOLS_HOME"/lib/*.sh \
                 "$TOOLS_HOME"/lib/sdk/*.sh "$TOOLS_HOME"/lib/tools/describe.sh \
                 "$TOOLS_HOME"/lib/tools/capabilities.ts \
-                "$TOOLS_HOME"/lib/sdk/process.ts \
+                "$TOOLS_HOME"/lib/sdk/*.ts \
                 "$TOOLS_HOME"/config/capabilities.json 2>/dev/null
                 [[ -r "$obsidian_contract" ]] && cat "$obsidian_contract"
             } | cksum) || sig=""

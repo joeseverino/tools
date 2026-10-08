@@ -9,17 +9,20 @@
 // — everything that is *not* specific to one tool's model. Each tool keeps its
 // own model, frame renderers, key handler, and test-override env names.
 
-// ---- palette ----------------------------------------------------------------
+import { stripVTControlCharacters } from 'node:util';
+import { open } from './sdk/color.ts';
 
-export const RESET = '\x1b[0m';
-export const BOLD = '\x1b[1m';
-export const DIM = '\x1b[2m';
-export const INVERT = '\x1b[7m';
-export const GREEN = '\x1b[32m';
-export const YELLOW = '\x1b[33m';
-export const RED = '\x1b[31m';
-export const CYAN = '\x1b[36m';
-export const MAGENTA = '\x1b[35m';
+// Empty strings when stdout is not a TTY or NO_COLOR is set (see sdk/color.ts).
+
+export const RESET = open('reset');
+export const BOLD = open('bold');
+export const DIM = open('dim');
+export const INVERT = open('inverse');
+export const GREEN = open('green');
+export const YELLOW = open('yellow');
+export const RED = open('red');
+export const CYAN = open('cyan');
+export const MAGENTA = open('magenta');
 
 const SEGMENTER = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
@@ -50,8 +53,7 @@ export function cellWidth(grapheme: string): number {
 }
 
 export function displayWidth(text: unknown): number {
-  const plain = String(text).replace(/\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))/g, '');
-  return graphemes(plain).reduce((width, grapheme) => width + cellWidth(grapheme), 0);
+  return graphemes(stripVTControlCharacters(String(text))).reduce((width, grapheme) => width + cellWidth(grapheme), 0);
 }
 
 export function previousBoundary(text: string, index: number): number {
@@ -282,6 +284,11 @@ export function windowLines(lines: string[], cursorLine: number, height: number)
   return slice;
 }
 
+export function loadError(what: string, stderr: string): Error {
+  const detail = stderr.trim();
+  return new Error(`could not load ${what}${detail ? `: ${detail}` : ''}`);
+}
+
 // ---- polish bar: alt screen + window title ----------------------------------
 // \x1b[22;0t / \x1b[23;0t push/pop the window title so quitting restores
 // whatever the shell had set before; the 1049 pair is the alt screen.
@@ -311,7 +318,7 @@ export interface TuiAction {
 // Foreground: inherit the terminal so the command's own output/pager shows.
 export function spawnInherit(action: TuiAction): Promise<number> {
   return new Promise<number>((resolve) => {
-    const shell = process.env.SHELL || '/bin/zsh';
+    const shell = process.env['SHELL'] || '/bin/zsh';
     const child = action.shellHere
       ? spawn(shell, ['-l'], { cwd: action.cwd || process.cwd(), stdio: 'inherit' })
       : spawn(shell, ['-lc', action.cmd], { stdio: 'inherit' });
@@ -324,7 +331,7 @@ export function spawnInherit(action: TuiAction): Promise<number> {
 // the dashboard: detached, output discarded, parent does not wait. This is what
 // keeps "open in browser" from tearing down the alt-screen.
 export function spawnDetached(action: TuiAction): void {
-  const shell = process.env.SHELL || '/bin/zsh';
+  const shell = process.env['SHELL'] || '/bin/zsh';
   try {
     const child = spawn(shell, ['-lc', action.cmd], { stdio: 'ignore', detached: true });
     child.on('error', () => {});

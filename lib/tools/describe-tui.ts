@@ -8,11 +8,15 @@
 // `--tui`). Built on the shared TUI library (../tui.ts), the same visual
 // language as `brief tui` and `repos tui`.
 
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
+import { CliError, reportError } from '../sdk/cli.ts';
+import { isRecord } from '../sdk/guards.ts';
+import { runJson, spawnJson } from '../sdk/process.ts';
+import { toolsHome } from '../sdk/paths.ts';
 import {
   RESET, BOLD, DIM, INVERT, GREEN, YELLOW, RED, CYAN, MAGENTA,
   truncate, displayWidth, wrapText, lineEditor, fitFrame, padEndAnsi, windowLines, editQuery,
-  enterAlt, leaveAlt, createTitleSetter, createInputPump, NAMED_KEYS,
+  enterAlt, leaveAlt, createTitleSetter, createInputPump, NAMED_KEYS, loadError,
 } from '../tui.ts';
 import type { QueryModel } from '../tui.ts';
 
@@ -81,17 +85,16 @@ interface Model extends QueryModel {
   flash: string;
 }
 
-const TOOLS_HOME = process.env.TOOLS_HOME || '';
-const TOOLS_BIN = TOOLS_HOME ? `${TOOLS_HOME}/bin/tools` : 'tools';
+const TOOLS_BIN = `${toolsHome}/bin/tools`;
 const WANT_REPOS = process.argv.slice(2).includes('--repos');
 
 // DESCRIBE_TUI_SMOKE renders one static frame without a TTY; DESCRIBE_TUI_KEYS
 // replays a comma-separated key script through the real handler and prints the
 // final frame (the tests use both).
-const SMOKE = process.env.DESCRIBE_TUI_SMOKE;
-const REPLAY = !!process.env.DESCRIBE_TUI_KEYS;
-const TEST_COLUMNS = Number.parseInt(process.env.DESCRIBE_TUI_COLUMNS || '', 10);
-const TEST_ROWS = Number.parseInt(process.env.DESCRIBE_TUI_ROWS || '', 10);
+const SMOKE = process.env['DESCRIBE_TUI_SMOKE'];
+const REPLAY = !!process.env['DESCRIBE_TUI_KEYS'];
+const TEST_COLUMNS = Number.parseInt(process.env['DESCRIBE_TUI_COLUMNS'] || '', 10);
+const TEST_ROWS = Number.parseInt(process.env['DESCRIBE_TUI_ROWS'] || '', 10);
 
 function terminalColumns(): number {
   return Number.isFinite(TEST_COLUMNS) && TEST_COLUMNS > 0
@@ -105,55 +108,24 @@ function terminalRows(): number {
     : process.stdout.rows || 30;
 }
 
-function fail(message: string): never {
-  process.stderr.write(message + '\n');
-  process.exit(1);
+const DESCRIBE_WHAT = '`tools describe` output';
+const describeArgs = ['describe', ...(WANT_REPOS ? ['--repos'] : [])];
+
+function isDescribeDoc(value: unknown): value is DescribeDoc {
+  return isRecord(value) && value['ok'] !== false && Array.isArray(value['tools']);
 }
 
-// ---- data -------------------------------------------------------------------
-
-// Shell out to `tools describe` (mirrors how manage-tui shells out to the MCP),
-// so the TUI is just another renderer of the one emit-once document.
 function fetchDescribe(): DescribeDoc {
-  const args = ['describe', ...(WANT_REPOS ? ['--repos'] : [])];
-  const res = spawnSync(TOOLS_BIN, args, { encoding: 'utf8' });
-  let json: DescribeDoc | null = null;
-  try {
-    json = JSON.parse(res.stdout || 'null') as DescribeDoc | null;
-  } catch {
-    json = null;
-  }
-  if (!json || json.ok === false || !Array.isArray(json.tools)) {
-    fail('could not load `tools describe` output' + (res.stderr ? `: ${res.stderr.trim()}` : ''));
-  }
-  return json;
+  const res = runJson(TOOLS_BIN, describeArgs, {}, isDescribeDoc);
+  if (!res.ok || !res.json) throw loadError(DESCRIBE_WHAT, res.stderr);
+  return res.json;
 }
 
-// The async twin of fetchDescribe, used by the interactive path so the federation
-// (one --describe subprocess per tool) runs off the event loop instead of
-// blocking the first paint. The alt-screen opens on a loading frame; this fills
-// the model in when `tools describe` resolves. SMOKE/REPLAY stay on the sync
-// fetchDescribe so they render one deterministic frame.
-function fetchDescribeAsync(): Promise<DescribeDoc> {
-  return new Promise<DescribeDoc>((resolve, reject) => {
-    const args = ['describe', ...(WANT_REPOS ? ['--repos'] : [])];
-    const child = spawn(TOOLS_BIN, args);
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (d) => { stdout += d; });
-    child.stderr.on('data', (d) => { stderr += d; });
-    child.on('error', reject);
-    child.on('close', () => {
-      let json: DescribeDoc | null = null;
-      try { json = JSON.parse(stdout || 'null') as DescribeDoc | null; } catch { json = null; }
-      if (!json || json.ok === false || !Array.isArray(json.tools)) {
-        reject(new Error('could not load `tools describe` output'
-          + (stderr ? `: ${stderr.trim()}` : '')));
-        return;
-      }
-      resolve(json);
-    });
-  });
+// Async so the first paint is not blocked on the federation (one --describe subprocess per tool).
+async function fetchDescribeAsync(): Promise<DescribeDoc> {
+  const res = await spawnJson(TOOLS_BIN, describeArgs, {}, isDescribeDoc);
+  if (!res.ok || !res.json) throw loadError(DESCRIBE_WHAT, res.stderr);
+  return res.json;
 }
 
 function normalize(raw: RawTool, sibling: boolean): Tool {
@@ -245,7 +217,7 @@ function selectedTool(model: Model): Tool | null {
 
 function argLabel(a: DescribeArg): string {
   if (a.positional) return a.required ? `<${a.name}>` : `[${a.name}]`;
-  const flag = a.flags && a.flags.length ? a.flags[a.flags.length - 1] : a.name;
+  const flag = a.flags?.at(-1) ?? a.name;
   return flag + (a.takes_value ? ' <val>' : '');
 }
 
@@ -255,7 +227,7 @@ function argLabel(a: DescribeArg): string {
 // Effect: line, colored by escalating blast radius.
 function effectTag(scope: EffectScope): string {
   const eff = scope.effect || 'read';
-  const bits = [];
+  const bits: string[] = [];
   if (scope.network) bits.push('network');
   if (scope.interactive) bits.push('interactive');
   if (eff === 'read' && !bits.length) return '';
@@ -273,7 +245,7 @@ function invocation(tool: Tool, cmd: DescribeCommand | null | undefined): string
   for (const a of args) {
     if (a.positional) parts.push(a.required ? `<${a.name}>` : `[<${a.name}>]`);
     else if (a.required && a.takes_value) {
-      const flag = a.flags && a.flags.length ? a.flags[a.flags.length - 1] : a.name;
+      const flag = a.flags?.at(-1) ?? a.name;
       parts.push(`${flag} <${a.name}>`);
     }
   }
@@ -503,7 +475,7 @@ function rightPane(model: Model, height: number, width: number): string[] {
       shownDetail = [
         ...detail.slice(0, Math.max(1, detailHeight - 2)),
         `${DIM}… press ${RESET}${CYAN}e${RESET}${DIM} to expand (full prose + examples)${RESET}`,
-        detail[detail.length - 1] ?? '',
+        detail.at(-1) ?? '',
       ];
     } else {
       shownDetail = [...detail];
@@ -725,60 +697,68 @@ function finish(code: number): void {
   process.exit(code);
 }
 
-if (SMOKE) {
-  const model = load();
-  if (SMOKE === 'commands') focusCommands(model);
-  if (SMOKE === 'expanded') { focusCommands(model); model.expanded = true; }
-  process.stdout.write(frame(model) + '\n');
-  process.exit(0);
-}
-
-// REPLAY needs a fully-populated model for one deterministic frame; the
-// interactive path starts empty and hydrates from fetchDescribeAsync below.
-const model = REPLAY ? load() : newModel();
-
-const { feedInput, flushInput } = createInputPump({
-  onKey: (key) => { handleKey(model, key); draw(model); },
-  onPaste: (text) => {
-    if (!model.filtering) return;
-    editQuery(model, text.replace(/[\r\n\t]/g, ' '));
-    clampCursors(model);
-    draw(model);
-  },
-});
-
-if (REPLAY) {
-  for (const token of (process.env.DESCRIBE_TUI_KEYS ?? '').split(',')) {
-    const t = token.trim();
-    if (t.startsWith('paste:')) feedInput(`\x1b[200~${t.slice(6)}\x1b[201~`);
-    else if (t) feedInput(NAMED_KEYS[t] ?? t);
+function main(): void {
+  if (SMOKE) {
+    const model = load();
+    if (SMOKE === 'commands') focusCommands(model);
+    if (SMOKE === 'expanded') { focusCommands(model); model.expanded = true; }
+    process.stdout.write(frame(model) + '\n');
+    return;
   }
-  flushInput();
-  process.stdout.write(fitFrame(frame(model), terminalColumns(), terminalRows()) + '\n');
-  process.exit(0);
-}
 
-if (!process.stdin.isTTY || !process.stdout.isTTY) {
-  fail('tools describe --tui is interactive and needs a terminal. Use `tools describe --pretty` for the JSON.');
-}
+  // REPLAY needs a fully-populated model for one deterministic frame; the
+  // interactive path starts empty and hydrates from fetchDescribeAsync below.
+  const model = REPLAY ? load() : newModel();
 
-enterAlt();
-draw(model); // paints the loading frame immediately — no blocking federation
-fetchDescribeAsync()
-  .then((data) => {
-    model.tools = buildTools(data);
-    model.loading = false;
-    clampCursors(model);
-    draw(model);
-  })
-  .catch((err: unknown) => {
-    model.loading = false;
-    model.error = err instanceof Error ? err.message : String(err);
-    draw(model);
+  const { feedInput, flushInput } = createInputPump({
+    onKey: (key) => { handleKey(model, key); draw(model); },
+    onPaste: (text) => {
+      if (!model.filtering) return;
+      editQuery(model, text.replace(/[\r\n\t]/g, ' '));
+      clampCursors(model);
+      draw(model);
+    },
   });
-process.stdout.on('resize', () => draw(model));
-process.on('SIGINT', () => finish(0));
 
-process.stdin.setRawMode(true);
-process.stdin.resume();
-process.stdin.on('data', (buf) => feedInput(buf.toString('utf8')));
+  if (REPLAY) {
+    for (const token of (process.env['DESCRIBE_TUI_KEYS'] ?? '').split(',')) {
+      const t = token.trim();
+      if (t.startsWith('paste:')) feedInput(`\x1b[200~${t.slice(6)}\x1b[201~`);
+      else if (t) feedInput(NAMED_KEYS[t] ?? t);
+    }
+    flushInput();
+    process.stdout.write(fitFrame(frame(model), terminalColumns(), terminalRows()) + '\n');
+    return;
+  }
+
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new CliError('tools describe --tui is interactive and needs a terminal. Use `tools describe --pretty` for the JSON.');
+  }
+
+  enterAlt();
+  draw(model);
+  fetchDescribeAsync()
+    .then((data) => {
+      model.tools = buildTools(data);
+      model.loading = false;
+      clampCursors(model);
+      draw(model);
+    })
+    .catch((err: unknown) => {
+      model.loading = false;
+      model.error = err instanceof Error ? err.message : String(err);
+      draw(model);
+    });
+  process.stdout.on('resize', () => draw(model));
+  process.on('SIGINT', () => finish(0));
+
+  process.stdin.setRawMode(true);
+  process.stdin.resume();
+  process.stdin.on('data', (buf) => feedInput(buf.toString('utf8')));
+}
+
+try {
+  main();
+} catch (error) {
+  reportError(error);
+}

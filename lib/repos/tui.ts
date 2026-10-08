@@ -5,12 +5,16 @@
 // tool owns collection; this file owns layout, filtering, copyable workflow
 // commands, and the replay/smoke harness used by tests.
 
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
+import { CliError, reportError } from '../sdk/cli.ts';
+import { isRecord } from '../sdk/guards.ts';
+import { runJson, spawnJson } from '../sdk/process.ts';
+import { toolsHome } from '../sdk/paths.ts';
 import {
   RESET, BOLD, DIM, INVERT, GREEN, YELLOW, RED, CYAN, MAGENTA,
   truncate, wrapText, lineEditor, fitFrame, padEndAnsi, windowLines, editQuery, displayWidth,
   enterAlt, leaveAlt, createTitleSetter, createInputPump, NAMED_KEYS,
-  spawnDetached, runForegroundAction,
+  spawnDetached, runForegroundAction, loadError,
 } from '../tui.ts';
 import type { TuiAction } from '../tui.ts';
 import type { Repo } from './record.ts';
@@ -60,19 +64,18 @@ interface Counts {
   resync: number; gone: number; local: number;
 }
 
-const TOOLS_HOME = process.env.TOOLS_HOME || '';
-const REPOS_BIN = TOOLS_HOME ? `${TOOLS_HOME}/bin/repos` : 'repos';
+const REPOS_BIN = `${toolsHome}/bin/repos`;
 const ARGS = process.argv.slice(2);
 
-const SMOKE = process.env.REPOS_TUI_SMOKE;
-const REPLAY = !!process.env.REPOS_TUI_KEYS;
+const SMOKE = process.env['REPOS_TUI_SMOKE'];
+const REPLAY = !!process.env['REPOS_TUI_KEYS'];
 // Live runs hydrate PR/CI state asynchronously after the local snapshot paints.
 // The static harnesses stay offline by default; a test opts into PR rendering
 // (against the hermetic gh stub) with REPOS_TUI_PRS=1, which makes load() also
 // fetch `repos --json --prs` synchronously so one deterministic frame shows it.
-const PRS_SYNC = (!!SMOKE || REPLAY) && !!process.env.REPOS_TUI_PRS;
-const TEST_COLUMNS = Number.parseInt(process.env.REPOS_TUI_COLUMNS || '', 10);
-const TEST_ROWS = Number.parseInt(process.env.REPOS_TUI_ROWS || '', 10);
+const PRS_SYNC = (!!SMOKE || REPLAY) && !!process.env['REPOS_TUI_PRS'];
+const TEST_COLUMNS = Number.parseInt(process.env['REPOS_TUI_COLUMNS'] || '', 10);
+const TEST_ROWS = Number.parseInt(process.env['REPOS_TUI_ROWS'] || '', 10);
 
 const VIEWS: [View, ...View[]] = [
   { id: 'all', label: 'All', pred: () => true },
@@ -131,39 +134,22 @@ function terminalRows() {
     : process.stdout.rows || 34;
 }
 
-function fail(message: string): never {
-  process.stderr.write(message + '\n');
-  process.exit(1);
+const REPOS_WHAT = '`repos --json` output';
+
+function isReposJson(value: unknown): value is ReposJson {
+  return isRecord(value) && value['ok'] !== false && Array.isArray(value['repos']) && value['repos'].every(isRecord);
 }
 
 function fetchReposSync(extra: string[] = []): ReposJson {
-  const res = spawnSync(REPOS_BIN, ['--json', ...extra, ...ARGS], { encoding: 'utf8' });
-  let json: ReposJson | null = null;
-  try { json = JSON.parse(res.stdout || 'null') as ReposJson | null; } catch {}
-  if (res.status !== 0 || !json || json.ok === false || !Array.isArray(json.repos)) {
-    fail('could not load `repos --json` output' + (res.stderr ? `: ${res.stderr.trim()}` : ''));
-  }
-  return json;
+  const res = runJson(REPOS_BIN, ['--json', ...extra, ...ARGS], {}, isReposJson);
+  if (!res.ok || !res.json) throw loadError(REPOS_WHAT, res.stderr);
+  return res.json;
 }
 
-function fetchReposAsync(extra: string[] = []) {
-  return new Promise<ReposJson>((resolve, reject) => {
-    const child = spawn(REPOS_BIN, ['--json', ...extra, ...ARGS]);
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (d) => { stdout += d; });
-    child.stderr.on('data', (d) => { stderr += d; });
-    child.on('error', reject);
-    child.on('close', (code) => {
-      let json: ReposJson | null = null;
-      try { json = JSON.parse(stdout || 'null') as ReposJson | null; } catch {}
-      if (code !== 0 || !json || json.ok === false || !Array.isArray(json.repos)) {
-        reject(new Error('could not load `repos --json` output' + (stderr ? `: ${stderr.trim()}` : '')));
-        return;
-      }
-      resolve(json);
-    });
-  });
+async function fetchReposAsync(extra: string[] = []): Promise<ReposJson> {
+  const res = await spawnJson(REPOS_BIN, ['--json', ...extra, ...ARGS], {}, isReposJson);
+  if (!res.ok || !res.json) throw loadError(REPOS_WHAT, res.stderr);
+  return res.json;
 }
 
 // Splice PR/CI state from a `repos --json --prs` snapshot into the live repo
@@ -796,7 +782,7 @@ async function runNamedAction(model: Model, label: string, missing: string) {
 function showOutput(model: Model, action: Action) {
   const repo = selectedRepo(model);
   const title = `${action.label}${repo ? ` · ${repo.name}` : ''}`;
-  const res = spawnSync(process.env.SHELL || '/bin/zsh', ['-lc', action.cmd], { encoding: 'utf8' });
+  const res = spawnSync(process.env['SHELL'] || '/bin/zsh', ['-lc', action.cmd], { encoding: 'utf8' });
   const text = `${res.stdout || ''}${res.stderr || ''}`.replace(/\s+$/, '');
   model.overlay = { title, cmd: action.cmd, lines: text ? text.split('\n') : ['(no output)'], top: 0 };
 }
@@ -832,27 +818,35 @@ async function resyncFleet(model: Model) {
 }
 
 function reload(model: Model) {
-  const json = fetchReposSync();
-  model.repos = buildRepos(json);
-  model.roots = json.roots || [];
-  model.prsLoaded = false;
-  if (PRS_SYNC) mergePrs(model, fetchReposSync(['--prs']));
-  else { hydratePrs(model); hydrateFetch(model); }
-  model.flash = `${GREEN}reloaded repo fleet${RESET}`;
-  clamp(model);
+  try {
+    const json = fetchReposSync();
+    model.repos = buildRepos(json);
+    model.roots = json.roots || [];
+    model.prsLoaded = false;
+    if (PRS_SYNC) mergePrs(model, fetchReposSync(['--prs']));
+    else { hydratePrs(model); hydrateFetch(model); }
+    model.flash = `${GREEN}reloaded repo fleet${RESET}`;
+    clamp(model);
+  } catch (err) {
+    model.flash = `${RED}${err instanceof Error ? err.message : String(err)}${RESET}`;
+  }
 }
 
 // Explicit full refresh (F): also git fetch each repo so behind/gone is honest,
 // plus PR/CI state. Synchronous — it is a deliberate, user-initiated wait.
 function refreshFull(model: Model) {
   if (REPLAY || SMOKE) { reload(model); return; }
-  const json = fetchReposSync(['--fetch', '--prs']);
-  model.repos = buildRepos(json);
-  model.roots = json.roots || [];
-  model.prsLoaded = true;
-  model.prsLoading = false;
-  model.flash = `${GREEN}refreshed — fetched + PR/CI state${RESET}`;
-  clamp(model);
+  try {
+    const json = fetchReposSync(['--fetch', '--prs']);
+    model.repos = buildRepos(json);
+    model.roots = json.roots || [];
+    model.prsLoaded = true;
+    model.prsLoading = false;
+    model.flash = `${GREEN}refreshed — fetched + PR/CI state${RESET}`;
+    clamp(model);
+  } catch (err) {
+    model.flash = `${RED}${err instanceof Error ? err.message : String(err)}${RESET}`;
+  }
 }
 
 // Pull open-PR/CI state in the background and splice it in when it lands, so the
@@ -1025,60 +1019,67 @@ function finish(code: number) {
   process.exit(code);
 }
 
-if (SMOKE) {
-  const model = load();
-  process.stdout.write(frame(model) + '\n');
-  process.exit(0);
-}
-
-const model = REPLAY ? load() : newModel([], [], true);
-
-const { feedInput, flushInput } = createInputPump({
-  onKey: (key) => { handleKey(model, key).then(() => draw(model)); },
-  onPaste: (text) => {
-    if (!model.filtering) return;
-    editQuery(model, text.replace(/[\r\n\t]/g, ' '));
-    clamp(model);
-    draw(model);
-  },
-});
-
-if (REPLAY) {
-  for (const token of (process.env.REPOS_TUI_KEYS ?? '').split(',')) {
-    const t = token.trim();
-    if (t.startsWith('paste:')) feedInput(`\x1b[200~${t.slice(6)}\x1b[201~`);
-    else if (t) feedInput(NAMED_KEYS[t] ?? t);
+function main(): void {
+  if (SMOKE) {
+    process.stdout.write(frame(load()) + '\n');
+    return;
   }
-  flushInput();
-  process.stdout.write(fitFrame(frame(model), terminalColumns(), terminalRows()) + '\n');
-  process.exit(0);
-}
 
-if (!process.stdin.isTTY || !process.stdout.isTTY) {
-  fail('repos tui is interactive and needs a terminal. Use `repos --json` for machine-readable output.');
-}
+  const model = REPLAY ? load() : newModel([], [], true);
 
-enterAlt();
-draw(model);
-fetchReposAsync()
-  .then((data) => {
-    model.repos = buildRepos(data);
-    model.roots = data.roots || [];
-    model.loading = false;
-    selectCurrentWorkingRepo(model);
-    clamp(model);
-    draw(model);
-    hydratePrs(model);
-    hydrateFetch(model);
-  })
-  .catch((err: Error) => {
-    model.loading = false;
-    model.error = err.message;
-    draw(model);
+  const { feedInput, flushInput } = createInputPump({
+    onKey: (key) => { handleKey(model, key).then(() => draw(model)); },
+    onPaste: (text) => {
+      if (!model.filtering) return;
+      editQuery(model, text.replace(/[\r\n\t]/g, ' '));
+      clamp(model);
+      draw(model);
+    },
   });
-process.stdout.on('resize', () => draw(model));
-process.on('SIGINT', () => finish(0));
 
-process.stdin.setRawMode(true);
-process.stdin.resume();
-process.stdin.on('data', (buf) => feedInput(buf.toString('utf8')));
+  if (REPLAY) {
+    for (const token of (process.env['REPOS_TUI_KEYS'] ?? '').split(',')) {
+      const t = token.trim();
+      if (t.startsWith('paste:')) feedInput(`\x1b[200~${t.slice(6)}\x1b[201~`);
+      else if (t) feedInput(NAMED_KEYS[t] ?? t);
+    }
+    flushInput();
+    process.stdout.write(fitFrame(frame(model), terminalColumns(), terminalRows()) + '\n');
+    return;
+  }
+
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new CliError('repos tui is interactive and needs a terminal. Use `repos --json` for machine-readable output.');
+  }
+
+  enterAlt();
+  draw(model);
+  fetchReposAsync()
+    .then((data) => {
+      model.repos = buildRepos(data);
+      model.roots = data.roots || [];
+      model.loading = false;
+      selectCurrentWorkingRepo(model);
+      clamp(model);
+      draw(model);
+      hydratePrs(model);
+      hydrateFetch(model);
+    })
+    .catch((err: Error) => {
+      model.loading = false;
+      model.error = err.message;
+      draw(model);
+    });
+  process.stdout.on('resize', () => draw(model));
+  process.on('SIGINT', () => finish(0));
+
+  process.stdin.setRawMode(true);
+  process.stdin.resume();
+  process.stdin.on('data', (buf) => feedInput(buf.toString('utf8')));
+}
+
+try {
+  main();
+} catch (error) {
+  reportError(error);
+}

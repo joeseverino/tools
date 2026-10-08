@@ -16,8 +16,10 @@ This repo is also the lightweight SDK for sibling CLIs, one-off scripts, and
 agent utilities. Stable public modules live under `lib/sdk/`; `common.sh` is a
 compatibility aggregator, not a destination for new domain helpers. Import the
 narrowest module possible. Shell commands use `lib/sdk.sh` when they need the
-Cordon runtime; Node commands use `process.ts` / `result.ts`; every vault CLI
-crossing uses `svmc.sh` or `svmc.ts`.
+Cordon runtime; Node commands use the narrow modules in `lib/sdk/` (`process.ts`
+for subprocesses, `paths.ts` for `TOOLS_HOME` / `CODE_HOME`, `guards.ts` for
+JSON validation, `cli.ts` for exit codes, `color.ts` for terminal colour); every
+vault CLI crossing uses `svmc.sh`.
 
 Generic structured output uses `schemas/result-v1.json`. Repository capabilities
 are declared once in `config/capabilities.json` and validated against
@@ -223,7 +225,9 @@ type; both stay in sync because there is only one implementation.
   `tools contracts --check` and the CI gate compare this copy against the pinned
   `cordon-spec` package, so the copy cannot silently drift.
 - `tests/` — bats suite. Hermetic: tmpdirs, stubbed `gh`, `uv`, `mmdc`, and
-  HQ transport; never the real network. CI runs it.
+  HQ transport; never the real network. CI runs it. `tests/unit/*.test.ts` are
+  `node --test` tests for the pure TypeScript functions (`npm test`); `unit.bats`
+  runs them inside the suite, so `tools check` and CI cover them.
 - `bench/` — every measured claim in the README has a script here that
   asserts it; `tools check` runs them.
 
@@ -234,9 +238,8 @@ it as a plain CLI — **don't** hand-edit vault frontmatter or shell out to `yq`
 the MCP is the schema-validated, atomic writer.
 
 Every shell call goes through the shared **`svmc()`** adapter in
-`lib/sdk/svmc.sh` (also re-exported by `lib/common.sh` for compatibility), and
-Node consumers use `lib/sdk/svmc.ts`. Both pin `SVMC_VAULT_PATH` to
-`$NOTES_HOME` AND names the binary in one place via `$SVMC_BIN` (the test seam),
+`lib/sdk/svmc.sh` (also re-exported by `lib/common.sh` for compatibility). It pins
+`SVMC_VAULT_PATH` to `$NOTES_HOME` AND names the binary in one place via `$SVMC_BIN` (the test seam),
 so a call site can neither read the MCP's own configured default vault nor dodge
 the hermetic stub:
 
@@ -291,8 +294,15 @@ computed by the MCP's own code.
 - `dns-test` is the lone zsh exception to the bash rule (but it self-describes
   from the same engine — `lib/describe.sh` is bash+zsh safe).
 - Node code is TypeScript under `lib/`, run directly by Node 24 (no build) and
-  type-checked strictly: no explicit `any`, no `@ts-*` suppressions, casts only
-  where parsed JSON meets a declared shape. Dependencies are pinned exactly in
+  type-checked strictly (including `noPropertyAccessFromIndexSignature` and
+  `noImplicitReturns`): no explicit `any`, no `@ts-*` suppressions, no casts on
+  parsed JSON. JSON stays `unknown` until a guard from `lib/sdk/guards.ts`
+  narrows it, or until `runJson` / `spawnJson` apply the guard passed as their
+  last argument. Entry points use `import.meta.main`, `util.parseArgs` with
+  `strict: true`, `util.styleText` (through `lib/sdk/color.ts`) for colour, and
+  `import.meta.dirname`; shared paths come from `lib/sdk/paths.ts`. Helpers throw
+  and the entry point sets `process.exitCode` (`reportError` in `lib/sdk/cli.ts`).
+  Dependencies are pinned exactly in
   the root `package.json`. JSON in shell is `jq`; there is no Python at runtime
   (`marks` is the exception until it moves to severino-life).
 - Adding a tool: drop it in `bin/`, then run `tools generate`. The generated
@@ -391,6 +401,7 @@ For a fast inner loop while editing one area:
   `lib/*.sh`; it catches integration regressions (e.g. a broken MCP call) that
   reading the diff will not.
 - `npm run typecheck` — the strict TypeScript check alone.
+- `npm test`: the `node --test` unit tests alone.
 - `shellcheck -x bin/<tool> lib/*.sh` — matches CI lint.
 
 ## Cautions (time-savers learned the hard way)

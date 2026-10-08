@@ -1,12 +1,15 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { parseArgs } from 'node:util';
 import { spawnSync } from 'node:child_process';
-import { repositoryCapability, repositoryEntries } from './capabilities.ts';
+import { reportError } from '../sdk/cli.ts';
+import { isRecord } from '../sdk/guards.ts';
+import { toolsHome } from '../sdk/paths.ts';
+import { isCommand, repositoryCapability, repositoryEntries } from './capabilities.ts';
 import type { Command } from './capabilities.ts';
 
-const toolsHome = process.env.TOOLS_HOME || path.resolve(import.meta.dirname, '../..');
-const graphPath = process.env.TOOLS_CONTRACT_GRAPH || path.join(toolsHome, 'config/contracts.json');
+const graphPath = process.env['TOOLS_CONTRACT_GRAPH'] || path.join(toolsHome, 'config/contracts.json');
 
 export type Scope = 'local' | 'fleet' | 'live';
 
@@ -103,14 +106,53 @@ function repositoryPaths(): Paths {
   return paths;
 }
 
+function isInvocation(value: unknown): value is Invocation {
+  return isRecord(value) && typeof value['repository'] === 'string' && isCommand(value['argv']);
+}
+
+function isRepair(value: unknown): value is Repair {
+  return isRecord(value)
+    && typeof value['repository'] === 'string'
+    && isCommand(value['argv'])
+    && typeof value['effect'] === 'string';
+}
+
+function isContract(value: unknown): value is Contract {
+  return isRecord(value)
+    && typeof value['id'] === 'string'
+    && typeof value['owner'] === 'string'
+    && typeof value['description'] === 'string'
+    && isRecord(value['source'])
+    && typeof value['source']['repository'] === 'string';
+}
+
+function isProjection(value: unknown): value is Projection {
+  return isRecord(value)
+    && typeof value['id'] === 'string'
+    && typeof value['contract'] === 'string'
+    && typeof value['consumer'] === 'string'
+    && typeof value['description'] === 'string'
+    && typeof value['scope'] === 'string' && isScope(value['scope'])
+    && isInvocation(value['check'])
+    && (value['repair'] === undefined || isRepair(value['repair']));
+}
+
+function isContractGraph(value: unknown): value is ContractGraph {
+  return isRecord(value)
+    && typeof value['contract_graph_version'] === 'number'
+    && Array.isArray(value['contracts']) && value['contracts'].every(isContract)
+    && Array.isArray(value['projections']) && value['projections'].every(isProjection);
+}
+
 export function loadContractGraph(): ContractGraph {
-  const graph = JSON.parse(fs.readFileSync(graphPath, 'utf8')) as ContractGraph;
-  const ids = new Set();
+  const graph: unknown = JSON.parse(fs.readFileSync(graphPath, 'utf8'));
+  if (!isContractGraph(graph)) throw new Error(`invalid contract graph: ${graphPath}`);
+  const ids = new Set<string>();
   for (const contract of graph.contracts) {
     if (ids.has(contract.id)) throw new Error(`duplicate contract id: ${contract.id}`);
     ids.add(contract.id);
   }
-  const projectionIds = new Set();
+  const projectionIds = new Set<string>();
   for (const projection of graph.projections) {
     if (projectionIds.has(projection.id)) throw new Error(`duplicate projection id: ${projection.id}`);
     if (!ids.has(projection.contract)) throw new Error(`unknown contract: ${projection.contract}`);
@@ -271,31 +313,28 @@ function renderText(result: ContractsResult): void {
 }
 
 function main() {
-  const args = process.argv.slice(2);
-  let check = false;
-  let json = false;
-  let scope = 'fleet';
-  let id: string | null = null;
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index] ?? '';
-    if (arg === '--check') check = true;
-    else if (arg === '--json') json = true;
-    else if (arg === '--scope' && args[index + 1]) scope = args[++index] ?? scope;
-    else if (!arg.startsWith('-') && !id) id = arg;
-    else throw new Error(`unknown option or extra id: ${arg}`);
-  }
-  if (!isScope(scope)) throw new Error(`unknown scope: ${scope}`);
-  const result = inspectContracts({ check, scope, id });
-  if (json) process.stdout.write(JSON.stringify(result) + '\n');
+  const { values, positionals } = parseArgs({
+    args: process.argv.slice(2),
+    options: {
+      check: { type: 'boolean', default: false },
+      json: { type: 'boolean', default: false },
+      scope: { type: 'string', default: 'fleet' },
+    },
+    allowPositionals: true,
+    strict: true,
+  });
+  if (positionals.length > 1) throw new Error(`unknown option or extra id: ${positionals[1]}`);
+  if (!isScope(values.scope)) throw new Error(`unknown scope: ${values.scope}`);
+  const result = inspectContracts({ check: values.check, scope: values.scope, id: positionals[0] ?? null });
+  if (values.json) process.stdout.write(JSON.stringify(result) + '\n');
   else renderText(result);
   if (!result.ok) process.exitCode = 1;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.main) {
   try {
     main();
   } catch (error) {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-    process.exitCode = 2;
+    reportError(error, 2);
   }
 }
