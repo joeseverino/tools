@@ -1,4 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
+import { closeSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import type { SpawnOptions, SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns } from 'node:child_process';
 import { errorMessage } from './guards.ts';
 
@@ -96,4 +99,18 @@ export function spawnJson(bin: string, args: string[] = [], options: SpawnJsonOp
 export function runInherit(bin: string, args: readonly string[] = [], options: Omit<SpawnSyncOptionsWithStringEncoding, 'encoding' | 'stdio'> = {}): number {
   const proc = spawnSync(bin, [...args], { ...options, env: { ...process.env, ...(options.env || {}) }, stdio: 'inherit' });
   return proc.status ?? 1;
+}
+
+/** Runs a command with stdout and stderr on one descriptor, so the output keeps its interleaving. */
+export function runCombined(bin: string, args: readonly string[], options: { input?: string; cwd?: string } = {}): { status: number; output: string } {
+  const dir = mkdtempSync(path.join(tmpdir(), 'tools-run-'));
+  const file = path.join(dir, 'out');
+  const fd = openSync(file, 'w');
+  try {
+    const result = spawnSync(bin, [...args], { stdio: ['pipe', fd, fd], ...options });
+    closeSync(fd);
+    return { status: result.status ?? 1, output: readFileSync(file, 'utf8') };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }

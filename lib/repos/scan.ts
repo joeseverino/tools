@@ -1,7 +1,9 @@
 // Fleet scan: list the repo directories under the roots, collect each one in a
 // worker thread (the per-repo git work is independent and dominates), and fan
 // the open-PR lookups out in parallel. Results keep directory order.
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { readdirSync, statSync } from 'node:fs';
+import type { Dirent } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import path from 'node:path';
 import { Worker } from 'node:worker_threads';
@@ -18,11 +20,26 @@ export interface ScanRequest {
   options: CollectOptions;
 }
 
-// The shell glob keeps the scan order the same as the locale-sorted listing
-// every other tool shows, hidden entries excluded and symlinked directories kept.
+const byName = new Intl.Collator('en-US');
+
+// Hidden entries are excluded and symlinked directories are kept. ICU collation
+// gives the same order on every machine, independent of the system locale.
 function listDirs(root: string): string[] {
-  const listing = spawnSync('bash', ['-c', 'for d in "$1"/*/; do [[ -d "$d" ]] && printf "%s\\0" "${d%/}"; done', 'list', root], { encoding: 'utf8' });
-  return listing.stdout.split('\0').filter(Boolean);
+  return readdirSync(root, { withFileTypes: true })
+    .filter((entry) => !entry.name.startsWith('.') && isDirEntry(root, entry))
+    .map((entry) => entry.name)
+    .sort(byName.compare)
+    .map((name) => path.join(root, name));
+}
+
+function isDirEntry(root: string, entry: Dirent): boolean {
+  if (entry.isDirectory()) return true;
+  if (!entry.isSymbolicLink()) return false;
+  try {
+    return statSync(path.join(root, entry.name)).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 /**

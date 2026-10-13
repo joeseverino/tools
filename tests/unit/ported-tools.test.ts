@@ -58,6 +58,13 @@ test('remember: memory files quote and escape the description', () => {
   );
 });
 
+test('remember: a backslash in the description is escaped before the quotes', () => {
+  assert.equal(
+    memoryFileText('feedback-x', 'feedback', 'a\\b "c"', 'body'),
+    '---\nname: feedback-x\ndescription: "a\\\\b \\"c\\""\nmetadata:\n  type: feedback\n---\n\nbody\n',
+  );
+});
+
 test('remember: the index upserts one line per file and drops forgotten ones', () => {
   const first = upsertIndex('', 'a.md', '- [A](a.md) — one');
   assert.equal(first, '- [A](a.md) — one\n');

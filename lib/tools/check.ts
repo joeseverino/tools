@@ -1,12 +1,11 @@
 // `tools check`: the CI suite runnable locally. CI calls it so the definition of
 // "passing" lives in one place.
-import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { applyCiEnv } from '../sdk/ci.ts';
 import { blank, msg, palette } from '../sdk/output.ts';
 import { toolsHome } from '../sdk/paths.ts';
-import { run } from '../sdk/process.ts';
+import { run, runCombined } from '../sdk/process.ts';
 import { CheckReport, tail } from '../sdk/report.ts';
 import { which } from '../sdk/which.ts';
 
@@ -20,8 +19,8 @@ function indent(text: string): string {
 }
 
 function combined(bin: string, args: readonly string[], options: { input?: string } = {}): { ok: boolean; output: string } {
-  const result = spawnSync('/bin/sh', ['-c', 'exec "$@" 2>&1', 'check', bin, ...args], { encoding: 'utf8', ...options });
-  return { ok: result.status === 0, output: result.stdout.replace(/\n+$/, '') };
+  const result = runCombined(bin, args, options);
+  return { ok: result.status === 0, output: result.output.replace(/\n+$/, '') };
 }
 
 /** True when the first line of the file names the interpreter. */

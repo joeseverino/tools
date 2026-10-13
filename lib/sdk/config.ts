@@ -25,18 +25,30 @@ export function configFile(name: string, home = toolsHome): string {
   return existsSync(local) ? local : `${local}.example`;
 }
 
-function script(request: ShellConfigRequest): string {
-  const lines = ['set -eu', 'source "$1"', 'set +u'];
-  for (const name of request.scalars ?? []) {
-    if (!NAME.test(name)) throw new Error(`invalid config variable: ${name}`);
-    lines.push(`if [ -n "\${${name}+x}" ]; then printf 'S\\0%s\\0%s\\0' '${name}' "\${${name}}"; fi`);
-  }
-  for (const name of request.arrays ?? []) {
-    if (!NAME.test(name)) throw new Error(`invalid config variable: ${name}`);
-    lines.push(`printf 'A\\0%s\\0%s\\0' '${name}' "\${#${name}[@]}"`);
-    lines.push(`for item in "\${${name}[@]+\${${name}[@]}}"; do printf '%s\\0' "$item"; done`);
-  }
-  return lines.join('\n');
+// The script is constant: the config file and the variable names arrive as
+// positional arguments, never as part of the command text.
+const SCRIPT = `set -eu
+source "$1"
+shift
+set +u
+for spec; do
+  kind=\${spec%%:*}
+  name=\${spec#*:}
+  if [ "$kind" = S ]; then
+    if [ -n "\${!name+x}" ]; then printf 'S\\0%s\\0%s\\0' "$name" "\${!name}"; fi
+  else
+    ref="\${name}[@]"
+    count=0
+    for item in "\${!ref}"; do count=$((count + 1)); done
+    printf 'A\\0%s\\0%s\\0' "$name" "$count"
+    for item in "\${!ref}"; do printf '%s\\0' "$item"; done
+  fi
+done`;
+
+function specs(request: ShellConfigRequest): string[] {
+  const names = [...(request.scalars ?? []), ...(request.arrays ?? [])];
+  for (const name of names) if (!NAME.test(name)) throw new Error(`invalid config variable: ${name}`);
+  return [...(request.scalars ?? []).map((name) => `S:${name}`), ...(request.arrays ?? []).map((name) => `A:${name}`)];
 }
 
 export function parseConfigOutput(output: string): ShellConfig {
@@ -60,7 +72,7 @@ export function parseConfigOutput(output: string): ShellConfig {
 
 /** Sources an explicit shell file and returns the requested variables. */
 export function loadShellFile(file: string, request: ShellConfigRequest, home = toolsHome): ShellConfig {
-  const result = spawnSync('bash', ['-c', script(request), 'config', file], {
+  const result = spawnSync('bash', ['-c', SCRIPT, 'config', file, ...specs(request)], {
     encoding: 'utf8',
     stdio: ['inherit', 'pipe', 'inherit'],
     env: { ...process.env, TOOLS_HOME: home },

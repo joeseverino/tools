@@ -67,7 +67,7 @@ export function normalizeSlug(slug: string): string {
 }
 
 export function memoryFileText(kebabName: string, type: string, description: string, body: string): string {
-  const escaped = description.replace(/"/g, '\\"');
+  const escaped = description.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   return `---\nname: ${kebabName}\ndescription: "${escaped}"\nmetadata:\n  type: ${type}\n---\n\n${body}\n`;
 }
 

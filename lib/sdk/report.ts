@@ -1,8 +1,8 @@
 // Health-report plumbing shared by `tools doctor`, `tools check` and `cbm doctor`:
 // named checks rendered as status lines or as one JSON object, and gates that run
 // another system's own check by exit code.
-import { spawnSync } from 'node:child_process';
 import { msg, palette } from './output.ts';
+import { runCombined } from './process.ts';
 
 export interface CheckEntry {
   label: string;
@@ -42,16 +42,16 @@ export class CheckReport {
   gate(label: string, command: readonly string[]): boolean {
     const started = Date.now();
     const [bin = '', ...args] = command;
-    const result = spawnSync('/bin/sh', ['-c', 'exec "$@" 2>&1', 'gate', bin, ...args], { encoding: 'utf8' });
+    const result = runCombined(bin, args);
     const seconds = Math.floor((Date.now() - started) / 1000);
-    const code = result.status ?? 1;
+    const code = result.status;
     if (code === 0) return this.check(label, true, `${seconds}s`);
-    const lines = result.stdout.split('\n');
+    const lines = result.output.split('\n');
     const last = lines.map((line) => line.replace(/^\s+/, '')).filter((line) => line !== '').at(-1) ?? '';
     this.check(label, false, `exit ${code} in ${seconds}s — ${last}`);
     if (!this.json) {
       const p = palette();
-      for (const line of tail(result.stdout, 6)) process.stdout.write(`             ${p.DIM}${line}${p.RESET}\n`);
+      for (const line of tail(result.output, 6)) process.stdout.write(`             ${p.DIM}${line}${p.RESET}\n`);
     }
     return false;
   }
