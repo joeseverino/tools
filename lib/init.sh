@@ -1,42 +1,33 @@
 # shellcheck shell=bash
-# init.sh — bootstrap for the personal CLI tools.
-#
-# Each tool sources this with one line, forwarding its own argv:
+# init.sh — bootstrap for shell tools that author their surface with the desc_*
+# DSL (TypeScript tools use lib/sdk/tool.ts instead).
 #
 #     source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" <config-name> "$@"
 #
-# Loads lib/common.sh + lib/describe.sh, then config/<config-name>.sh if a name
-# was given. Pass an empty string (or omit) for tools that don't have a config.
+# Loads lib/common.sh and lib/describe.sh, then config/<config-name>.sh unless the
+# forwarded argv is a help or describe request. Pass an empty name for tools with
+# no config. A local config/<name>.sh wins; without one the tracked
+# config/<name>.sh.example applies, so a clean checkout runs as-is.
 #
-# A tool's command surface renders from describe_spec (static strings), so
-# `-h` / `--help` / `--describe` MUST work with no environment configured — the
-# command-surface contract. Config files hard-gate their env (`${NOTES_HOME:?}`)
-# at source time, which would otherwise kill help before desc_help_intercept
-# runs. So when the forwarded argv is a help/describe request, we skip sourcing
-# config entirely — describe_spec needs none of it. Real commands still get it.
-# (`source ... "$@"` exposes the tool's argv here and restores the caller's
-# afterward, in bash and zsh alike.)
+# Config files hard-gate their environment (`${NOTES_HOME:?}`) at source time,
+# which would kill -h before the help renderer ran, so help and describe requests
+# skip the config. `source ... "$@"` exposes the tool's argv here and restores the
+# caller's afterward, in bash and zsh alike.
 
 : "${TOOLS_HOME:?set in ~/.zshrc}"
 
 # shellcheck source=lib/common.sh
 source "$TOOLS_HOME/lib/common.sh"
-# Emit-once command-surface contract: the generic usage() + the --describe JSON
-# renderer over a tool's describe_spec. Sourced for every tool, so defining
-# describe_spec is all a tool needs to self-describe.
 # shellcheck source=lib/describe.sh
 source "$TOOLS_HOME/lib/describe.sh"
 
 if [[ ${1-} ]]; then
-    # $1 = config name; $2.. = the tool's own argv (forwarded). A help/describe
-    # request reaches the renderer without config — match the same tokens
-    # desc_help_intercept does (main: $2; focused `<cmd> -h`: $3).
+    # $1 = config name; $2.. = the tool's own argv. Main help is $2, a focused
+    # `<cmd> -h` is $3.
     _init_help=0
     case "${2-}" in -h|--help|help|--describe|--describe=*) _init_help=1 ;; esac
     case "${3-}" in -h|--help) _init_help=1 ;; esac
     if [[ $_init_help -eq 0 ]]; then
-        # A local config/<name>.sh wins; without one, the tracked template's
-        # defaults apply, so a clean checkout (CI, a new Mac) runs as-is.
         if [[ -f "$TOOLS_HOME/config/$1.sh" ]]; then
             # shellcheck source=/dev/null
             source "$TOOLS_HOME/config/$1.sh"

@@ -6,12 +6,16 @@
 // verbs (ship/land/resync) on the shared runner. Vault/writeup rows are
 // reminders that copy a useful string. Mirrors repos tui's SMOKE/REPLAY harness.
 
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
+import { CliError, reportError } from '../sdk/cli.ts';
+import { isRecord } from '../sdk/guards.ts';
+import { runJson, spawnJson } from '../sdk/process.ts';
+import { toolsHome } from '../sdk/paths.ts';
 import {
   RESET, BOLD, DIM, GREEN, YELLOW, RED, CYAN, MAGENTA,
   truncate, wrapText, fitFrame, padEndAnsi, windowLines,
   enterAlt, leaveAlt, createTitleSetter, createInputPump, NAMED_KEYS,
-  spawnDetached, runForegroundAction,
+  spawnDetached, runForegroundAction, loadError,
 } from '../tui.ts';
 import type { TuiAction } from '../tui.ts';
 
@@ -54,14 +58,13 @@ interface Model {
 }
 interface Surface { label: string; color: string }
 
-const TOOLS_HOME = process.env.TOOLS_HOME || '';
-const BRIEF_BIN = process.env.BRIEF_BIN || (TOOLS_HOME ? `${TOOLS_HOME}/bin/brief` : 'brief');
+const BRIEF_BIN = process.env['BRIEF_BIN'] || `${toolsHome}/bin/brief`;
 const ARGS = process.argv.slice(2);
 
-const SMOKE = process.env.BRIEF_TUI_SMOKE;
-const REPLAY = !!process.env.BRIEF_TUI_KEYS;
-const TEST_COLUMNS = Number.parseInt(process.env.BRIEF_TUI_COLUMNS || '', 10);
-const TEST_ROWS = Number.parseInt(process.env.BRIEF_TUI_ROWS || '', 10);
+const SMOKE = process.env['BRIEF_TUI_SMOKE'];
+const REPLAY = !!process.env['BRIEF_TUI_KEYS'];
+const TEST_COLUMNS = Number.parseInt(process.env['BRIEF_TUI_COLUMNS'] || '', 10);
+const TEST_ROWS = Number.parseInt(process.env['BRIEF_TUI_ROWS'] || '', 10);
 
 const SURFACE: Record<string, Surface> = {
   pr:      { label: 'PR', color: GREEN },
@@ -88,36 +91,25 @@ function termColumns(): number {
 function termRows(): number {
   return Number.isFinite(TEST_ROWS) && TEST_ROWS > 0 ? TEST_ROWS : process.stdout.rows || 34;
 }
-function fail(message: string): never { process.stderr.write(message + '\n'); process.exit(1); }
 function shellQuote(s: unknown): string { return `'${String(s).replace(/'/g, `'\\''`)}'`; }
 
-function fetchDigestSync(): BriefDigest {
-  const res = spawnSync(BRIEF_BIN, ['--json', '--prs', ...ARGS], { encoding: 'utf8' });
-  let json: BriefDigest | null = null;
-  try { json = JSON.parse(res.stdout || 'null') as BriefDigest | null; } catch {}
-  if (res.status !== 0 || !json || json.ok === false) {
-    fail('could not load `brief --json --prs`' + (res.stderr ? `: ${res.stderr.trim()}` : ''));
-  }
-  return json;
+const DIGEST_WHAT = '`brief --json --prs`';
+const digestArgs = ['--json', '--prs', ...ARGS];
+
+function isDigest(value: unknown): value is BriefDigest {
+  return isRecord(value) && value['ok'] !== false;
 }
 
-function fetchDigestAsync(): Promise<BriefDigest> {
-  return new Promise<BriefDigest>((resolve, reject) => {
-    const child = spawn(BRIEF_BIN, ['--json', '--prs', ...ARGS]);
-    let out = '', err = '';
-    child.stdout.on('data', (d) => { out += d; });
-    child.stderr.on('data', (d) => { err += d; });
-    child.on('error', reject);
-    child.on('close', (code) => {
-      let json: BriefDigest | null = null;
-      try { json = JSON.parse(out || 'null') as BriefDigest | null; } catch {}
-      if (code !== 0 || !json || json.ok === false) {
-        reject(new Error('could not load `brief --json --prs`' + (err ? `: ${err.trim()}` : '')));
-        return;
-      }
-      resolve(json);
-    });
-  });
+function fetchDigestSync(): BriefDigest {
+  const res = runJson(BRIEF_BIN, digestArgs, {}, isDigest);
+  if (!res.ok || !res.json) throw loadError(DIGEST_WHAT, res.stderr);
+  return res.json;
+}
+
+async function fetchDigestAsync(): Promise<BriefDigest> {
+  const res = await spawnJson(BRIEF_BIN, digestArgs, {}, isDigest);
+  if (!res.ok || !res.json) throw loadError(DIGEST_WHAT, res.stderr);
+  return res.json;
 }
 
 // The whole point: collapse the digest into one severity-ranked queue of
@@ -367,37 +359,44 @@ async function handleKey(model: Model, key: string): Promise<void> {
   }
 }
 
-if (SMOKE) {
-  const model = load();
-  process.stdout.write(frame(model) + '\n');
-  process.exit(0);
-}
-
-const model = REPLAY ? load() : newModel(null, true);
-
-const { feedInput, flushInput } = createInputPump({ onKey: (key) => { handleKey(model, key).then(() => draw(model)); }, onPaste: () => {} });
-
-if (REPLAY) {
-  for (const token of (process.env.BRIEF_TUI_KEYS ?? '').split(',')) {
-    const t = token.trim();
-    if (t) feedInput(NAMED_KEYS[t] ?? t);
+function main(): void {
+  if (SMOKE) {
+    process.stdout.write(frame(load()) + '\n');
+    return;
   }
-  flushInput();
-  process.stdout.write(fitFrame(frame(model), termColumns(), termRows()) + '\n');
-  process.exit(0);
+
+  const model = REPLAY ? load() : newModel(null, true);
+
+  const { feedInput, flushInput } = createInputPump({ onKey: (key) => { handleKey(model, key).then(() => draw(model)); }, onPaste: () => {} });
+
+  if (REPLAY) {
+    for (const token of (process.env['BRIEF_TUI_KEYS'] ?? '').split(',')) {
+      const t = token.trim();
+      if (t) feedInput(NAMED_KEYS[t] ?? t);
+    }
+    flushInput();
+    process.stdout.write(fitFrame(frame(model), termColumns(), termRows()) + '\n');
+    return;
+  }
+
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new CliError('brief tui is interactive and needs a terminal. Use `brief --json` for machine-readable output.');
+  }
+
+  enterAlt();
+  draw(model);
+  fetchDigestAsync()
+    .then((digest) => { model.digest = digest; model.items = buildItems(digest); model.loading = false; clamp(model); draw(model); })
+    .catch((err: unknown) => { model.loading = false; model.error = err instanceof Error ? err.message : String(err); draw(model); });
+  process.stdout.on('resize', () => draw(model));
+  process.on('SIGINT', () => finish(0));
+  process.stdin.setRawMode(true);
+  process.stdin.resume();
+  process.stdin.on('data', (buf) => feedInput(buf.toString('utf8')));
 }
 
-if (!process.stdin.isTTY || !process.stdout.isTTY) {
-  fail('brief tui is interactive and needs a terminal. Use `brief --json` for machine-readable output.');
+try {
+  main();
+} catch (error) {
+  reportError(error);
 }
-
-enterAlt();
-draw(model);
-fetchDigestAsync()
-  .then((digest) => { model.digest = digest; model.items = buildItems(digest); model.loading = false; clamp(model); draw(model); })
-  .catch((err: unknown) => { model.loading = false; model.error = err instanceof Error ? err.message : String(err); draw(model); });
-process.stdout.on('resize', () => draw(model));
-process.on('SIGINT', () => finish(0));
-process.stdin.setRawMode(true);
-process.stdin.resume();
-process.stdin.on('data', (buf) => feedInput(buf.toString('utf8')));

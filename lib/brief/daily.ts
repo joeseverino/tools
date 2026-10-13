@@ -12,19 +12,38 @@
 // one entry. Empty sections drop, so a quiet day is just the header (you write
 // the rest below the region by hand).
 
+import { text } from 'node:stream/consumers';
+import { parseArgs } from 'node:util';
+import { runCli } from '../sdk/cli.ts';
+import { isRecord, isStringArray, parseJson } from '../sdk/guards.ts';
+
+interface Commits { repo: string; subjects: string[] }
+interface Closed { doc_id: string; title: string; project?: string }
 interface Activity {
-  commits: { repo: string; subjects: string[] }[];
-  closed: { doc_id: string; title: string; project?: string }[];
+  commits: Commits[];
+  closed: Closed[];
 }
-interface DailyInput { commits?: unknown; closed?: unknown }
+
+function isCommits(value: unknown): value is Commits {
+  return isRecord(value) && typeof value['repo'] === 'string' && isStringArray(value['subjects']);
+}
+
+function isClosed(value: unknown): value is Closed {
+  return isRecord(value)
+    && typeof value['doc_id'] === 'string'
+    && typeof value['title'] === 'string'
+    && (value['project'] === undefined || typeof value['project'] === 'string');
+}
+
+function list<T>(value: unknown, guard: (item: unknown) => item is T): T[] {
+  return Array.isArray(value) ? value.filter(guard) : [];
+}
 interface Section {
   title: string;
   callout: string;
   open: boolean;
   lines: (a: Activity) => string[];
 }
-
-const isoDate = process.argv[2] || new Date().toISOString().slice(0, 10);
 
 const SECTIONS: Section[] = [
   {
@@ -53,10 +72,10 @@ function callout(title: string, type: string, open: boolean, lines: string[]): s
   return [`> [!${type}]${open ? "+" : "-"} ${title}`, ...lines.map((l) => `> - ${l}`)].join("\n");
 }
 
-function render(input: DailyInput): string {
+export function render(input: unknown, isoDate: string): string {
   const a: Activity = {
-    commits: Array.isArray(input.commits) ? input.commits as Activity["commits"] : [],
-    closed: Array.isArray(input.closed) ? input.closed as Activity["closed"] : [],
+    commits: list(isRecord(input) ? input['commits'] : undefined, isCommits),
+    closed: list(isRecord(input) ? input['closed'] : undefined, isClosed),
   };
   const blocks = [`> [!note] ${isoDate}\n> ${summaryLine(a)}`];
   for (const s of SECTIONS) {
@@ -67,15 +86,10 @@ function render(input: DailyInput): string {
   return blocks.join("\n\n");
 }
 
-let raw = "";
-process.stdin.setEncoding("utf8");
-process.stdin.on("data", (c) => (raw += c));
-process.stdin.on("end", () => {
-  let input: DailyInput = {};
-  try {
-    input = JSON.parse(raw) as DailyInput;
-  } catch {
-    input = {};
-  }
-  process.stdout.write(render(input) + "\n");
-});
+if (import.meta.main) {
+  await runCli(async () => {
+    const { positionals } = parseArgs({ args: process.argv.slice(2), allowPositionals: true, strict: true });
+    const isoDate = positionals[0] || new Date().toISOString().slice(0, 10);
+    process.stdout.write(render(parseJson(await text(process.stdin)), isoDate) + "\n");
+  });
+}

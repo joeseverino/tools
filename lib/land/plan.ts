@@ -1,14 +1,21 @@
-#!/usr/bin/env node
-// land/plan.ts — project a `repos --json --prs` payload to the rows land acts
-// on: only repos with an OPEN PR, as
-//   name <TAB> path <TAB> number <TAB> ci <TAB> url
-// The stdin/parse plumbing is shared (repos/project.ts); this declares only
-// land's filter and columns.
-import { projectReposStdin } from "../repos/project.ts";
-import type { Pr } from "../repos/pr.ts";
+import type { PlanRepo } from '../repos/project.ts';
 
-projectReposStdin((r) => {
-  const pr: Partial<Pr> = r.pr || {};
-  if (pr.state !== "open") return null;
-  return [r.name, r.path, pr.number, pr.ci, pr.url];
-});
+export interface LandRow {
+  name: string;
+  path: string;
+  number: number | undefined;
+  ci: string;
+  url: string;
+}
+
+/** Repos with an open PR, with the fields land acts on. */
+export function landRows(repos: readonly PlanRepo[]): LandRow[] {
+  return repos
+    .filter((repo) => repo.pr?.state === 'open')
+    .map((repo) => ({ name: repo.name, path: repo.path, number: repo.pr?.number, ci: repo.pr?.ci ?? '', url: repo.pr?.url ?? '' }));
+}
+
+/** CI counts as green when it passed or the repo has no checks. */
+export function isGreen(ci: string): boolean {
+  return ci === 'passing' || ci === 'none';
+}

@@ -8,60 +8,69 @@ surface once and carrying each command's **blast radius**. Read Cordon for the
 framework itself: the [contract shape and schema](https://github.com/joeseverino/cordon#the-contract),
 the [effect ladder](https://github.com/joeseverino/cordon#the-effect-ladder), and
 [how to write an emitter](https://github.com/joeseverino/cordon/blob/main/docs/IMPLEMENTERS.md).
-**This page is the Bash *implementation* of that framework** — the `desc_*` DSL,
-the renderers, the runtime gate, and the federation that fold it into the wider
-toolchain.
+**This page is the TypeScript *implementation* of that framework**: the typed
+spec, the renderers, the runtime gate, and the federation that fold it into the
+wider toolchain.
 
 A tool's surface — its commands, flags, arguments, prose, examples, external
-flag-ownership, and effect — is declared exactly once in a `describe_spec()`
-function. Two pure renderers turn that into the human help and the machine JSON,
-so they can never drift (there is no prose to parse). See
+flag-ownership, and effect — is declared exactly once as a typed `ToolSpec`.
+Two pure renderers turn that into the human help and the machine JSON, so they
+can never drift (there is no prose to parse). See
 [`ARCHITECTURE.md`](ARCHITECTURE.md) for where this sits in the repo, and
 [`../AGENTS.md`](../AGENTS.md) for the editing rules.
 
 ![the describe pipeline](diagrams/describe-pipeline.png)
 
-## The DSL
+## The spec
 
-```bash
-describe_spec() {
-    desc_tool "hq" "Sync vault docs into Severino HQ and operate the deploy."
-    desc_inventory "Integrations" 130       # aggregate group + workflow order
-    desc_synopsis "hq <command>"
-
-    desc_cmd restart -- "docker compose restart app — no rebuild, no migrations"
-    desc_effect deploy +network            # ← blast radius
-
-    desc_cmd create  -- "Create or update a Project or Asset in HQ"
-    desc_effect remote_write +network
-    desc_pos kind "{project,asset}" -- "What to create"
-    desc_delegate "HQ's capability schemas — run 'hq create <kind> -h' for the live fields"
-}
+```ts
+export const spec: ToolSpec = {
+  name: 'hq',
+  description: 'Sync vault docs into Severino HQ and operate the deploy.',
+  group: 'Integrations',            // aggregate group
+  order: 130,                       // globally unique workflow order
+  effect: 'read',
+  synopsis: ['hq <command>'],
+  commands: [
+    { name: 'restart', summary: 'docker compose restart app, no rebuild, no migrations',
+      effect: 'deploy', network: true },
+    { name: 'create', summary: 'Create or update a Project or Asset in HQ',
+      effect: 'remote_write', network: true,
+      positionals: [{ name: 'kind', choices: ['project', 'asset'], help: 'What to create' }],
+      delegates: "HQ's capability schemas; run 'hq create <kind> -h' for the live fields" },
+  ],
+};
 ```
 
-| Helper | Declares | Scope |
+| Field | Declares | Scope |
 |---|---|---|
-| `desc_tool` / `desc_synopsis` | name, one-liner, usage line | tool |
-| `desc_inventory` | aggregate group + globally unique workflow order | tool |
-| `desc_cmd` | a subcommand (opens its scope) | — |
-| `desc_opt` / `desc_pos` | a flag / a positional (`+repeat`, `+optional`, `+variadic`, `"{a,b,c}"`) | current command |
-| `desc_effect` | blast radius + `+network` / `+interactive` | current command |
-| `desc_para` / `desc_example` | prose / an example | current command |
-| `desc_delegate` | "flags owned by another repo" | current command |
-| `desc_env` | an environment variable (human help only) | tool |
+| `name`, `description`, `synopsis` | name, one-liner, usage lines | tool |
+| `group`, `order` | aggregate group and globally unique workflow order | tool |
+| `commands` | the subcommands | tool |
+| `options` / `positionals` | flags (`repeatable`, `metavar`, `choices`) and arguments (`optional`, `variadic`, `choices`) | tool or command |
+| `effect`, `network`, `interactive` | blast radius | tool or command |
+| `paras` / `examples` | prose and examples | tool or command |
+| `delegates` | "flags owned by another repo" | command |
+| `env` | environment variables (human help only) | tool |
+| `leafCommands` | commands are discoverable aliases; bare invocation stays tool-owned | tool |
 
-Everything after a `desc_cmd` is **scoped to that command** — declare tool-level
-prose/examples/effect *before the first `desc_cmd`*. One dispatch line —
-`desc_help_intercept "$@"` — renders the whole help + machine surface; the `case`
-after it is pure wiring.
+The launcher calls `runTool(tool)`, which renders the whole help and machine
+surface; the handlers are pure wiring.
 
-A `desc_para` is **one logical paragraph stored as a single unwrapped string** —
+A `paras` entry is **one logical paragraph stored as a single unwrapped string**,
 never a hard-wrapped source line. Every renderer (`-h`, README, the `--tui`
 expand pane) reflows it to its own width, so no presentation line-breaks are
-baked into the source of truth; declare one `desc_para` per paragraph (renderers
-space them) rather than an empty `desc_para ""` separator. Validation fails
-closed on a paragraph that ends mid-sentence or is empty, so the data stays
-reflowable as the repo scales.
+baked into the source of truth; add one entry per paragraph (renderers space
+them) rather than an empty entry as a separator. Validation fails closed on a
+paragraph that ends mid-sentence or is empty, so the data stays reflowable as the
+repo scales.
+
+Shell tools in sibling repos author the same spec with the `desc_*` DSL
+(`desc_tool`, `desc_cmd`, `desc_opt`, `desc_pos`, `desc_effect`, `desc_para`,
+`desc_example`, `desc_delegate`, `desc_env`, `desc_inventory`) and one
+`desc_help_intercept "$@"` dispatch line. The DSL streams records to
+`lib/sdk/spec-cli.ts`, which builds a `ToolSpec` and renders it, so the output is
+byte-identical to a typed tool's.
 
 ## Three tiers, cleanly separated
 
@@ -99,31 +108,30 @@ and the `network`-vs-dependency-install distinction; below is how this repo
 
 ![the effect contract](diagrams/effect-contract.png)
 
-```bash
-desc_effect deploy +network          # after a desc_cmd …
-desc_effect local_write              # … or after desc_tool, for a leaf tool
+```ts
+{ name: 'restart', effect: 'deploy', network: true, summary: '…' }   // a command
+{ name: 'diagram', effect: 'local_write', /* … */ }                  // a leaf tool
 ```
 
-Every tool and command declares `desc_effect` explicitly, including `read`.
-Missing or duplicate declarations fail closed before help, JSON, or the runtime
-gate can render. It renders five ways from the one line: a terse `Effect:` line
+Every tool and command sets `effect` explicitly, including `read`; the field is
+required, so an omission does not compile (the shell DSL fails closed at render
+time instead). It renders five ways from the one line: a terse `Effect:` line
 in the focused `-h` (only when non-trivial), `effect` / `network?` /
 `interactive?` in the JSON
 (`effect` always emitted; the boolean tags only when true, to stay lean), a
 color-coded chip in `--tui`, the field in the scoped lookup below, and — the
 load-bearing one — the **runtime gate**.
 
-**The runtime gate (`desc_guard_effect`).** A `deploy` (the top of the ladder —
+**The runtime gate (`confirmDeploy`).** A `deploy` (the top of the ladder —
 it ships to prod) requires an explicit confirmation before it runs. The gate is
-derived from the same `desc_effect` line, so the warning can't disagree with the
-contract, and it lives in the one intercept every tool already calls
-(`desc_help_intercept`) — a new deploy command is gated the moment it declares
-its effect, with zero per-tool wiring. At a TTY it prompts `[y/N]`;
+derived from the same `effect` field, so the warning can't disagree with the
+contract, and it lives in the one intercept every tool already runs
+(`intercept` in `lib/sdk/tool.ts`): a new deploy command is gated the moment it
+declares its effect, with zero per-tool wiring. At a TTY it prompts `[y/N]`;
 non-interactive it **fails closed** unless `TOOLS_ASSUME_YES=1` is set (the
 bypass CI and intentional automation use), so a stray `hq ship` / `hq restart`
-can't fire by accident, by hand or by an agent. A tool with no `describe_spec`
-has no executable declared surface to gate. Covered by `describe.bats`, against
-a throwaway tool with one deploy and one read command.
+can't fire by accident, by hand or by an agent. Covered by `tool.test.ts` and, for the shell bridge, `describe.bats`, against a
+throwaway tool with one deploy and one read command.
 
 ## Scoped lookup — the token-minimal AI path
 
@@ -165,8 +173,9 @@ before it runs anything, instead of guessing from flags or reading handlers.
 
 ## How it can't drift
 
-- **spec ↔ dispatch parity** — every declared command has a dispatch arm and
-  vice versa (`describe.bats`).
+- **spec ↔ handler parity** — every declared command has a handler and vice
+  versa: `runTool` refuses to start otherwise, and `fleet.test.ts` asserts it
+  for every tool.
 - **effect enum** — every emitted `effect` is a valid class; `network` /
   `interactive` only ever appear as `true` (`describe.bats`).
 - **JSON Schema** — every real tool *and folded-in sibling* validates against
@@ -176,10 +185,11 @@ before it runs anything, instead of guessing from flags or reading handlers.
 - **generated consumers** — completions and the README reference/inventory must match
   the current aggregate (`tools generate --check`).
 - **round-trip** — every JSON option/command appears in some help view.
-- **bash/zsh byte-parity** — `lib/describe.sh` runs identically under both
-  (no numeric array indexing, no `read -ra`), so the lone zsh tool (`dns-test`)
-  self-describes from the same engine.
-- **byte-determinism** — `drift_main` diffs the whole emitted surface.
+- **cordon parity** — `renderContract` equals `cordon-spec`'s `renderSurface`
+  structurally (`surface.test.ts`); it differs only in fixing the key order.
+- **shell bridge parity** — `describe.bats` renders one spec through the shell
+  DSL under bash and zsh and checks the outputs agree.
+- **byte-determinism** — the emitted surface has no timestamps, so guards diff it.
 
 ## Re-rendering the diagrams
 

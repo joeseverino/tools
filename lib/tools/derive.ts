@@ -1,22 +1,22 @@
+import { parseArgs } from 'node:util';
+import { reportError } from '../sdk/cli.ts';
 import { deriveProjections } from './contracts.ts';
 
 function main() {
-  const args = process.argv.slice(2);
-  let id: string | null = null;
-  let all = false;
-  let go = false;
-  let json = false;
-  let scope = 'local';
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index] ?? '';
-    if (arg === '--all') all = true;
-    else if (arg === '--go') go = true;
-    else if (arg === '--json') json = true;
-    else if (arg === '--scope' && args[index + 1]) scope = args[++index] ?? scope;
-    else if (arg.startsWith('-')) throw new Error(`unknown option: ${arg}`);
-    else if (!id) id = arg;
-    else throw new Error(`unexpected argument: ${arg}`);
-  }
+  const { values, positionals } = parseArgs({
+    args: process.argv.slice(2),
+    options: {
+      all: { type: 'boolean', default: false },
+      go: { type: 'boolean', default: false },
+      json: { type: 'boolean', default: false },
+      scope: { type: 'string', default: 'local' },
+    },
+    allowPositionals: true,
+    strict: true,
+  });
+  if (positionals.length > 1) throw new Error(`unexpected argument: ${positionals[1]}`);
+  const { all, go, json, scope } = values;
+  const id = positionals[0] ?? null;
   if (id && all) throw new Error('name one projection or pass --all, not both');
   const result = deriveProjections({ id, all, scope, go });
   if (json) {
@@ -35,6 +35,5 @@ function main() {
 try {
   main();
 } catch (error) {
-  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-  process.exitCode = 2;
+  reportError(error, 2);
 }

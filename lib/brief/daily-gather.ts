@@ -10,17 +10,34 @@
 
 import { execFileSync } from "node:child_process";
 import process from "node:process";
+import { text } from "node:stream/consumers";
+import { parseArgs } from "node:util";
+import { runCli } from "../sdk/cli.ts";
+import { isRecord, parseJson } from "../sdk/guards.ts";
 
 interface Repo { name?: string; path?: string }
 interface BoardTask { doc_id?: string; title?: string; project?: string; closed?: string }
-interface GatherInput {
-  repos?: { repos?: unknown };
-  board?: { tasks?: unknown };
+
+const optionalString = (value: unknown): boolean => value === undefined || typeof value === "string";
+
+function isRepo(value: unknown): value is Repo {
+  return isRecord(value) && optionalString(value['name']) && optionalString(value['path']);
 }
 
-const date = process.argv[2] || new Date().toISOString().slice(0, 10);
+function isBoardTask(value: unknown): value is BoardTask {
+  return isRecord(value)
+    && optionalString(value['doc_id'])
+    && optionalString(value['title'])
+    && optionalString(value['project'])
+    && optionalString(value['closed']);
+}
 
-function commitsOn(repoPath: string): string[] {
+function nested(value: unknown, outer: string, inner: string): unknown {
+  const group = isRecord(value) ? value[outer] : undefined;
+  return isRecord(group) ? group[inner] : undefined;
+}
+
+function commitsOn(repoPath: string, date: string): string[] {
   try {
     const out = execFileSync(
       "git",
@@ -35,26 +52,22 @@ function commitsOn(repoPath: string): string[] {
   }
 }
 
-let raw = "";
-process.stdin.setEncoding("utf8");
-process.stdin.on("data", (c) => (raw += c));
-process.stdin.on("end", () => {
-  let input: GatherInput = {};
-  try {
-    input = JSON.parse(raw) as GatherInput;
-  } catch {
-    input = {};
-  }
+await runCli(async () => {
+  const { positionals } = parseArgs({ args: process.argv.slice(2), allowPositionals: true, strict: true });
+  const date = positionals[0] || new Date().toISOString().slice(0, 10);
+  const input = parseJson(await text(process.stdin));
 
-  const repoList: Repo[] = Array.isArray(input.repos?.repos) ? input.repos.repos as Repo[] : [];
+  const repoField = nested(input, "repos", "repos");
+  const repoList = Array.isArray(repoField) ? repoField.filter(isRepo) : [];
   const commits: { repo: string | undefined; subjects: string[] }[] = [];
   for (const r of repoList) {
     if (!r.path) continue;
-    const subjects = commitsOn(r.path);
+    const subjects = commitsOn(r.path, date);
     if (subjects.length) commits.push({ repo: r.name, subjects });
   }
 
-  const tasks: BoardTask[] = Array.isArray(input.board?.tasks) ? input.board.tasks as BoardTask[] : [];
+  const taskField = nested(input, "board", "tasks");
+  const tasks = Array.isArray(taskField) ? taskField.filter(isBoardTask) : [];
   const closed = tasks
     .filter((t) => t.closed === date)
     .map((t) => ({ doc_id: t.doc_id, title: t.title, project: t.project }));

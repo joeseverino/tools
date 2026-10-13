@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import type { AnySchema } from 'ajv/dist/2020.js';
+import { isRecord } from '../sdk/guards.ts';
 
 // The subset of a Cordon describe contract the prose lint and order check read;
 // full structure is enforced by the schema.
@@ -33,8 +34,10 @@ export interface ContractValidation {
 // canonical source (declared in config/contracts.json) so it can't
 // silently drift; re-vendor with `cp` when cordon ships a change.
 const schemaPath = new URL('../../schemas/cordon-v4.json', import.meta.url);
-const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8')) as AnySchema;
-const validate = new Ajv2020({ allErrors: true, strict: true }).compile(schema);
+const parsedSchema: unknown = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
+if (!isRecord(parsedSchema)) throw new Error(`schema is not a JSON object: ${schemaPath.pathname}`);
+const schema: AnySchema = parsedSchema;
+const validate = new Ajv2020({ allErrors: true, strict: true }).compile<unknown>(schema);
 
 // A paragraph in the contract is ONE logical, unwrapped sentence-or-more —
 // renderers (-h, README, TUI) reflow it to their own width. So presentation
@@ -73,8 +76,8 @@ export function validateContracts(document: DescribeDocument): ContractValidatio
   const contracts = [...own, ...siblings];
   const errors: string[] = [];
   for (const contract of contracts) {
+    const name = contract?.name || '(unknown)';
     if (!validate(contract)) {
-      const name = contract?.name || '(unknown)';
       for (const error of validate.errors || []) {
         errors.push(`${name}${error.instancePath || '/'} ${error.message}`);
       }

@@ -5,19 +5,32 @@ to this file, so Claude Code and any AGENTS.md-aware tool read the same source.
 Read this before editing; it answers the questions agents otherwise re-derive
 from the code every session.
 
-Small bash/zsh tools with TypeScript modules under `lib/` (Node 24 runs them
-directly), sharing one look and feel. The toolchain owns nothing another system
-owns: infrastructure facts are HQ's (`hq call`, `hq drift`), publishing is the
-site repo's, and vault reads and writes go through the vault MCP.
+TypeScript tools under `lib/<tool>/` (Node 24 runs them directly, no build),
+each launched by a four-line extensionless `bin/<tool>` and sharing one look and
+feel. The toolchain owns nothing another system owns: infrastructure facts are
+HQ's (`hq call`, `hq drift`), publishing is the site repo's, and vault reads and
+writes go through the vault MCP.
 
 ## Reusable SDK boundary
 
 This repo is also the lightweight SDK for sibling CLIs, one-off scripts, and
-agent utilities. Stable public modules live under `lib/sdk/`; `common.sh` is a
-compatibility aggregator, not a destination for new domain helpers. Import the
-narrowest module possible. Shell commands use `lib/sdk.sh` when they need the
-Cordon runtime; Node commands use `process.ts` / `result.ts`; every vault CLI
-crossing uses `svmc.sh` or `svmc.ts`.
+agent utilities. Stable public modules live under `lib/sdk/`. Import the
+narrowest module possible:
+
+| Module | Owns |
+|---|---|
+| `surface.ts`, `usage.ts` | the typed tool spec, the Cordon contract and the help screens rendered from it |
+| `tool.ts` | `runTool`: help and `--describe` interception, the deploy gate, command dispatch, `parsing` for `util.parseArgs` |
+| `cli.ts`, `output.ts`, `color.ts` | `CliError` and exit codes, status lines and `header`/`footer`, colour through `util.styleText` |
+| `process.ts`, `which.ts`, `guards.ts` | subprocesses, `command -v`, JSON validation |
+| `paths.ts`, `config.ts`, `ci.ts` | `TOOLS_HOME` / `CODE_HOME`, shell-sourced `config/<name>.sh`, the CI environment |
+| `svmc.ts`, `result.ts` | the vault CLI crossing, the `result-v1` envelope |
+
+Shell consumers (sibling repos) source `lib/sdk.sh` or `lib/init.sh`: the `desc_*`
+DSL in `lib/describe.sh` streams its declarations to `lib/sdk/spec-cli.ts`, so
+shell tools render through the same code as the TypeScript ones. `core.sh`,
+`svmc.sh` and `ci.sh` are the shell twins of the modules above; `common.sh`
+aggregates them for the bats harness.
 
 Generic structured output uses `schemas/result-v1.json`. Repository capabilities
 are declared once in `config/capabilities.json` and validated against
@@ -28,118 +41,96 @@ extension rules: [`docs/SDK.md`](docs/SDK.md).
 ## Command-surface contract (`describe`)
 
 Every tool emits its command surface as one structured JSON document conforming
-to [**Cordon**](https://github.com/joeseverino/cordon) — the language-agnostic
+to [**Cordon**](https://github.com/joeseverino/cordon), the language-agnostic
 command-surface contract (the framework, schema, and emitter guide live there;
-read it first). This section is the rules for *this repo's* Bash implementation
-of it — the `desc_*` DSL and its renderers; the prose walkthrough is
+read it first). This section is the rules for this repo's TypeScript
+implementation of it; the prose walkthrough is
 [`docs/command-surface-contract.md`](docs/command-surface-contract.md). (Vault
 decision record: `read_doc('report-emit-once-render-many')`; the Python sibling
 emitter is `severino-vault-mcp`'s `cli_introspect.describe_parser`.)
 
-- **One source, one dispatch line — leaf and subcommand alike.** A tool defines
-  a single `describe_spec()` (the `desc_*` DSL in `lib/describe.sh`) and calls
-  **`desc_help_intercept "$@"`** first in its dispatch. That one line renders the
-  whole help + machine surface from the spec, and **derives the rest from the
-  spec's shape** (does it declare any `desc_cmd`?) so a tool never restates it:
-  `-h`/`--help` → the git-style main screen (`usage()`); `--describe` → the JSON
-  — both universal. For a **subcommand tool** it also serves bare/`help` → main
-  screen and **`<tool> <cmd> -h` → that command's focused screen**
-  (`usage_command`); for a **leaf tool** (no `desc_cmd`) it claims only the
-  unambiguous `-h`/`--help`/`--describe` meta-flags and hands back, because a
-  leaf's bare / `help` invocation is the tool's own to define (`backup` runs,
-  `diagram` errors with its usage). So a leaf tool with its own options
-  (`inbox`, `remember`, `backup`, `diagram`) drops the
-  hand-rolled `--describe)` / `-h)` arms and uses the same one line; adding or
-  removing a `desc_cmd` re-routes dispatch with no second edit. No tool
-  hand-routes help, and a help flag can never fall through to run an action
-  (`hq restart -h`, `hq drift -h`, `tools reinstall -h` all *render*, never
-  execute). The `case` after it is pure command→action wiring — the only thing
-  not derivable from the spec (`cmd_*` vs aliases); `describe.bats`
-  guards that every declared command has a dispatch arm so the two sets can't
-  drift. New tools get this form from `tools new`. The lone zsh tool,
-  `dns-test`, uses this same one dispatch line (`lib/describe.sh` is bash+zsh
-  safe); it keeps `getopts` only for its own short options, and a `getopts -h`
-  arm for an `-h` that isn't the leading token, since `getopts` can't see the
-  long meta-flags.
-- **Everything per-command is spec-derived — zero hand-written sub-help, zero
-  help heredocs in the toolchain.** After a `desc_cmd`, declare its flags
-  (`desc_opt`/`desc_pos`), prose (`desc_para`), and examples (`desc_example`);
-  all are **scoped to that command**, so the focused `-h`, JSON, and `--tui`
-  light up from the one declaration. `desc_pos … "{a,b,c}"` gives a positional
-  a fixed choice set; `+variadic` rides into JSON for completion consumers.
-  Keep the data model honest: structured → structured primitives
-  (flags`→desc_opt`, args`→desc_pos`, examples`→desc_example`), `desc_para` for
-  genuine prose only; interactive UIs (the `--tui` explorers) self-document
-  their keymaps rather than restating them in CLI help.
-  **A `desc_para` call is ONE logical paragraph — a single unwrapped string, not
-  a hard-wrapped source line.** Every renderer (`-h`, the README, the `--tui`
-  expand pane) reflows it to its own width, so presentation line-breaks must
-  never be baked into the source of truth; declare multiple `desc_para`s for
-  multiple paragraphs (the renderers space them), never an empty `desc_para ""`
-  separator. The validator fails closed on a paragraph that ends mid-sentence or
-  is empty (`lib/tools/describe-schema.ts`, guarded by `describe.bats`).
+- **One source, one entry point.** A tool exports `tool: ToolDefinition` from
+  `lib/<tool>/main.ts`: a typed `spec` (`ToolSpec` in `lib/sdk/surface.ts`) plus
+  `run` (a tool without commands, or with `leafCommands`) or `commands` (a
+  handler per spec command). The launcher calls `runTool(tool)`, which renders
+  `-h`/`--help` (the git-style main screen), `--describe` (the JSON) and
+  `<cmd> -h` (that command's focused screen), runs the deploy gate, and only
+  then dispatches. A help flag can never fall through to run an action
+  (`hq restart -h`, `hq drift -h`, `tools reinstall -h` all render, never
+  execute). Leaf versus subcommand is read from the spec's shape, so a tool
+  never restates it. A leaf tool's bare invocation is the tool's own to define
+  (`backup` runs, `diagram` prints its usage). `definitionDrift` fails the run
+  when a spec command has no handler or a handler has no spec command, and
+  `tests/unit/fleet.test.ts` asserts it for every tool.
+- **Everything per-command is spec-derived.** A command's `options`,
+  `positionals`, `paras` and `examples` are scoped to it, so the focused `-h`,
+  the JSON, and `--tui` light up from the one declaration. A positional's
+  `choices` give it a fixed set. Keep the data model honest: flags are
+  `options`, arguments are `positionals`, examples are `examples`, and `paras`
+  is for genuine prose only; interactive UIs (the `--tui` explorers)
+  self-document their keymaps rather than restating them in CLI help.
+  **One `paras` entry is one logical paragraph: a single unwrapped string, not a
+  hard-wrapped source line.** Every renderer (`-h`, the README, the `--tui`
+  expand pane) reflows it to its own width, so presentation line-breaks never
+  enter the source of truth; add one entry per paragraph and never an empty one.
+  The validator fails closed on a paragraph that ends mid-sentence or is empty
+  (`lib/tools/describe-schema.ts`).
 - **Flags owned by another repo are pointed at, never restated.** `hq create`'s
-  fields are HQ's `project.upsert` / `asset.upsert` input schemas. Such commands declare
-  **`desc_delegate "<owner>"`** (after the `desc_cmd`) instead of enumerating
-  flags — a *structured* ownership marker that renders in the focused `-h`
-  ("Flags are owned elsewhere: …") **and** rides into the JSON as `delegates`, so
-  an agent sees ownership without reading handlers. `hq create <kind> -h` also
-  falls through to HQ (the help flag isn't the *2nd* arg, so the intercept
+  fields are HQ's `project.upsert` / `asset.upsert` input schemas. Such commands
+  set `delegates: "<owner>"` instead of enumerating flags. It renders in the
+  focused `-h` ("Flags are owned elsewhere: ...") and rides into the JSON, so an
+  agent sees ownership without reading handlers. `hq create <kind> -h` falls
+  through to HQ (the help flag is not the second argument, so interception
   skips it) and renders the owner's live field list.
-- **Unknown input is self-service and derived — `die_unknown`.** `die_unknown
-  <kind> <token> [<cmd>]` (in `common.sh`) replaces every hand-written
-  "unknown … (try `tool -h`)": it prints the error and then *shows* the valid
-  surface from the spec — the command list for a bad command, a command's own
-  options for a bad flag — deriving the tool name from `$0`. No "(try -h)"
-  strings to drift between `-h`/`--help`.
-- **Wiring.** Source `lib/init.sh` (it sources `lib/describe.sh`), define
-  `describe_spec`, and put `desc_help_intercept "$@"` above the dispatch `case`.
-  `bin/doc-to-pdf` is a launcher for `lib/doc-to-pdf/index.ts`, which carries
-  its own `SPEC` object that renders both its `--help` and `--describe`.
-- **Effect = the risk signal an agent can't read off the flags — `desc_effect`.**
-  Every command (and leaf tool) carries a Cordon blast-radius class on the ladder
-  `read → local_write → vault_write → remote_write → deploy`, plus the `+network`
-  / `+interactive` tags. The ladder's definitions and the
-  network-vs-dependency-install rule live in
-  [cordon](https://github.com/joeseverino/cordon#the-effect-ladder) — don't
-  restate them here. Declare it explicitly in one line, including reads —
-  `desc_effect deploy +network` after a `desc_cmd`, or after `desc_tool` for a
-  leaf — scoped like `desc_opt`. Missing or duplicate declarations fail closed
-  before rendering or gating, so an omitted classification can never become an
-  inferred read. It renders a terse `Effect:` line in the focused `-h`, a colored
-  chip in `--tui`, and rides into the JSON. This is what lets an agent risk-gate
-  `hq restart` (`deploy`) vs `vault status` (`read`) before running either.
-- **Contract.** This repo emits the **complete** [Cordon `schema_version 4`](https://github.com/joeseverino/cordon#the-contract)
-  document — every optional field included (`paras`/`examples`/`delegates`,
-  option `metavar`/`repeatable`, positional `variadic`); the sibling
+- **Unknown input is self-service and derived.** `rt.dieUnknown(kind, token,
+  command?)` prints the error and then shows the valid surface from the spec:
+  the command list for a bad command, a command's own options for a bad flag.
+  There are no "(try -h)" strings to drift. `parsing(rt, () => parseArgs(...))`
+  routes `util.parseArgs` rejections of unknown flags to it.
+- **Effect is the risk signal an agent cannot read off the flags.** Every
+  command and leaf tool sets `effect` on the Cordon blast-radius ladder
+  `read -> local_write -> vault_write -> remote_write -> deploy`, plus
+  `network` and `interactive` tags. The ladder's definitions and the
+  network-versus-dependency-install rule live in
+  [cordon](https://github.com/joeseverino/cordon#the-effect-ladder); do not
+  restate them here. `effect` is a required field, so an omitted classification
+  is a compile error and can never become an inferred read. It renders a terse
+  `Effect:` line in the focused `-h`, a coloured chip in `--tui`, and rides into
+  the JSON. It is what lets an agent risk-gate `hq restart` (`deploy`) versus
+  `vault status` (`read`) before running either.
+- **Contract.** This repo emits the complete Cordon `schema_version 4` document,
+  every optional field included (`paras`/`examples`/`delegates`, option
+  `metavar`/`repeatable`, positional `variadic`); the sibling
   `severino-vault-mcp` emits the same schema minus the prose fields. The field
-  list, schema, and version history live in cordon; this repo's *rendering* of it
-  is [`docs/command-surface-contract.md`](docs/command-surface-contract.md).
-  Repo-specific rules: `desc_inventory "<group>" <order>` is required once after
-  `desc_tool`, and `order` is globally unique — the canonical workflow order for
-  every aggregate renderer (README, completions, TUI). `desc_para`,
-  `desc_example`, and `desc_effect` are **scoped to the current command** (like
-  `desc_opt`/`desc_pos`) — declare tool-level ones *before the first `desc_cmd`*
-  or they attach to the last command. `desc_env` stays human-help only. Output is
-  byte-deterministic (no timestamps) so guards can diff it; `describe.bats`
-  guards every emitted effect against the enum, and schema validation rejects
-  missing metadata and duplicate order values.
+  list, schema, and version history live in cordon; `renderContract` in
+  `lib/sdk/surface.ts` is this repo's rendering, kept structurally equal to
+  `cordon-spec`'s `renderSurface` by `tests/unit/surface.test.ts`. It does not
+  use `renderSurface` directly because it fixes the key order the committed
+  surfaces were generated with and because help must answer on a checkout
+  without `node_modules`. `group` and `order` are required once per tool, and
+  `order` is globally unique: the canonical workflow order for every aggregate
+  renderer (README, completions, TUI). `env` is human help only. Output is
+  byte-deterministic (no timestamps) so guards can diff it.
 - **`tools describe`** is the orchestrator: it federates every `bin/*`
   `--describe` into one document (`--pretty` to read, `--repos` to fold in
-  sibling repos like the MCP, `tools describe <tool>` for one). **`tools describe
-  <tool> <command>`** projects the contract down to a single command object
-  (lifting in `tool` + `effect`) — the token-minimal path an agent fetches before
-  acting, instead of reading the whole surface. `tools doctor` gates that every
-  tool self-describes. Because the federated document is byte-deterministic, the
-  aggregate call is **content-cached** under
-  `${XDG_CACHE_HOME:-~/.cache}/severino-tools/describe-<hash>.json` — the hash is
-  over every `bin/*` plus the shared describe/render libs, so any spec or
-  renderer edit misses and re-federates (correctness never lags content; warm
-  calls go ~1.4s → ~35ms). `TOOLS_DESCRIBE_NO_CACHE=1` forces a live federation.
-- `lib/describe.sh` is written to run under **bash and zsh** (no numeric array
-  indexing, no `read -ra`) so the lone zsh tool (`dns-test`) self-describes from
-  the same engine. `tests/describe.bats` asserts the round-trip invariant and
-  bash/zsh byte-parity.
+  sibling repos like the MCP, `tools describe <tool>` for one). **`tools
+  describe <tool> <command>`** projects the contract down to a single command
+  object (lifting in `tool` + `effect`), the token-minimal path an agent fetches
+  before acting. `tools doctor` gates that every tool self-describes. The
+  tools are spawned in parallel and the aggregate is **content-cached** under
+  `${XDG_CACHE_HOME:-~/.cache}/severino-tools/describe-<hash>.json`. The hash is
+  over every `bin/*` and `lib/**/*.{ts,sh}`, so any spec or renderer edit misses
+  and re-federates (a cold call is about 0.5s, a warm one under 0.1s).
+  `TOOLS_DESCRIBE_NO_CACHE=1` forces a live federation.
+- **Shell authoring.** A shell tool (a sibling repo's) declares the same surface
+  with the `desc_*` DSL in a `describe_spec` function, sources `lib/init.sh`, and
+  puts `desc_help_intercept "$@"` above its dispatch `case`. The DSL only
+  collects records; `lib/sdk/spec-cli.ts` parses them into a `ToolSpec` and
+  renders through the same code, so the output is byte-identical to a typed
+  tool's. `tests/describe.bats` asserts the round-trip invariant and bash/zsh
+  parity for the bridge. `bin/doc-to-pdf` is a launcher for
+  `lib/doc-to-pdf/index.ts`, which carries its own `SPEC` object that renders
+  both its `--help` and `--describe`.
 
 ## `tools describe --tui` — the human tier (shipped 2026-06-13)
 
@@ -148,8 +139,8 @@ the contract above: a full-screen Node explorer over the same `tools describe`
 JSON (`lib/tools/describe-tui.ts`), sharing the look and polish bar of every
 TUI here through `lib/tui.ts`. The three tiers stay cleanly separated: `-h`
 (clean text) · `--describe` (JSON) · `--tui` (this). `tools tui` is a thin
-dispatch alias to `cmd_describe --tui` — the same renderer, one less thing to
-type; both stay in sync because there is only one implementation.
+dispatch alias to `describe --tui`: the same renderer, one less thing to type;
+both stay in sync because there is only one implementation.
 
 - **Scope: aggregate only.** A single tool stays the clean wrapped `-h` (no
   per-tool mini-TUIs); `tools describe <tool> --tui` is a usage error.
@@ -169,7 +160,7 @@ type; both stay in sync because there is only one implementation.
   overlay rendering everything the contract holds for that command (or leaf
   tool): summary, effect, all args, the full reflowed `paras`, and `examples` —
   instead of truncating to a `-h` pointer. `e`/Esc closes it, `Enter`/`c` copies.
-  This is the consumer that the one-logical-paragraph `desc_para` rule feeds:
+  This is the consumer that the one-logical-paragraph `paras` rule feeds:
   the overlay reflows real paragraphs to the pane width.
 - **Reuse, don't fork — shared `lib/tui.ts`.** The visual language and input
   plumbing (palette, grapheme-aware width/clip, `lineEditor`, `fitFrame`, the
@@ -200,16 +191,23 @@ type; both stay in sync because there is only one implementation.
 
 ## Layout
 
-- `bin/` — exactly one executable per tool, nothing else. `tools install`,
-  the completions, `tools doctor`, and CI all discover tools by globbing
-  `bin/*`.
-- `lib/` — shared shell helpers flat (`common.sh`, `init.sh`, `doctor.sh`,
-  `git.sh`, `describe.sh`), the SDK under `lib/sdk/` (shell and TypeScript), and
-  tool-specific support under `lib/<tool>/` (e.g. `lib/hq/`, `lib/doc-to-pdf/`).
+- `bin/` — exactly one executable per tool, nothing else. Each is a four-line
+  `#!/usr/bin/env node` launcher that calls `runTool(tool)`; Node's type
+  stripping does not apply to an extensionless entry file, so the logic lives in
+  `lib/<tool>/main.ts`. `tools install`, the completions, `tools doctor`, and CI
+  discover tools by globbing `bin/*`.
+- `lib/<tool>/` — one directory per tool. `main.ts` exports `tool`
+  (`ToolDefinition`: the spec plus its handlers); pure logic (parsing,
+  formatting, planning) sits in sibling modules so `tests/unit` can reach it.
   Node modules are TypeScript, type-checked under the strict `tsconfig.json` by
-  `tools check`. `doctor.sh` owns the `check`/`check_warn`/`gate`/`doctor_finish`
-  plumbing and the gate registry behind `tools doctor --all` / `--live` (a gate's
-  only contract: exit 0 when healthy).
+  `tools check`.
+- `lib/sdk/` — the shared framework and SDK (see above). `lib/git/` is the one
+  owner of git and PR mechanics. `lib/tui.ts` is the shared TUI toolkit.
+- Shell that remains: `lib/hq-call` (the SSH transport, a thin `exec`),
+  `lib/describe.sh`, `lib/init.sh`, `lib/common.sh`, `lib/sdk.sh` and
+  `lib/sdk/{core,svmc,ci}.sh` (the authoring surface for shell consumers and the
+  bats harness), and `config/*.sh`, which stay shell so they can be sourced and
+  overridden from the environment (`lib/sdk/config.ts` reads them).
 - `config/capabilities.json` — the one declaration of each sibling repository:
   path, install command, fingerprint, describe surface, `brief` section.
   `tools reinstall`, `tools bump-engine`, `tools doctor`, `brief`, and the
@@ -223,7 +221,9 @@ type; both stay in sync because there is only one implementation.
   `tools contracts --check` and the CI gate compare this copy against the pinned
   `cordon-spec` package, so the copy cannot silently drift.
 - `tests/` — bats suite. Hermetic: tmpdirs, stubbed `gh`, `uv`, `mmdc`, and
-  HQ transport; never the real network. CI runs it.
+  HQ transport; never the real network. CI runs it. `tests/unit/*.test.ts` are
+  `node --test` tests for the pure TypeScript functions (`npm test`); `unit.bats`
+  runs them inside the suite, so `tools check` and CI cover them.
 - `bench/` — every measured claim in the README has a script here that
   asserts it; `tools check` runs them.
 
@@ -233,20 +233,21 @@ We own the MCP (`$CODE_HOME/Assets/severino-vault-mcp/`). Shell tools call
 it as a plain CLI — **don't** hand-edit vault frontmatter or shell out to `yq`;
 the MCP is the schema-validated, atomic writer.
 
-Every shell call goes through the shared **`svmc()`** adapter in
-`lib/sdk/svmc.sh` (also re-exported by `lib/common.sh` for compatibility), and
-Node consumers use `lib/sdk/svmc.ts`. Both pin `SVMC_VAULT_PATH` to
-`$NOTES_HOME` AND names the binary in one place via `$SVMC_BIN` (the test seam),
-so a call site can neither read the MCP's own configured default vault nor dodge
-the hermetic stub:
+Every call goes through the shared **`svmc()`** adapter: `lib/sdk/svmc.ts` for
+TypeScript tools (`svmc(args, { input?, vaultPath? })`) and `lib/sdk/svmc.sh` for
+shell consumers. It pins `SVMC_VAULT_PATH` to `$NOTES_HOME` (an explicit
+`SVMC_VAULT_PATH` or `vaultPath` wins) AND names the binary in one place via
+`$SVMC_BIN` (the test seam), so a call site can neither read the MCP's own
+configured default vault nor dodge the hermetic stub:
 
-```bash
-svmc <subcommand> [args] [--pretty]     # bin/backlog, bin/brief, bin/hq, …
+```ts
+const result = svmc(['brief', '--days', '7']);   // lib/backlog, lib/brief, lib/hq, ...
 ```
 
-Add new call sites through the matching adapter, never inline — an inline `severino-vault-mcp`
-call silently falls back to the MCP's own configured default vault (and bypasses
-`$SVMC_BIN`). One boundary, every consumer (emit once, derive everywhere).
+Add new call sites through the adapter, never inline: an inline
+`severino-vault-mcp` call silently falls back to the MCP's own configured default
+vault (and bypasses `$SVMC_BIN`). One boundary, every consumer (emit once,
+derive everywhere).
 
 The console script is on PATH (`uv tool install`); `severino-vault-mcp --help`
 lists its subcommands. Each prints JSON and exits 0/1 on `ok`. Infrastructure
@@ -258,12 +259,12 @@ HQ's committed `docs_index/schema.json` from it, and `hq schema --check` fails o
 drift (CI / pre-deploy, including the vault's Frontmatter Schema doc). Don't
 hand-maintain enum lists anywhere downstream.
 
-**No hand-rolled logic in `bin/hq`:** every HQ read and write is an HQ tool
-called through `lib/hq-call`, the operator's transport to HQ's MCP tool surface
-over the host shell (their own SSH certificate, never a shared token, never an
-inline ORM script). `hq call <tool> [json]` exposes that surface directly;
-`hq drift` reads HQ's own reconciliation verdict. Keep the logic in HQ or the
-MCP; `bin/hq` transports, and `lib/hq/report.ts` formats what they emit.
+**No hand-rolled logic in `lib/hq`:** every HQ read and write is an HQ tool
+called through `lib/hq-call` (`$HQ_CALL`), the operator's transport to HQ's MCP
+tool surface over the host shell (their own SSH certificate, never a shared
+token, never an inline ORM script). `hq call <tool> [json]` exposes that surface
+directly; `hq drift` reads HQ's own reconciliation verdict. Keep the logic in HQ
+or the MCP; `lib/hq` transports, and `lib/hq/report.ts` formats what they emit.
 
 **Cross-repo JSON contract** (keep both sides in sync):
 - One JSON object per call; exit 0 on success, 1 on failure.
@@ -271,7 +272,7 @@ MCP; `bin/hq` transports, and `lib/hq/report.ts` formats what they emit.
   (singular `error`). Consumers read `json.error`; preserve that shape when
   adding or changing MCP tools.
 
-**To expose another MCP tool to the shell:** add a subparser + handler in the
+**To expose another MCP tool to a tool here:** add a subparser + handler in the
 MCP's `src/severino_vault_mcp/__main__.py` (mirror an existing block), then
 `tools reinstall severino-vault-mcp`. Tools run the *installed* console script,
 so a stale `uv tool` install is real drift; `tools doctor` catches it by
@@ -280,22 +281,29 @@ computed by the MCP's own code.
 
 ## Conventions (enforced by review, checked by CI)
 
-- New bash tools: scaffold with `tools new <name>` — it emits the canonical
-  skeleton. Add `--verify` to regenerate the derived README/completions and run
-  `tools check --no-bench` immediately after scaffolding. Every tool sources
-  `lib/init.sh`, uses `msg`/`die`/`header`/`footer` for output, and exits 0
-  (success/skips), 1 (failure), 2 (usage).
-- Every tool answers `-h`/`--help` and `--describe` (both from one
-  `describe_spec` — see the Command-surface contract above; `tools doctor`
-  gates it).
-- `dns-test` is the lone zsh exception to the bash rule (but it self-describes
-  from the same engine — `lib/describe.sh` is bash+zsh safe).
+- New tools: scaffold with `tools new <name>` (add `--agent` for a `result-v1`
+  envelope tool). It writes `bin/<name>` and `lib/<name>/main.ts` with the
+  canonical skeleton; `--verify` regenerates the derived README/completions and
+  runs `tools check` immediately. A tool exits 0 (success or skips), 1
+  (failure), 2 (usage), and reports through `msg`/`header`/`footer`/`die` from
+  `lib/sdk/output.ts` and `lib/sdk/cli.ts`.
+- Every tool answers `-h`/`--help` and `--describe` from its one spec (see the
+  Command-surface contract above; `tools doctor` gates it).
 - Node code is TypeScript under `lib/`, run directly by Node 24 (no build) and
-  type-checked strictly: no explicit `any`, no `@ts-*` suppressions, casts only
-  where parsed JSON meets a declared shape. Dependencies are pinned exactly in
-  the root `package.json`. JSON in shell is `jq`; there is no Python at runtime
-  (`marks` is the exception until it moves to severino-life).
-- Adding a tool: drop it in `bin/`, then run `tools generate`. The generated
+  type-checked strictly (including `noPropertyAccessFromIndexSignature` and
+  `noImplicitReturns`): no explicit `any`, no `@ts-*` suppressions, no casts on
+  parsed JSON. JSON stays `unknown` until a guard from `lib/sdk/guards.ts`
+  narrows it, or until `runJson` / `spawnJson` apply the guard passed as their
+  last argument. Handlers parse arguments with `util.parseArgs` in `strict`
+  mode (through `parsing` so unknown flags get the shared usage error), colour
+  through `lib/sdk/color.ts`/`output.ts`, and read paths from `lib/sdk/paths.ts`.
+  Helpers throw (`die`, `usageError`, `CliError`); `runTool` reports the error
+  and sets the exit code. Dependencies are pinned exactly in the root
+  `package.json`. JSON in code is `JSON.parse` behind a guard; there is no
+  Python at runtime (`marks` is the exception until it moves to severino-life).
+- Comments say a non-obvious why, tersely. They do not restate the code or tell
+  the history of a change.
+- Adding a tool: `tools new`, then `tools generate`. The generated
   `completions/_tools-suite` and README CLI reference/inventory both consume
   `--describe`; never hand-edit either generated block.
 
@@ -313,10 +321,10 @@ that split when extending it, don't add a second scanner or a second merge path.
 > from colliding: each change is a clean branch off current main, gated before it
 > leaves the machine.
 
-- **Branch safety is decided once, in `lib/git.sh` (`git_branch_state`).** Never
+- **Branch safety is decided once, in `lib/git/index.ts` (`branchState`).** Never
   commit to `main` and never pile onto a stale branch: the single ladder classes
   the current branch `trunk|zombie|pr|current|stale` vs `origin/<base>`, and every
-  consumer reads it — `git_target_branch` (ship's write-time gate), `repos --json`
+  consumer reads it: `targetBranch` (ship's write-time gate), `repos --json`
   (`branch_state` field), and the TUI queues. `start` cuts a fresh branch off
   `origin/<base>` carrying the working tree (the opening beat that makes
   branching-first one word). When ship hits a **stale** branch (committed work,
@@ -334,18 +342,18 @@ that split when extending it, don't add a second scanner or a second merge path.
   `stash` is always emitted. `start`, `ship`, `land`, and `resync` all read this
   one surface and never re-derive git state (the emit-once rule). `land`'s preview
   *is* `repos --prs`.
-- **`lib/git.sh` owns every *write* mechanic.** Commit/push/PR/merge/sync live
-  there, not inlined in a driver. The single merge mechanic is **`git_merge_pr`**
-  (`--squash|--merge|--rebase` + optional `--admin`); `git_land` (require-green
-  policy) and `bin/land` (explicit green-gate + `--admin`
+- **`lib/git/index.ts` owns every *write* mechanic.** Commit/push/PR/merge/sync
+  live there, not inlined in a driver. The single merge mechanic is
+  **`mergePr`** (`--squash|--merge|--rebase` + optional `--admin`); `land`
+  (require-green policy) and `lib/land/main.ts` (explicit green-gate + `--admin`
   policy) both ride it. Add a new git/PR mechanic here and call it from the driver.
 - **`land` is the merge beat** (`ship → land → resync`): merges the open PR for the
   current branch and deletes it. Dry-run + single-repo by default, fleet behind
   `--all` (same guard shape as `ship`). It skips a non-green PR unless `--admin`
   (the solo-repo / land-ahead-of-CI override). `ship --watch` ends by pointing at
   `land`; `land` ends by pointing at `resync`.
-- **All GitHub calls go through `"${GH_BIN:-gh}"`** — in `bin/repos`, `bin/land`,
-  and `lib/git.sh` — so the bats suite shadows `gh` with `tests/fixtures/gh` (a
+- **All GitHub calls go through `GH_BIN`** (default `gh`), in `lib/repos`,
+  `lib/land`, `lib/ship` and `lib/git/index.ts`, so the suites shadow `gh` with `tests/fixtures/gh` (a
   hermetic stub: branch-name → canned PR JSON; `pr merge` logged to
   `$GH_MERGE_LOG`). Never call bare `gh`; add the call site through `GH_BIN`.
 - **The `repos tui` PR tier loads in two phases.** It paints the fast local
@@ -361,7 +369,7 @@ that split when extending it, don't add a second scanner or a second merge path.
   merged → `resync`, then vault to-review / inbox / writeup drafts (reminders that
   copy a string). It re-invokes `brief --json --prs` via `$BRIEF_BIN` (tests feed a
   canned digest stub — no repos/vault/gh). `brief` is a leaf-with-subcommand
-  (`desc_leaf_commands` + `desc_cmd tui`), so bare `brief` still runs the briefing.
+  (`leafCommands` + a `tui` command), so bare `brief` still runs the briefing.
 - **The action runner is shared (`lib/tui.ts`), not per-TUI.** `runForegroundAction`
   (the raw-mode/alt-screen/`waitForReturn` dance) and `spawnDetached`/`spawnInherit`
   live in `lib/tui.ts`; both `repos tui` and `brief tui` import them. A new TUI
@@ -370,49 +378,43 @@ that split when extending it, don't add a second scanner or a second merge path.
 
 ## Verify (do this before claiming a change works)
 
-`tools check` runs everything CI runs and more: `bash -n`/`zsh -n`, the strict
-TypeScript type-check, shellcheck, JSON Schema validation for every describe
-contract, generated-surface drift checks, the bats suite, and the bench
+`tools check` runs everything CI runs and more: `bash -n`/`zsh -n` over any
+remaining shell scripts, the strict TypeScript type-check, shellcheck, JSON
+Schema validation for every describe contract, generated-surface drift checks,
+the bats suite (which runs the `node --test` unit tests), and the bench
 assertions.
 `--no-bench` skips the slow step. **`tools check --ci`** runs that same gate
 under the CI-equivalent environment — this checkout's `bin/` first with the
 install dir off `$PATH` (no stale `~/.local/bin` shadow), an empty global/system
 git config (no leaked `init.defaultBranch`, aliases, or hooks), and the bats
 version surfaced — so a local pass means a CI pass. That hermetic profile is
-defined once in `lib/common.sh` (`ci_shell_env`) and shared with the bats
-harness (`tests/helpers.bash`); `ship --check` runs `tools check --ci`. Set
+defined once in `lib/sdk/ci.ts` (`applyCiEnv`, with `ci_shell_env` in
+`lib/sdk/ci.sh` as its shell twin) and shared with the bats harness
+(`tests/helpers.bash`); `ship --check` runs `tools check --ci`. Set
 `TOOLS_CI_BATS_VERSION` to fail the gate on a bats version other than CI's.
 `tools status --json` / `tools doctor --json`
 give machine-readable state. `tools doctor --all` is the cross-system rollup
 (`hq doctor`); `--live` adds `hq drift` (HQ's reconciliation verdict, over SSH).
 
 For a fast inner loop while editing one area:
-- `bats tests/<file>.bats` — hermetic, ~seconds. Run it after editing a tool or
-  `lib/*.sh`; it catches integration regressions (e.g. a broken MCP call) that
-  reading the diff will not.
+- `bats tests/<file>.bats` — hermetic, ~seconds. Run it after editing a tool; it
+  catches integration regressions (e.g. a broken MCP call) that reading the diff
+  will not.
 - `npm run typecheck` — the strict TypeScript check alone.
-- `shellcheck -x bin/<tool> lib/*.sh` — matches CI lint.
+- `npm test`: the `node --test` unit tests alone.
+- `shellcheck -x lib/*.sh lib/sdk/*.sh config/*.sh.example` — matches CI lint of the remaining shell.
 
 ## Cautions (time-savers learned the hard way)
 
-- **`replace_all` on a short substring is dangerous**: it will also rewrite that
-  text *inside a helper you just added* (a literal MCP invocation collapsed into
-  the new `svmc()` body, creating `svmc() { svmc …; }` infinite recursion). The
-  bats suite caught it. Prefer targeted edits, or re-grep + run bats after a
-  bulk replace.
-- Use plain `if` (not `[[ ]] &&`) as the last statement in trap handlers under
-  `set -e`.
 - `config/backup.sh` and `config/hq.sh` are user-local; never commit or lint
   them in CI (non-reproducible).
-- **`die` (common.sh) writes to stderr** — so a `die` inside a `x=$(some_fn)`
-  caller is shown, not captured into the value (the silent `set -e` abort that
-  once hid failures). Callers never need `die … >&2`; don't re-add it.
-- **`${FLAG:+x}` is wrong for 0/1 flags** — `"0"` is non-empty, so it always
-  substitutes. Use `if (( FLAG ))`. Related: `if ! cmd; then case $? in` is dead
-  code — `!` negates `$?` to 0; capture with `|| rc=$?` instead.
-- External binaries the suite must stub are named through a variable: `$GH_BIN`
+- External binaries the suites must stub are named through a variable: `$GH_BIN`
   (gh), `$UV_BIN` (uv), `$MMDC_BIN` (mermaid-cli), `$HQ_CALL` (the HQ
-  transport), `$SVMC_BIN` (the vault MCP). Keep new call sites on the variable.
+  transport), `$SVMC_BIN` (the vault MCP), `$EDITOR`. Keep new call sites on the
+  variable.
+- **Shell-printed label columns pad by bytes.** `printf '%-10s'` pads by byte
+  count, so `msgLine` pads with `padBytes` to keep multibyte labels aligned the
+  way the shell tools had them.
 - **A `[[ … ]]` or `! cmd` before a test's last line never fails it.** Bash
   exempts both from errexit, so a false one is silently ignored (82 such
   assertions once hid a stale test and an over-broad check). `[ … ]` and plain

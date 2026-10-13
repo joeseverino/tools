@@ -6,12 +6,17 @@
 // either the digest JSON (mode "json") or a human briefing (mode "human").
 // Emit-once, render-many: one digest, two renderers.
 //
-// Open-PR/CI state is read straight off each repo's `pr` field (present only when
-// brief ran `repos --prs`) — brief no longer carries a parallel `prs` array, so
-// there is one PR owner (repos), not two. argv[3] is the --prs flag ("1"/"0"): it
-// gates the PR section and the land "next" verb so they show even at zero.
+// Open-PR/CI state is read from each repo's `pr` field (present only when brief
+// ran `repos --prs`), so repos is the one PR owner. The second positional is the
+// --prs flag ("1"/"0"): it gates the PR section so it shows even at zero.
 
-// The input shapes, cut to the fields this renderer reads.
+import { text } from 'node:stream/consumers';
+import { parseArgs } from 'node:util';
+import { runCli } from '../sdk/cli.ts';
+import { paint } from '../sdk/color.ts';
+import { isRecord, isStringArray, parseJson } from '../sdk/guards.ts';
+import type { JsonRecord } from '../sdk/guards.ts';
+
 interface Pr { state: string; number: number; ci: string; review: string; url: string }
 interface Repo {
   name: string;
@@ -27,20 +32,6 @@ interface Repo {
 interface Writeup { slug: string; published?: boolean }
 interface Line { label?: string; value?: unknown; warn?: boolean }
 interface Section { name: string; lines?: Line[]; next?: Line[] }
-interface Counted { count?: number }
-interface VaultPayload {
-  vault_doc_count?: number;
-  recent_changes?: Counted & { days?: number };
-  docs_to_review?: Counted & { docs?: unknown };
-  inbox?: Counted;
-  tasks?: { open?: number; total?: number; stale?: number; stale_slugs?: string[] };
-}
-interface BriefInput {
-  repos?: { repos?: unknown };
-  vault?: VaultPayload;
-  writeups?: { writeups?: unknown; featured_order?: Writeup[] };
-  sections?: unknown;
-}
 interface PrRow { repo: string; number: number; ci: string; review: string; url: string }
 
 interface Digest {
@@ -53,152 +44,200 @@ interface Digest {
   sections?: Section[];
 }
 
-const mode = process.argv[2] === "json" ? "json" : "human";
-const prsRequested = process.argv[3] === "1";
+const optional = (value: unknown, type: 'string' | 'number' | 'boolean'): boolean =>
+  value === undefined || typeof value === type;
 
-let raw = "";
-process.stdin.setEncoding("utf8");
-process.stdin.on("data", (c) => (raw += c));
-process.stdin.on("end", () => {
-  let input: BriefInput = {};
-  try { input = JSON.parse(raw) as BriefInput; } catch { input = {}; }
+function isPr(value: unknown): value is Pr {
+  return isRecord(value)
+    && typeof value['state'] === 'string'
+    && typeof value['number'] === 'number'
+    && typeof value['ci'] === 'string'
+    && typeof value['review'] === 'string'
+    && typeof value['url'] === 'string';
+}
 
-  const repos: NonNullable<BriefInput["repos"]> = input.repos || {};
-  const vault: VaultPayload = input.vault || {};
-  const writeups: NonNullable<BriefInput["writeups"]> = input.writeups || {};
-  // Plugged sections ride through untouched — the emitter owns its content;
-  // this renderer only knows the contract shape (name/lines/queue/next).
-  const sections = (Array.isArray(input.sections) ? input.sections as (Section | null)[] : [])
-    .filter((s): s is Section => !!(s && s.name));
+function isRepo(value: unknown): value is Repo {
+  return isRecord(value)
+    && typeof value['name'] === 'string'
+    && typeof value['pm'] === 'string'
+    && optional(value['needs_ship'], 'boolean')
+    && optional(value['needs_resync'], 'boolean')
+    && optional(value['needs_attention'], 'boolean')
+    && optional(value['branch_state'], 'string')
+    && optional(value['dirty'], 'number')
+    && optional(value['untracked'], 'number')
+    && (value['pr'] === undefined || isPr(value['pr']));
+}
 
-  const repoList: Repo[] = Array.isArray(repos.repos) ? repos.repos as Repo[] : [];
-  // Consume repos' owned classification (needs_ship / needs_resync /
-  // needs_attention) — bin/repos is the one owner; never re-derive it here.
+function isWriteup(value: unknown): value is Writeup {
+  return isRecord(value) && typeof value['slug'] === 'string' && optional(value['published'], 'boolean');
+}
+
+function isLine(value: unknown): value is Line {
+  return isRecord(value);
+}
+
+function isSection(value: unknown): value is Section {
+  return isRecord(value)
+    && typeof value['name'] === 'string' && value['name'] !== ''
+    && (value['lines'] === undefined || (Array.isArray(value['lines']) && value['lines'].every(isLine)))
+    && (value['next'] === undefined || (Array.isArray(value['next']) && value['next'].every(isLine)));
+}
+
+function record(value: unknown, key: string): JsonRecord {
+  const field = isRecord(value) ? value[key] : undefined;
+  return isRecord(field) ? field : {};
+}
+
+function list<T>(value: unknown, guard: (item: unknown) => item is T): T[] {
+  return Array.isArray(value) ? value.filter(guard) : [];
+}
+
+function count(value: JsonRecord, key: string): number {
+  const field = value[key];
+  return typeof field === 'number' ? field : 0;
+}
+
+function digestFrom(input: unknown, sections: Section[], prsRequested: boolean): { digest: Digest; repoList: Repo[]; greenPrs: (Repo & { pr: Pr })[]; recentDays: number } {
+  const repoList = list(record(input, 'repos')['repos'], isRepo);
+  const vault = record(input, 'vault');
+  const writeups = record(input, 'writeups');
+
+  // needs_ship, needs_resync, needs_attention and branch_state are repos' own
+  // classification; consume them, never re-derive.
   const ship = repoList.filter((r) => r.needs_ship).map((r) => r.name);
   const resync = repoList.filter((r) => r.needs_resync).map((r) => r.name);
-  // branch_state is repos' owned branch-safety verdict (lib/git.sh) — a stale
-  // branch (committed work behind base, no PR) blocks a clean ship and needs
-  // recovery. Consume it; never re-derive the ladder here.
-  const stale = repoList.filter((r) => r.branch_state === "stale").map((r) => r.name);
-  // Open PRs and the green ones to land, straight off repos --prs (one owner).
-  const openPrs = repoList.filter((r): r is Repo & { pr: Pr } => !!(r.pr && r.pr.state === "open"));
-  const greenPrs = openPrs.filter((r) => r.pr.ci === "passing" || r.pr.ci === "none");
-  const prs: PrRow[] | null = prsRequested
-    ? openPrs.map((r) => ({ repo: r.name, number: r.pr.number, ci: r.pr.ci, review: r.pr.review, url: r.pr.url }))
-    : null;
+  const stale = repoList.filter((r) => r.branch_state === 'stale').map((r) => r.name);
+  const openPrs = repoList.filter((r): r is Repo & { pr: Pr } => r.pr?.state === 'open');
+  const greenPrs = openPrs.filter((r) => r.pr.ci === 'passing' || r.pr.ci === 'none');
   const dirty = repoList.filter((r) => (r.dirty || 0) + (r.untracked || 0) > 0).map((r) => r.name);
-  const attention = repoList.filter((r) => r.needs_attention).length;
   const byPm: Record<string, number> = {};
   for (const r of repoList) byPm[r.pm] = (byPm[r.pm] || 0) + 1;
 
-  const wlist: Writeup[] = Array.isArray(writeups.writeups) ? writeups.writeups as Writeup[] : [];
-  const drafts = wlist.filter((w) => !w.published).map((w) => w.slug);
-  const published = wlist.filter((w) => w.published).length;
-  const featured = (writeups.featured_order || []).map((f) => f.slug);
+  const wlist = list(writeups['writeups'], isWriteup);
+  const featured = list(writeups['featured_order'], isWriteup).map((f) => f.slug);
 
-  const review = vault.docs_to_review || {};
-  const reviewDocs: { doc_id: string }[] = Array.isArray(review.docs) ? review.docs as { doc_id: string }[] : [];
+  const review = record(vault, 'docs_to_review');
+  const reviewDocs = list(review['docs'], (d): d is { doc_id: string } => isRecord(d) && typeof d['doc_id'] === 'string');
+  const tasks = record(vault, 'tasks');
+  const staleSlugs = tasks['stale_slugs'];
 
   const digest: Digest = {
     ok: true,
-    repos: { count: repoList.length, ship, resync, stale, dirty, attention, by_pm: byPm },
+    repos: { count: repoList.length, ship, resync, stale, dirty, attention: repoList.filter((r) => r.needs_attention).length, by_pm: byPm },
     vault: {
-      doc_count: vault.vault_doc_count || 0,
-      recent_changes: (vault.recent_changes || {}).count || 0,
-      docs_to_review: review.count || 0,
+      doc_count: count(vault, 'vault_doc_count'),
+      recent_changes: count(record(vault, 'recent_changes'), 'count'),
+      docs_to_review: count(review, 'count'),
       docs_to_review_top: reviewDocs.slice(0, 5).map((d) => d.doc_id),
-      inbox: (vault.inbox || {}).count || 0,
+      inbox: count(record(vault, 'inbox'), 'count'),
     },
     backlog: {
-      open: (vault.tasks || {}).open || 0,
-      total: (vault.tasks || {}).total || 0,
-      stale: (vault.tasks || {}).stale || 0,
-      stale_slugs: (vault.tasks || {}).stale_slugs || [],
+      open: count(tasks, 'open'),
+      total: count(tasks, 'total'),
+      stale: count(tasks, 'stale'),
+      stale_slugs: isStringArray(staleSlugs) ? staleSlugs : [],
     },
-    writeups: { drafts, published, featured },
+    writeups: {
+      drafts: wlist.filter((w) => !w.published).map((w) => w.slug),
+      published: wlist.filter((w) => w.published).length,
+      featured,
+    },
   };
-  if (prs) digest.prs = prs;
-  if (sections.length) digest.sections = sections;
-
-  if (mode === "json") {
-    process.stdout.write(JSON.stringify(digest));
-    return;
+  if (prsRequested) {
+    digest.prs = openPrs.map((r) => ({ repo: r.name, number: r.pr.number, ci: r.pr.ci, review: r.pr.review, url: r.pr.url }));
   }
+  if (sections.length) digest.sections = sections;
+  return { digest, repoList, greenPrs, recentDays: count(record(vault, 'recent_changes'), 'days') || 7 };
+}
 
-  // ---- human briefing ----
-  const B = "\x1b[1m", D = "\x1b[2m", Y = "\x1b[33m", R = "\x1b[0m";
-  const out = [];
-  const head = (s: string) => out.push(`\n  ${B}${s}${R}`);
+function human(digest: Digest, greenPrs: (Repo & { pr: Pr })[], recentDays: number): string {
+  const { ship, resync, stale, dirty, by_pm: byPm } = digest.repos;
+  const sections = digest.sections ?? [];
+  const { drafts, published, featured } = digest.writeups;
+  const prs = digest.prs;
+  const out: string[] = [];
+  const head = (s: string) => out.push(`\n  ${paint('bold', s)}`);
   const line = (label: string, val: string, warn = false) =>
-    out.push(`  ${D}${label.padEnd(14)}${R}${warn ? Y : ""}${val}${R}`);
+    out.push(`  ${paint('dim', label.padEnd(14))}${warn ? paint('yellow', val) : val}`);
 
-  head("repos");
-  line("total", String(digest.repos.count));
-  line("ship", ship.length ? ship.join(", ") : "none", ship.length > 0);
-  line("resync", resync.length ? resync.join(", ") : "none", resync.length > 0);
-  if (stale.length) line("stale", stale.join(", "), true);
-  line("dirty", dirty.length ? dirty.join(", ") : "none", dirty.length > 0);
-  line("by pm", Object.entries(byPm).map(([k, v]) => `${k} ${v}`).join("  "));
+  head('repos');
+  line('total', String(digest.repos.count));
+  line('ship', ship.length ? ship.join(', ') : 'none', ship.length > 0);
+  line('resync', resync.length ? resync.join(', ') : 'none', resync.length > 0);
+  if (stale.length) line('stale', stale.join(', '), true);
+  line('dirty', dirty.length ? dirty.join(', ') : 'none', dirty.length > 0);
+  line('by pm', Object.entries(byPm).map(([k, v]) => `${k} ${v}`).join('  '));
 
-  head("vault");
-  line("docs", String(digest.vault.doc_count));
-  line(`changed ${(vault.recent_changes || {}).days || 7}d`, String(digest.vault.recent_changes));
-  line("to review", digest.vault.docs_to_review
-    ? `${digest.vault.docs_to_review}  (${digest.vault.docs_to_review_top.join(", ")})`
-    : "none", digest.vault.docs_to_review > 0);
-  line("inbox", String(digest.vault.inbox), digest.vault.inbox > 0);
+  head('vault');
+  line('docs', String(digest.vault.doc_count));
+  line(`changed ${recentDays}d`, String(digest.vault.recent_changes));
+  line('to review', digest.vault.docs_to_review
+    ? `${digest.vault.docs_to_review}  (${digest.vault.docs_to_review_top.join(', ')})`
+    : 'none', digest.vault.docs_to_review > 0);
+  line('inbox', String(digest.vault.inbox), digest.vault.inbox > 0);
 
-  head("backlog");
-  line("open", String(digest.backlog.open));
-  line("stale", digest.backlog.stale
-    ? `${digest.backlog.stale}  (${digest.backlog.stale_slugs.join(", ")})`
-    : "none", digest.backlog.stale > 0);
+  head('backlog');
+  line('open', String(digest.backlog.open));
+  line('stale', digest.backlog.stale
+    ? `${digest.backlog.stale}  (${digest.backlog.stale_slugs.join(', ')})`
+    : 'none', digest.backlog.stale > 0);
 
   for (const s of sections) {
     head(s.name);
-    for (const l of s.lines || []) line(l.label || "", String(l.value ?? ""), !!l.warn);
+    for (const l of s.lines || []) line(l.label || '', String(l.value ?? ''), !!l.warn);
   }
 
-  head("writeups");
-  line("published", String(published));
-  line("drafts", drafts.length ? drafts.join(", ") : "none", drafts.length > 0);
-  line("featured", featured.length ? featured.join(" > ") : "none");
+  head('writeups');
+  line('published', String(published));
+  line('drafts', drafts.length ? drafts.join(', ') : 'none', drafts.length > 0);
+  line('featured', featured.length ? featured.join(' > ') : 'none');
 
   if (prs) {
-    head("open PRs");
-    if (!prs.length) line("none", "");
+    head('open PRs');
+    if (!prs.length) line('none', '');
     for (const pr of prs) {
-      const flag = pr.ci === "failing" ? "✗" : pr.ci === "pending" ? "•" : "✓";
-      line(pr.repo, `#${pr.number} ${flag} ${pr.ci} · ${pr.review}`, pr.ci !== "passing");
+      const flag = pr.ci === 'failing' ? '✗' : pr.ci === 'pending' ? '•' : '✓';
+      line(pr.repo, `#${pr.number} ${flag} ${pr.ci} · ${pr.review}`, pr.ci !== 'passing');
     }
   }
 
-  // Close the loop: name the next workflow verbs from the same classification,
-  // in loop order — ship (dirty) → land (green PR) → resync (merged).
   const sectionNext = sections.flatMap((s) => s.next || []);
   if (ship.length || greenPrs.length || resync.length || stale.length || digest.backlog.stale || sectionNext.length) {
-    head("next");
-    for (const n of sectionNext) line(n.label || "", String(n.value ?? ""));
+    head('next');
+    for (const n of sectionNext) line(n.label || '', String(n.value ?? ''));
     if (stale.length) {
-      line("rebranch", stale.length === 1
+      line('rebranch', stale.length === 1
         ? `ship ${stale[0]} --rebranch --go   (stale branch off old main)`
         : `ship <name> --rebranch --go   (${stale.length} stale)`);
     }
     if (ship.length) {
-      line("ship", ship.length === 1
+      line('ship', ship.length === 1
         ? `ship ${ship[0]} --check --watch --go`
         : `ship <name> --check --watch --go   (${ship.length} pending)`);
     }
     if (greenPrs.length) {
-      line("land", greenPrs.length === 1
+      line('land', greenPrs.length === 1
         ? `land ${greenPrs[0]?.name} --go`
         : `land <name> --go   (${greenPrs.length} green)`);
     }
-    if (resync.length) line("resync", "resync");
-    if (digest.backlog.stale) line("review", `backlog stale   (${digest.backlog.stale} untouched)`);
-    line("explore", "repos tui");
+    if (resync.length) line('resync', 'resync');
+    if (digest.backlog.stale) line('review', `backlog stale   (${digest.backlog.stale} untouched)`);
+    line('explore', 'repos tui');
   }
 
-  out.push("");
-  process.stdout.write(out.join("\n") + "\n");
+  out.push('');
+  return out.join('\n') + '\n';
+}
+
+await runCli(async () => {
+  const { positionals } = parseArgs({ args: process.argv.slice(2), allowPositionals: true, strict: true });
+  const mode = positionals[0] === 'json' ? 'json' : 'human';
+  const prsRequested = positionals[1] === '1';
+
+  const input = parseJson(await text(process.stdin));
+  // Plugged sections ride through untouched: the emitter owns their content.
+  const sections = list(isRecord(input) ? input['sections'] : undefined, isSection);
+  const { digest, greenPrs, recentDays } = digestFrom(input, sections, prsRequested);
+  process.stdout.write(mode === 'json' ? JSON.stringify(digest) : human(digest, greenPrs, recentDays));
 });

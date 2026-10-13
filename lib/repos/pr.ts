@@ -1,33 +1,24 @@
-#!/usr/bin/env node
-// repos --prs projector. `repos` fans out one `gh pr view --json` per repo into a
-// temp dir (named <index>.json). The CLI here reads them back in one node process
-// and emits one TSV line per repo so the shell can splice the result into its
-// parallel arrays without a JSON parser per repo:
-//
-//   <index>\t<number>\t<state>\t<ci>\t<review>\t<url>
+// Open-PR projection for `repos --prs`: one `gh pr view --json` blob per repo
+// becomes the contracted PR shape.
 //
 //   state : open | draft | closed | merged | none
 //   ci    : passing | failing | pending | none   (rollup over statusCheckRollup)
 //   review: approved | changes_requested | review_required | none
 //
-// A missing/empty/PR-less blob emits "<index>\t0\tnone\tnone\tnone\t" — repos
-// treats that as "no open PR", so a repo with no gh, no auth, or no PR degrades
-// to the same clean default instead of an error. The same projection feeds
-// json.ts (the --json surface), so the PR shape is derived in one place.
-
-import { readdirSync, readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+// A missing/empty/PR-less blob projects to number 0 / state none, so a repo with
+// no gh, no auth, or no PR degrades to the same clean default instead of an error.
+import { isRecord, parseJson } from '../sdk/guards.ts';
 
 interface CheckEntry { conclusion?: unknown; state?: unknown; status?: unknown }
 
 // A `gh pr view --json` blob; only the fields projectPr reads.
 export interface GhPrBlob {
-  number?: number;
-  isDraft?: boolean;
-  state?: string;
+  number?: number | null;
+  isDraft?: boolean | null;
+  state?: string | null;
   statusCheckRollup?: unknown;
-  reviewDecision?: string;
-  url?: string;
+  reviewDecision?: string | null;
+  url?: string | null;
 }
 
 export interface Pr { number: number; state: string; ci: string; review: string; url: string }
@@ -64,19 +55,20 @@ export function projectPr(raw: GhPrBlob | null | undefined): Pr {
   };
 }
 
-// Read a fanned-out gh blob for index <idx> from <dir>, or null if absent/garbage.
-export function readPrBlob(dir: string, idx: string | number): GhPrBlob | null {
-  try { return JSON.parse(readFileSync(`${dir}/${idx}.json`, 'utf8') || 'null') as GhPrBlob | null; } catch { return null; }
+const optional = (value: unknown, type: 'string' | 'number' | 'boolean'): boolean =>
+  value == null || typeof value === type;
+
+function isGhPrBlob(value: unknown): value is GhPrBlob {
+  return isRecord(value)
+    && optional(value['number'], 'number')
+    && optional(value['isDraft'], 'boolean')
+    && optional(value['state'], 'string')
+    && optional(value['reviewDecision'], 'string')
+    && optional(value['url'], 'string');
 }
 
-function main(dir: string | undefined) {
-  if (!dir) process.exit(0);
-  for (const file of readdirSync(dir).sort()) {
-    if (!file.endsWith('.json')) continue;
-    const idx = file.replace(/\.json$/, '');
-    const p = projectPr(readPrBlob(dir, idx));
-    process.stdout.write([idx, p.number, p.state, p.ci, p.review, p.url].join('\t') + '\n');
-  }
+// Parse the stdout of one `gh pr view --json` call, or null if empty/garbage.
+export function parsePrBlob(text: string): GhPrBlob | null {
+  const blob = parseJson(text || 'null');
+  return isGhPrBlob(blob) ? blob : null;
 }
-
-if (process.argv[1] === fileURLToPath(import.meta.url)) main(process.argv[2]);

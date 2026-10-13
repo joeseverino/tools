@@ -4,26 +4,30 @@ Bug reports and PRs welcome. A few ground rules:
 
 ## Before opening a PR
 
-- Run `tools check`. It runs what CI runs (`bash -n`/`zsh -n`, the strict
-  TypeScript type-check, shellcheck, contract validation, the bats suite) plus
-  the bench assertions. Green locally means green on the PR.
+- Run `tools check`. It runs what CI runs (the strict TypeScript type-check,
+  shellcheck and `bash -n` over the remaining shell, contract validation, the
+  bats suite and the unit tests) plus the bench assertions. Green locally means
+  green on the PR.
 - Match the existing style:
-  - 4-space indent
-  - `#!/usr/bin/env bash` + `set -euo pipefail`, except `dns-test`
-    (`#!/bin/zsh`), which uses zsh-specific idioms.
-  - Node code is TypeScript under `lib/`: strict, no explicit `any`.
-  - `lib/init.sh` sourcing pattern for any new tool.
-  - Status output via `msg` / `header` / `footer` / `die` — don't
+  - 2-space indent in TypeScript, 4-space in shell.
+  - Tools are TypeScript under `lib/<tool>/`: strict, no explicit `any`, no
+    non-null assertions, arguments through `util.parseArgs` in strict mode.
+  - A tool declares a typed `ToolSpec` and exports `tool`; `bin/<tool>` is the
+    four-line launcher `tools new` writes.
+  - Status output via `msg` / `header` / `footer` / `die` from `lib/sdk` — don't
     invent new colors or layouts unless the tool genuinely needs
     something different.
-- Add `-h` / `--help` output for any new tool.
-- New tools start with `tools new <name>` — it scaffolds the canonical
-  skeleton in `bin/`, and `tools install`, `tools doctor`, and CI
+  - Comments explain a non-obvious why in plain language; they do not restate
+    the code.
+- Every tool answers `-h` / `--help` and `--describe`; both come from its spec.
+- New tools start with `tools new <name>` — it scaffolds `bin/<name>` and
+  `lib/<name>/main.ts`, and `tools install`, `tools doctor`, and CI
   discover it automatically. Tool-specific support files go in
-  `lib/<tool>/`; only code shared by two or more tools belongs flat in
-  `lib/`. Then `tools generate` rebuilds the completions and README reference.
-- Behavior that matters gets a bats test in `tests/`. Tests must stay
-  hermetic: tmpdirs, stubbed binaries, no network.
+  `lib/<tool>/`; only code shared by two or more tools belongs in `lib/sdk/`.
+  Then `tools generate` rebuilds the completions and README reference.
+- Behavior that matters gets a bats test in `tests/`. Pure TypeScript
+  functions get a `node --test` test in `tests/unit/` (`npm test`). Tests must
+  stay hermetic: tmpdirs, stubbed binaries, no network.
 
 ## Scope
 

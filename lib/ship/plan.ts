@@ -1,30 +1,29 @@
-#!/usr/bin/env node
-// ship/plan.ts — project a `repos --json` payload to one TSV row per repo that
-// has something to ship (uncommitted changes or unpushed commits):
-//
-//   name <TAB> path <TAB> branch <TAB> uncommitted <TAB> ahead <TAB> has_remote
-//
-// With SHIP_INCLUDE_CLEAN_BRANCH=1 (set only by scoped `ship <name>` when PR
-// creation is requested), also include a clean pushed feature branch so `ship`
-// can open/update the PR after a prior push. ship reads this instead of
-// re-deriving git state per repo; the stdin/parse plumbing is shared
-// (repos/project.ts).
-import { projectReposStdin } from "../repos/project.ts";
+import type { PlanRepo } from '../repos/project.ts';
 
-const includeCleanBranch = process.env.SHIP_INCLUDE_CLEAN_BRANCH === "1";
+export interface ShipRow {
+  name: string;
+  path: string;
+  branch: string;
+  uncommitted: number;
+  ahead: number;
+  hasRemote: boolean;
+}
 
-projectReposStdin((r) => {
-  const uncommitted = (r.dirty || 0) + (r.untracked || 0);
-  const localOk = !!r.local_ok;
-  const unpushed = (r.ahead || 0) > 0 || (r.has_remote && !r.upstream && !localOk);
-  const branch = r.branch || "-";
-  const cleanFeatureBranch = includeCleanBranch
-    && r.has_remote
-    && uncommitted === 0
-    && !unpushed
-    && branch !== "main"
-    && branch !== "master"
-    && branch !== "-";
-  if (uncommitted === 0 && !unpushed && !cleanFeatureBranch) return null;
-  return [r.name, r.path, branch, uncommitted, r.ahead || 0, r.has_remote ? 1 : 0];
-});
+/**
+ * Repos with something to ship: uncommitted changes or unpushed commits. With
+ * includeCleanBranch, a clean pushed feature branch also qualifies so a scoped
+ * `ship <name>` can open or update its PR after an earlier push.
+ */
+export function shipRows(repos: readonly PlanRepo[], includeCleanBranch: boolean): ShipRow[] {
+  const rows: ShipRow[] = [];
+  for (const repo of repos) {
+    const uncommitted = (repo.dirty || 0) + (repo.untracked || 0);
+    const unpushed = (repo.ahead || 0) > 0 || Boolean(repo.has_remote && !repo.upstream && !repo.local_ok);
+    const branch = repo.branch || '-';
+    const cleanFeatureBranch =
+      includeCleanBranch && Boolean(repo.has_remote) && uncommitted === 0 && !unpushed && branch !== 'main' && branch !== 'master' && branch !== '-';
+    if (uncommitted === 0 && !unpushed && !cleanFeatureBranch) continue;
+    rows.push({ name: repo.name, path: repo.path, branch, uncommitted, ahead: repo.ahead || 0, hasRemote: Boolean(repo.has_remote) });
+  }
+  return rows;
+}

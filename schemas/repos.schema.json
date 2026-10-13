@@ -61,7 +61,7 @@
         "ci": { "type": "integer", "minimum": 0 },
         "branch_state": {
           "type": "string",
-          "description": "The branch-safety verdict from git_branch_state, or '-' when not applicable (no remote / not a git work tree).",
+          "description": "The branch-safety verdict from branchState (lib/git), or '-' when not applicable (no remote / not a git work tree).",
           "enum": ["trunk", "zombie", "pr", "current", "stale", "-"]
         },
         "icloud_dups": { "type": "integer", "minimum": 0 },

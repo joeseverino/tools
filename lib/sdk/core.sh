@@ -87,8 +87,7 @@ json_join() { local IFS=','; printf '%s' "$*"; }
 
 # Versioned result envelope for lightweight scripts and agent utilities.
 # data/warnings/receipt/next are pre-rendered JSON so callers never lose
-# structured values. The shape is pinned by schemas/result-v1.json;
-# lib/sdk/result.ts is the Node face of the same envelope — change together.
+# structured values. The shape is pinned by schemas/result-v1.json.
 result_ok() {
     local data="${1:-null}" warnings="${2:-[]}" receipt="${3:-null}" next="${4:-[]}"
     printf '{"ok":true,"result_version":1,"data":%s,"warnings":%s,"receipt":%s,"next":%s}\n' \
