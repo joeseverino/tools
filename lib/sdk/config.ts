@@ -25,25 +25,9 @@ export function configFile(name: string, home = toolsHome): string {
   return existsSync(local) ? local : `${local}.example`;
 }
 
-// The script is constant: the config file and the variable names arrive as
-// positional arguments, never as part of the command text.
-const SCRIPT = `set -eu
-source "$1"
-shift
-set +u
-for spec; do
-  kind=\${spec%%:*}
-  name=\${spec#*:}
-  if [ "$kind" = S ]; then
-    if [ -n "\${!name+x}" ]; then printf 'S\\0%s\\0%s\\0' "$name" "\${!name}"; fi
-  else
-    ref="\${name}[@]"
-    count=0
-    for item in "\${!ref}"; do count=$((count + 1)); done
-    printf 'A\\0%s\\0%s\\0' "$name" "$count"
-    for item in "\${!ref}"; do printf '%s\\0' "$item"; done
-  fi
-done`;
+// The reader is a checked-in script: the config file and the variable names arrive
+// as arguments and are never part of any command text.
+const READER = path.join(import.meta.dirname, 'read-config.sh');
 
 function specs(request: ShellConfigRequest): string[] {
   const names = [...(request.scalars ?? []), ...(request.arrays ?? [])];
@@ -72,7 +56,7 @@ export function parseConfigOutput(output: string): ShellConfig {
 
 /** Sources an explicit shell file and returns the requested variables. */
 export function loadShellFile(file: string, request: ShellConfigRequest, home = toolsHome): ShellConfig {
-  const result = spawnSync('bash', ['-c', SCRIPT, 'config', file, ...specs(request)], {
+  const result = spawnSync('bash', [READER, file, ...specs(request)], {
     encoding: 'utf8',
     stdio: ['inherit', 'pipe', 'inherit'],
     env: { ...process.env, TOOLS_HOME: home },
