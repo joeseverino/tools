@@ -133,7 +133,6 @@ _tools_suite_contract() {
         'create:Create or update a Project or Asset in HQ (idempotent upsert by slug)'
         'call:Call one HQ tool as the operator: the MCP tool contract, JSON arguments in, the tool'\''s JSON result out'
         'drift:List managed resources HQ reports out of sync or unhealthy; exit 1 when any are'
-        'ship:Commit + push a small HQ change. The push IS the deploy: it triggers the gated pipeline (build → scan → deploy on green)'
         'env-diff:Key-level drift between the 1Password '\''severino-hq env'\'' item (the source of truth) and the env rendered on prod. Key names only — values never print'
         'env-apply:Apply 1Password env changes to prod now: runs severino-hq-secrets.service (renders + restarts only if something changed; the hourly timer does this anyway)'
         'logs:Show HQ'\''s logs: the journal of severino-hq-web.service, where the container'\''s output goes (default last 50 lines)'
@@ -155,7 +154,6 @@ _tools_suite_contract() {
             create) _arguments '1:What to create:(project asset)' '2:Registry slug (the create_project / create_asset key):' ;;
             call) _arguments '1:HQ tool name (list them: hq call describe_capabilities):' '2:Tool arguments as one JSON object (default: {}):' ;;
             drift) _arguments '--json[Print the drifted resources as JSON]' ;;
-            ship) _arguments '{-m,--message}[Commit message for the HQ repo change (required)]:text:' ;;
             logs) _arguments '{-f,--follow}[Stream live output until Ctrl-C]' '--tail[Number of lines to show (default 50; ignored with --follow)]:n:' ;;
             export) _arguments '1:Year to export (default: current year):' '2:Output format (default: md):(md json)' ;;
           esac

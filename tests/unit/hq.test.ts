@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { DRIFT_REQUEST, callRequest, driftEntries, syncRequest } from '../../lib/hq/data.ts';
 import { failureMessage, jqLength, jqText, resultOk } from '../../lib/hq/env.ts';
-import { containerManage, envDrift, itemKeys, journal, renderedKeys, xargsStatus } from '../../lib/hq/host.ts';
+import { containerManage, envDrift, itemKeys, journal, renderedKeys } from '../../lib/hq/host.ts';
 import { tool } from '../../lib/hq/main.ts';
 import { createHelp, createRequest, doctorReport, stateRecord, syncSummary, validateReport } from '../../lib/hq/report.ts';
 import { compareRecord, manifestHash, readRecord } from '../../lib/hq/state.ts';
@@ -145,8 +145,4 @@ test('env drift compares key names only, sorted', () => {
   assert.deepEqual(renderedKeys(''), []);
   assert.deepEqual(envDrift(['AA', 'DD'], ['AA', 'CC']), ['item-only (not yet rendered): DD', 'rendered-only (gone from item): CC']);
   assert.deepEqual(envDrift(['AA'], ['AA']), []);
-});
-
-test('xargsStatus maps a failed compile like BSD xargs', () => {
-  assert.deepEqual([0, 1, 2, 126, 127].map(xargsStatus), [0, 1, 1, 126, 127]);
 });

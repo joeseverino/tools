@@ -362,7 +362,6 @@ Severino HQ glue. Reads YAML frontmatter from the vault and upserts the HQ docs 
 | `hq create <project|asset> <slug>` | `<project\|asset>`<br>`<slug>` | `remote_write + network` | Create or update a Project or Asset in HQ (idempotent upsert by slug) |
 | `hq call <tool> [arguments]` | `<tool>`<br>`[arguments]` | `remote_write + network` | Call one HQ tool as the operator: the MCP tool contract, JSON arguments in, the tool's JSON result out |
 | `hq drift` | `--json` | `read + network` | List managed resources HQ reports out of sync or unhealthy; exit 1 when any are |
-| `hq ship` | `-m, --message <TEXT>` | `deploy + network` | Commit + push a small HQ change. The push IS the deploy: it triggers the gated pipeline (build → scan → deploy on green) |
 | `hq env-diff` | — | `read + network` | Key-level drift between the 1Password 'severino-hq env' item (the source of truth) and the env rendered on prod. Key names only — values never print |
 | `hq env-apply` | — | `deploy + network` | Apply 1Password env changes to prod now: runs severino-hq-secrets.service (renders + restarts only if something changed; the hourly timer does this anyway) |
 | `hq logs` | `-f, --follow`<br>`--tail <N>` | `read + network` | Show HQ's logs: the journal of severino-hq-web.service, where the container's output goes (default last 50 lines) |

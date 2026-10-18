@@ -18,6 +18,9 @@
   `superuser` and `life-sync` run `manage.py` in the running container
   (`HQ_CONTAINER`, default `severino-hq`). `env-diff` reads the environment
   where the renderer writes it. `HQ_REMOTE_PATH` is no longer read.
+- Remove `hq ship`. It committed and pushed the HQ checkout's current branch
+  as a deploy, but HQ's `main` is protected and a merge is the deploy; change
+  HQ through a pull request instead.
 
 ## [1.5.0](https://github.com/joeseverino/tools/compare/v1.4.0...v1.5.0) (2026-08-11)
 

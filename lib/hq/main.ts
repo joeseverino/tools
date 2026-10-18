@@ -2,7 +2,7 @@ import type { CommandSpec, ToolSpec } from '../sdk/surface.ts';
 import type { Handler, ToolDefinition } from '../sdk/tool.ts';
 import { call, create, doctor, drift, exportSummary, manifest, schema, sync, validate } from './data.ts';
 import { loadHqEnv } from './env.ts';
-import { envApply, envDiff, lifeSync, logs, open, restart, shell, ship, superuser } from './host.ts';
+import { envApply, envDiff, lifeSync, logs, open, restart, shell, superuser } from './host.ts';
 
 const commands: CommandSpec[] = [
   { name: 'manifest', summary: 'Print the manifest JSON (frontmatter from every doc) to stdout — for inspection or piping elsewhere', effect: 'read' },
@@ -82,13 +82,6 @@ const commands: CommandSpec[] = [
       "HQ reconciles what it declares against what each provider reports. This reads that verdict from HQ's infrastructure.resources list (list_resource); it never reads a provider itself. A resource counts when it is enabled and has been observed, and drifts when its last applied generation lags its declaration or its health is anything but healthy.",
       'For the wider set of claims HQ derives from the same picture (a resource silently not read, a sweep that stopped, a background job that failed), with their remedies, run hq call get_findings.',
     ],
-  },
-  {
-    name: 'ship',
-    summary: 'Commit + push a small HQ change. The push IS the deploy: it triggers the gated pipeline (build → scan → deploy on green)',
-    effect: 'deploy',
-    network: true,
-    options: [{ flags: ['-m', '--message'], metavar: 'TEXT', help: 'Commit message for the HQ repo change (required)' }],
   },
   {
     name: 'env-diff',
@@ -184,7 +177,6 @@ export const tool: ToolDefinition = {
     create: configured(create),
     call: configured(call),
     drift: configured(drift),
-    ship: configured(ship),
     'env-diff': configured(envDiff),
     'env-apply': configured(envApply),
     logs: configured(logs),

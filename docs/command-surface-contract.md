@@ -129,7 +129,7 @@ contract, and it lives in the one intercept every tool already runs
 (`intercept` in `lib/sdk/tool.ts`): a new deploy command is gated the moment it
 declares its effect, with zero per-tool wiring. At a TTY it prompts `[y/N]`;
 non-interactive it **fails closed** unless `TOOLS_ASSUME_YES=1` is set (the
-bypass CI and intentional automation use), so a stray `hq ship` / `hq restart`
+bypass CI and intentional automation use), so a stray `hq restart` / `hq env-apply`
 can't fire by accident, by hand or by an agent. Covered by `tool.test.ts` and, for the shell bridge, `describe.bats`, against a
 throwaway tool with one deploy and one read command.
 

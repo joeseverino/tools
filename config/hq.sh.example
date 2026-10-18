@@ -12,8 +12,7 @@
 # Vault root we walk for frontmatter.
 : "${VAULT:=$NOTES_HOME}"
 
-# Local checkout of the HQ app. Used by `hq ship` to commit/push/deploy a
-# code correction from one command.
+# Local checkout of the HQ app. `hq schema` writes its docs_index/schema.json.
 : "${CODE_HOME:?set by lib/sdk/core.sh}"
 : "${HQ_LOCAL_PATH:=$CODE_HOME/Projects/severino-hq}"
 

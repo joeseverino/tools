@@ -1,13 +1,10 @@
-// hq commands that act on the HQ host over ssh or on the local HQ checkout.
+// hq commands that act on the HQ host over ssh.
 import { spawnSync } from 'node:child_process';
-import { statSync } from 'node:fs';
-import path from 'node:path';
 import { die, usageError } from '../sdk/cli.ts';
 import { isRecord, parseJson } from '../sdk/guards.ts';
 import { msg } from '../sdk/output.ts';
 import { run, runInherit } from '../sdk/process.ts';
 import type { Handler } from '../sdk/tool.ts';
-import { commit, git } from '../git/index.ts';
 import { jqLength, loadHqEnv, requireAdmin } from './env.ts';
 import { which } from '../sdk/which.ts';
 
@@ -135,86 +132,6 @@ export const envApply: Handler = (args, rt) => {
   msg('green', 'applied', 'prod env is current; container healthy');
   return 0;
 };
-
-const APP_DIRS = ['assets', 'content', 'core', 'docs', 'docs_index', 'expenses', 'projects', 'receipts', 'reports', 'static', 'templates'];
-
-/** Exit status BSD xargs reports for a `python3 -m py_compile` batch: 1 on any failure, 126/127 kept. */
-export function xargsStatus(status: number): number {
-  if (status === 0) return 0;
-  return status === 126 || status === 127 ? status : 1;
-}
-
-export const ship: Handler = (args, rt) => {
-  const env = loadHqEnv();
-  let message = '';
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index] ?? '';
-    if (arg === '-m' || arg === '--message') {
-      const next = args[index + 1];
-      if (next === undefined || next === '') die('error', '--message needs text');
-      message = next;
-      index += 1;
-    } else if (arg.startsWith('--message=')) message = arg.slice('--message='.length);
-    else return rt.dieUnknown('flag', arg, 'ship');
-  }
-
-  if (!message) die('usage', 'missing -m "commit message"');
-  if (!isDirectory(path.join(env.localPath, '.git'))) die('error', `HQ_LOCAL_PATH is not a git repo: ${env.localPath}`);
-
-  msg('dim', 'checking', `${env.localPath} (py_compile)`);
-  const files = git(env.localPath, ['ls-files', '*.py']).stdout.split('\n').filter(Boolean);
-  if (files.length > 0) {
-    const compiled = spawnSync('python3', ['-m', 'py_compile', ...files], { cwd: env.localPath, stdio: 'inherit' });
-    const status = xargsStatus(compiled.status ?? 127);
-    if (status !== 0) return status;
-  }
-
-  if (git(env.localPath, ['status', '--porcelain']).stdout.trim() === '') {
-    msg('green', 'clean', 'no local HQ changes to commit');
-    return 0;
-  }
-
-  msg('dim', 'staging', 'tracked changes + known HQ app files');
-  const rc = commitAndPush(env.localPath, message);
-  if (rc === 7) {
-    msg('yellow', 'skipped', 'no committable HQ changes staged');
-    return 0;
-  }
-  if (rc !== 0) die('error', `hq ship failed during commit/push (rc=${rc})`, 1);
-  msg('green', 'pushed', 'the pipeline will build -> scan -> deploy on green');
-  msg('dim', 'watch', 'gh run watch   (or the Actions tab)');
-
-  if (git(env.vault, ['status', '--porcelain']).stdout.trim() !== '') {
-    msg('yellow', 'vault', 'has uncommitted changes; run vault status/sync when ready');
-  }
-  return 0;
-};
-
-/** Tracked edits repo-wide plus new files under the known app dirs; push is the deploy. */
-function commitAndPush(cwd: string, message: string): number {
-  const add = spawnSync('git', ['add', '-u'], { cwd, stdio: 'inherit' }).status ?? 1;
-  if (add !== 0) return add;
-  const existing = APP_DIRS.filter((dir) => pathExists(path.join(cwd, dir)));
-  if (commit(cwd, message, existing) !== 0) return 7;
-  return spawnSync('git', ['push', '-q', '-u', 'origin', 'HEAD'], { cwd, stdio: 'inherit' }).status ?? 1;
-}
-
-function pathExists(file: string): boolean {
-  try {
-    statSync(file);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function isDirectory(dir: string): boolean {
-  try {
-    return statSync(dir).isDirectory();
-  } catch {
-    return false;
-  }
-}
 
 export const logs: Handler = (args, rt) => {
   const env = loadHqEnv();
