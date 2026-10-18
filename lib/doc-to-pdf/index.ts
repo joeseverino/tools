@@ -251,7 +251,6 @@ if (diagramDir) {
     encoding: 'utf8',
     env: {
       ...process.env,
-      TOOLS_HOME: toolsHome,
       DIAGRAM_BRAND_KIT: process.env['DIAGRAM_BRAND_KIT'] || brandKit,
       DIAGRAM_FONT: process.env['DIAGRAM_FONT'] || brandFont,
     },

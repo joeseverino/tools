@@ -9,7 +9,7 @@ each command carrying its blast radius so an agent can check it before acting.
 
 The toolchain stays thin by owning nothing another system already owns.
 Infrastructure facts belong to [Severino HQ](https://github.com/joeseverino/severino-hq),
-reached through `hq call` and `hq drift`. The site publishes from its own repo.
+reached through `hq call`. The site publishes from its own repo.
 Vault reads and writes go through the vault MCP. What is left here is the glue
 between them.
 
@@ -49,7 +49,7 @@ tools/
     dns-test      # Compare DNS resolver latency across paths.
     cbm           # Health and recovery for the codebase-memory-mcp daemon.
     # Integrations
-    hq            # Sync vault frontmatter to Severino HQ, plus routine HQ operational commands.
+    hq            # Sync vault frontmatter to Severino HQ, and call HQ as the operator.
     brand         # Render Joe's brand kits via the branding-engine.
     # Authoring
     remember      # Write a Claude memory file + MEMORY.md index entry in one shot.
@@ -81,8 +81,8 @@ tools/
 
 - **HQ.** `hq call <tool> [json]` reaches any HQ capability as the operator,
   over SSH with your own short-lived certificate, under the same approval rules
-  as HQ's MCP. `hq drift` reports what HQ reconciles that no longer matches its
-  declaration, and `tools doctor --live` gates on it.
+  as HQ's MCP. `hq call get_findings` is what HQ claims is wrong, drift
+  included, and `tools doctor --live` gates on it.
 - **The fleet.** [`config/capabilities.json`](config/capabilities.json) declares
   each sibling repository once: where it lives, how it installs, how it reports
   its fingerprint, and what it contributes (a describe surface, a `brief`
@@ -112,8 +112,7 @@ Layout rules:
 ```sh
 brew install zsh git rsync jq uv
 git clone https://github.com/joeseverino/tools ~/Code/Assets/tools
-export TOOLS_HOME=~/Code/Assets/tools        # in ~/.zshrc
-cd "$TOOLS_HOME" && npm ci
+cd ~/Code/Assets/tools && npm ci
 
 cp config/backup.sh.example config/backup.sh # then edit for your files
 cp config/hq.sh.example config/hq.sh         # then set the HQ host
@@ -132,8 +131,10 @@ export NOTES_HOME="$HOME/Documents/notes"     # the vault (a git repo)
 export BACKUPS_HOME="$HOME/Code/Assets/Backups"
 ```
 
-`CODE_HOME`, the root holding `Projects/` and `Assets/`, follows from
-`TOOLS_HOME` (two levels up) unless you set it. `config/vault.sh` derives the
+`TOOLS_HOME` is how programs outside this repo find tools; a tool itself always
+runs the checkout it was invoked from and exports that as `TOOLS_HOME` to its
+children. `CODE_HOME`, the root holding `Projects/` and `Assets/`, follows from
+the checkout (two levels up) unless you set it. `config/vault.sh` derives the
 vault paths from `NOTES_HOME`. Change a layout var and every tool follows; never
 edit the tracked configs for your own paths.
 
@@ -198,7 +199,7 @@ Umbrella command for the personal CLI toolchain.
 **Examples**
 
 ```sh
-tools describe hq restart  # one command's contract — effect, args, examples
+tools describe hq sync  # one command's contract: effect, args, examples
 tools tui  # interactive explorer over the whole toolchain (alias of describe --tui)
 ```
 
@@ -347,9 +348,9 @@ cbm prune --days 7  # delete index-worker logs older than a week
 
 #### `hq`
 
-Sync vault frontmatter to Severino HQ, plus routine HQ operational commands.
+Sync vault frontmatter to Severino HQ, and call HQ as the operator.
 
-Severino HQ glue. Reads YAML frontmatter from the vault and upserts the HQ docs index. Also wraps the routine ssh + docker compose calls for inspecting the HQ deployment. It does not deploy: landing on main is the deploy.
+Severino HQ glue. Reads YAML frontmatter from the vault and upserts the HQ docs index, and reaches HQ's tools as the operator through manage.py hq_call on the HQ host over ssh. It runs nothing on the host but HQ's own tools.
 
 | Invocation | Arguments / options | Effect | Summary |
 |---|---|---|---|
@@ -358,29 +359,8 @@ Severino HQ glue. Reads YAML frontmatter from the vault and upserts the HQ docs 
 | `hq doctor` | — | `read` | Report vault docs missing or with invalid frontmatter, and whether HQ's last-synced manifest is stale |
 | `hq schema` | `--check` | `local_write` | Regenerate HQ's docs_index/schema.json from the installed MCP (the canonical frontmatter contract) |
 | `hq validate` | — | `read + network` | Report HQ registry entries (Projects/Assets) that no vault doc references. Read-only |
-| `hq life-sync` | — | `remote_write + network` | Emit the Life vault projection on this Mac and install it on HQ (renewals, goals, tasks, claims, vehicles) |
 | `hq create <project|asset> <slug>` | `<project\|asset>`<br>`<slug>` | `remote_write + network` | Create or update a Project or Asset in HQ (idempotent upsert by slug) |
 | `hq call <tool> [arguments]` | `<tool>`<br>`[arguments]` | `remote_write + network` | Call one HQ tool as the operator: the MCP tool contract, JSON arguments in, the tool's JSON result out |
-| `hq drift` | `--json` | `read + network` | List managed resources HQ reports out of sync or unhealthy; exit 1 when any are |
-| `hq ship` | `-m, --message <TEXT>` | `deploy + network` | Commit + push a small HQ change. The push IS the deploy: it triggers the gated pipeline (build → scan → deploy on green) |
-| `hq env-diff` | — | `read + network` | Key-level drift between the 1Password 'severino-hq env' item (the source of truth) and the env rendered on prod. Key names only — values never print |
-| `hq env-apply` | — | `deploy + network` | Apply 1Password env changes to prod now: runs severino-hq-secrets.service (renders + restarts only if something changed; the hourly timer does this anyway) |
-| `hq logs` | `-f, --follow`<br>`--tail <N>` | `read + network` | Show app container logs (default tail 50) |
-| `hq restart` | — | `deploy + network` | `docker compose restart app` — no rebuild, no migrations. For stuck state (env changes need env-push: restart does not re-read .env) |
-| `hq open` | — | `read` | Open $HQ_URL in the browser |
-| `hq shell` | — | `remote_write + network + interactive` | ssh -t into the HQ Django shell (poke the ORM) |
-| `hq superuser` | — | `remote_write + network + interactive` | ssh -t into HQ and run createsuperuser interactively |
-| `hq export [year] [md|json]` | `[year]`<br>`[md\|json]` | `local_write + network` | Download the year summary to ./ and print the path |
-
-**`hq life-sync` details**
-
-The Mac is the only machine that can read the vault, so the snapshot originates here. HQ reconciles by doc_id and prunes anything the document omits — so an empty or malformed snapshot is refused locally rather than sent, because sending it would delete the records it failed to mention.
-
-**Examples**
-
-```sh
-hq life-sync  # refresh HQ's Life records from the vault
-```
 
 **`hq create` details**
 
@@ -398,12 +378,10 @@ The same surface agents reach over MCP, reached over the host shell with the ope
 **Examples**
 
 ```sh
-hq call list_managed_resources '{"limit":20}'  # what HQ manages
+hq call describe_resources  # what HQ can list, and each list's filters
+hq call list_resource '{"name":"infrastructure.resources","filters":{"limit":20}}'  # what HQ manages
+hq call get_findings  # what HQ claims is wrong, with remedies
 ```
-
-**`hq drift` details**
-
-HQ reconciles what it declares against what each provider reports. This reads that verdict; it never reads a provider itself.
 
 **Examples**
 
@@ -411,7 +389,7 @@ HQ reconciles what it declares against what each provider reports. This reads th
 hq sync  # most common — push vault → HQ
 hq manifest | jq '.[] | .doc_id'
 hq doctor  # find docs missing frontmatter
-hq export 2026  # download year-summary-2026.md
+hq call get_findings  # what HQ claims is wrong, with remedies
 ```
 
 #### `brand`

@@ -83,7 +83,9 @@ function isAggregate(value: unknown): value is Aggregate {
 function loadTools(): Tool[] {
   if (!validTargets.has(requested)) throw new CliError(`unknown generation target: ${requested}`, 2);
 
-  const described = runJson(path.join(root, 'bin/tools'), ['describe'], { env: { TOOLS_HOME: root } }, isAggregate);
+  // TOOLS_BIN stands in for the umbrella binary so tests can feed a broken aggregate.
+  const bin = process.env['TOOLS_BIN'] || path.join(root, 'bin/tools');
+  const described = runJson(bin, ['describe'], {}, isAggregate);
   if (described.code !== 0) throw new CliError(described.error);
   const aggregate = described.json;
   if (!aggregate?.ok) throw new CliError('tools describe did not return a valid aggregate');

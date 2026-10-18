@@ -7,6 +7,7 @@ import { ciPath, pathWithout } from '../../lib/sdk/ci.ts';
 import { resultError, resultOk } from '../../lib/sdk/result.ts';
 import { CheckReport, tail } from '../../lib/sdk/report.ts';
 import { sourceSignature } from '../../lib/tools/federate.ts';
+import { findingsVerdict } from '../../lib/tools/health.ts';
 import { launcher, scaffold, toolSource } from '../../lib/tools/scaffold.ts';
 import { which } from '../../lib/sdk/which.ts';
 import { spec as toolsSpec, tool as toolsTool } from '../../lib/tools/main.ts';
@@ -116,4 +117,13 @@ test('the source signature changes when a tool or library file changes', () => {
 test('the tools spec and its handlers cover the same commands', () => {
   assert.deepEqual(definitionDrift(toolsTool), []);
   assert.equal(toolsSpec.commands?.length, 11);
+});
+
+test('the live gate passes only when HQ counts no findings', () => {
+  assert.deepEqual(findingsVerdict({ ok: true, summary: { findings: 0, severities: {} }, findings: [] }), { ok: true, detail: 'HQ claims nothing is wrong' });
+  const raised = findingsVerdict({ ok: true, summary: { findings: 3, severities: { critical: 1, warning: 2 } } });
+  assert.equal(raised.ok, false);
+  assert.match(raised.detail, /^3 finding\(s\) \(1 critical, 2 warning\)/);
+  assert.equal(findingsVerdict({ ok: false, error: 'no tool' }).ok, false);
+  assert.equal(findingsVerdict(null).ok, false);
 });

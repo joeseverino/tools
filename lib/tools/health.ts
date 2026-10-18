@@ -2,10 +2,10 @@
 import { spawn } from 'node:child_process';
 import { existsSync, lstatSync, readlinkSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { isRecord } from '../sdk/guards.ts';
 import { blank, palette } from '../sdk/output.ts';
-import { toolsHome } from '../sdk/paths.ts';
-import { run } from '../sdk/process.ts';
-import { toolsHomeExported } from '../sdk/tool.ts';
+import { exportedToolsHome, toolsHome } from '../sdk/paths.ts';
+import { run, runJson } from '../sdk/process.ts';
 import { fingerprintVerdicts } from './capabilities.ts';
 import { summarize } from './contract-summary.ts';
 import { CheckReport } from '../sdk/report.ts';
@@ -48,6 +48,23 @@ function contractVerdict(scope: string, home: string): { ok: boolean; detail: st
   }
 }
 
+/** HQ's own verdict from get_findings: clean when its summary counts none. */
+export function findingsVerdict(result: unknown): { ok: boolean; detail: string } {
+  const summary = isRecord(result) ? result['summary'] : undefined;
+  const count = isRecord(summary) ? summary['findings'] : undefined;
+  if (typeof count !== 'number') return { ok: false, detail: 'HQ answered get_findings without a summary' };
+  if (count === 0) return { ok: true, detail: 'HQ claims nothing is wrong' };
+  const severities = isRecord(summary) && isRecord(summary['severities']) ? summary['severities'] : {};
+  const bySeverity = Object.entries(severities).map(([severity, n]) => `${String(n)} ${severity}`).join(', ');
+  return { ok: false, detail: `${count} finding(s)${bySeverity ? ` (${bySeverity})` : ''}; read them: hq call get_findings` };
+}
+
+function hqFindings(home: string): { ok: boolean; detail: string } {
+  const result = runJson(path.join(home, 'bin/hq'), ['call', 'get_findings']);
+  if (!result.ok) return { ok: false, detail: result.error || 'HQ did not answer get_findings' };
+  return findingsVerdict(result.json);
+}
+
 export async function runDoctor(options: DoctorOptions, home = toolsHome): Promise<number> {
   const doctor = new CheckReport(options.json);
   const dir = installDir();
@@ -58,7 +75,7 @@ export async function runDoctor(options: DoctorOptions, home = toolsHome): Promi
   if (!options.json) blank();
 
   const env: [string, string | undefined][] = [
-    ['TOOLS_HOME', toolsHomeExported ? process.env['TOOLS_HOME'] : undefined],
+    ['TOOLS_HOME', exportedToolsHome],
     ['NOTES_HOME', process.env['NOTES_HOME']],
     ['BACKUPS_HOME', process.env['BACKUPS_HOME']],
   ];
@@ -127,8 +144,10 @@ export async function runDoctor(options: DoctorOptions, home = toolsHome): Promi
       process.stdout.write(`  ${p.BOLD}systems${p.RESET}\n`);
     }
     record(doctor.gate('hq doctor', [path.join(home, 'bin/hq'), 'doctor']));
-    if (options.live) record(doctor.gate('hq drift', [path.join(home, 'bin/hq'), 'drift']));
-    else doctor.warn('hq drift', 'skipped — asks HQ over SSH; rerun with --live');
+    if (options.live) {
+      const findings = hqFindings(home);
+      record(doctor.check('hq findings', findings.ok, findings.detail));
+    } else doctor.warn('hq findings', 'skipped: it asks HQ over SSH; rerun with --live');
   }
 
   return doctor.finish(failed);

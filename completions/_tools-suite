@@ -29,10 +29,10 @@ _tools_suite_contract() {
         args)
           case "${words[2]}" in
             status) _arguments '--json[Machine-readable output (one JSON object)]' ;;
-            doctor) _arguments '--all[Cross-system rollup: also run hq doctor (exit 1 if any gate fails)]' '--live[Implies --all; also ask HQ for managed resources that have drifted from what it declares (hq drift, over SSH)]' '--json[Machine-readable output (one object, "checks" array)]' ;;
+            doctor) _arguments '--all[Cross-system rollup: also run hq doctor (exit 1 if any gate fails)]' '--live[Implies --all; also ask HQ what it claims is wrong (hq call get_findings, over SSH); exit 1 on any finding]' '--json[Machine-readable output (one object, "checks" array)]' ;;
             check) _arguments '--no-bench[Skip the bench scripts (the slowest step)]' '--ci[Run hermetically, as CI does: this checkout'\''s bin first with the install dir off $PATH (no stale shadow), an empty global/system git config (no leaked defaultBranch, aliases, or hooks), and the bats version surfaced. ship --check uses this mode; set TOOLS_CI_BATS_VERSION to fail on a bats version other than CI'\''s.]' ;;
             new) _arguments '1:Name of the new tool (creates bin/<name>):' '--agent[Scaffold a lightweight agent-facing tool that emits the versioned result envelope]' '--verify[Generate derived surfaces and run the full non-benchmark check after scaffolding]' ;;
-            describe) _arguments '1:Describe just one tool (delegates to <tool> --describe):' '2:With a tool, project its contract to one command — the token-minimal AI path (tools describe hq restart):' '--pretty[Indent the JSON for reading (default: compact, diff-stable)]' '--repos[Also fold in sibling repos'\'' emitters (severino-vault-mcp, life)]' '--tui[Browse the whole toolchain in a full-screen explorer (aggregate only; / filters, Enter copies an invocation). Shorthand: '\''tools tui'\'']' ;;
+            describe) _arguments '1:Describe just one tool (delegates to <tool> --describe):' '2:With a tool, project its contract to one command, the token-minimal AI path (tools describe hq sync):' '--pretty[Indent the JSON for reading (default: compact, diff-stable)]' '--repos[Also fold in sibling repos'\'' emitters (severino-vault-mcp, life)]' '--tui[Browse the whole toolchain in a full-screen explorer (aggregate only; / filters, Enter copies an invocation). Shorthand: '\''tools tui'\'']' ;;
             tui) _arguments '--repos[Also fold in sibling repos'\'' emitters (severino-vault-mcp, life)]' ;;
             generate) _arguments '1:Generated surface (default: all):(all completions readme)' '--check[Fail when generated files are stale; do not write]' ;;
             contracts) _arguments '1:Contract or projection id to inspect (default: complete graph):' '--check[Run every declared projection check and fail when any derived artifact is stale]' '--json[Emit the graph, source fingerprints, and projection status as JSON]' '--scope[Maximum projection scope to inspect (default: fleet)]:scope:(local fleet live)' ;;
@@ -129,19 +129,8 @@ _tools_suite_contract() {
         'doctor:Report vault docs missing or with invalid frontmatter, and whether HQ'\''s last-synced manifest is stale'
         'schema:Regenerate HQ'\''s docs_index/schema.json from the installed MCP (the canonical frontmatter contract)'
         'validate:Report HQ registry entries (Projects/Assets) that no vault doc references. Read-only'
-        'life-sync:Emit the Life vault projection on this Mac and install it on HQ (renewals, goals, tasks, claims, vehicles)'
         'create:Create or update a Project or Asset in HQ (idempotent upsert by slug)'
         'call:Call one HQ tool as the operator: the MCP tool contract, JSON arguments in, the tool'\''s JSON result out'
-        'drift:List managed resources HQ reports out of sync or unhealthy; exit 1 when any are'
-        'ship:Commit + push a small HQ change. The push IS the deploy: it triggers the gated pipeline (build → scan → deploy on green)'
-        'env-diff:Key-level drift between the 1Password '\''severino-hq env'\'' item (the source of truth) and the env rendered on prod. Key names only — values never print'
-        'env-apply:Apply 1Password env changes to prod now: runs severino-hq-secrets.service (renders + restarts only if something changed; the hourly timer does this anyway)'
-        'logs:Show app container logs (default tail 50)'
-        'restart:`docker compose restart app` — no rebuild, no migrations. For stuck state (env changes need env-push: restart does not re-read .env)'
-        'open:Open $HQ_URL in the browser'
-        'shell:ssh -t into the HQ Django shell (poke the ORM)'
-        'superuser:ssh -t into HQ and run createsuperuser interactively'
-        'export:Download the year summary to ./ and print the path'
       )
       _arguments -C \
         '(-h --help)'{-h,--help}'[show help]' \
@@ -154,10 +143,6 @@ _tools_suite_contract() {
             schema) _arguments '--check[Verify the HQ schema.json and the vault schema doc match the MCP; exit 1 on drift without writing (CI / pre-deploy gate)]' ;;
             create) _arguments '1:What to create:(project asset)' '2:Registry slug (the create_project / create_asset key):' ;;
             call) _arguments '1:HQ tool name (list them: hq call describe_capabilities):' '2:Tool arguments as one JSON object (default: {}):' ;;
-            drift) _arguments '--json[Print the drifted resources as JSON]' ;;
-            ship) _arguments '{-m,--message}[Commit message for the HQ repo change (required)]:text:' ;;
-            logs) _arguments '{-f,--follow}[Stream live output until Ctrl-C]' '--tail[Number of lines to show (default 50; ignored with --follow)]:n:' ;;
-            export) _arguments '1:Year to export (default: current year):' '2:Output format (default: md):(md json)' ;;
           esac
           ;;
       esac

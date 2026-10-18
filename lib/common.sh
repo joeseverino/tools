@@ -4,10 +4,8 @@
 # file unchanged; new external consumers may source only lib/sdk/core.sh,
 # lib/sdk/svmc.sh, or lib/sdk.sh.
 
-: "${TOOLS_HOME:?common.sh needs TOOLS_HOME}"
-
 # shellcheck source=lib/sdk/core.sh
-source "$TOOLS_HOME/lib/sdk/core.sh"
+source "$(dirname -- "${BASH_SOURCE[0]:-$0}")/sdk/core.sh"
 # shellcheck source=lib/sdk/svmc.sh
 source "$TOOLS_HOME/lib/sdk/svmc.sh"
 # shellcheck source=lib/sdk/ci.sh

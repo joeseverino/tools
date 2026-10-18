@@ -15,10 +15,8 @@
 # floor is ~1.5x). Tweak the INDEX_SIZES list to explore.
 set -euo pipefail
 
-HERE="$(cd "$(dirname "$0")" && pwd)"
-export TOOLS_HOME="${TOOLS_HOME:-$(cd "$HERE/.." && pwd)}"
 # shellcheck source=lib/init.sh
-source "$TOOLS_HOME/lib/init.sh" ""
+source "$(dirname "$0")/../lib/init.sh" ""
 
 REMEMBER="$TOOLS_HOME/bin/remember"
 INDEX_SIZES=(10 30 100 300)
