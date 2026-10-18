@@ -99,15 +99,19 @@ export const call: Handler = (args, rt) => {
   return result.status;
 };
 
+// Everything HQ manages, each with what HQ expects and what is live. No bound in
+// the query schema, so one page holds the whole estate.
+export const DRIFT_REQUEST = { tool: 'list_resource', arguments: { name: 'infrastructure.resources', filters: { limit: 10000 } } };
+
 export const drift: Handler = (args, rt) => {
   const flag = args[0] ?? '';
   if (flag !== '' && flag !== '--json') return rt.dieUnknown('flag', flag, 'drift');
   loadHqEnv();
-  const response = callTransport({ tool: 'list_managed_resources', arguments: { limit: 1000 } });
-  if (response.status !== 0) die('error', 'HQ did not answer list_managed_resources');
+  const response = callTransport(DRIFT_REQUEST);
+  if (response.status !== 0) die('error', 'HQ did not answer list_resource infrastructure.resources');
   const result = parseJson(response.stdout);
   const items = isRecord(result) ? result['items'] : undefined;
-  if (!Array.isArray(items)) return die('error', "HQ's list_managed_resources answer has no items");
+  if (!Array.isArray(items)) return die('error', "HQ's infrastructure.resources answer has no items");
   const { drifted, checked } = driftEntries(items);
   if (flag === '--json') process.stdout.write(`${JSON.stringify(drifted)}\n`);
   else if (drifted.length === 0) msg('green', 'drift', `every resource HQ reconciles is in sync (${checked} checked)`);

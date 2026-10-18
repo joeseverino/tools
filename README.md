@@ -349,7 +349,7 @@ cbm prune --days 7  # delete index-worker logs older than a week
 
 Sync vault frontmatter to Severino HQ, plus routine HQ operational commands.
 
-Severino HQ glue. Reads YAML frontmatter from the vault and upserts the HQ docs index. Also wraps the routine ssh + docker compose calls for inspecting the HQ deployment. It does not deploy: landing on main is the deploy.
+Severino HQ glue. Reads YAML frontmatter from the vault and upserts the HQ docs index. Also wraps the routine operator calls on the HQ host over ssh: HQ's tools through manage.py hq_call, its systemd units, their journal, and manage.py in the running container. It does not deploy: landing on main is the deploy.
 
 | Invocation | Arguments / options | Effect | Summary |
 |---|---|---|---|
@@ -365,11 +365,11 @@ Severino HQ glue. Reads YAML frontmatter from the vault and upserts the HQ docs 
 | `hq ship` | `-m, --message <TEXT>` | `deploy + network` | Commit + push a small HQ change. The push IS the deploy: it triggers the gated pipeline (build → scan → deploy on green) |
 | `hq env-diff` | — | `read + network` | Key-level drift between the 1Password 'severino-hq env' item (the source of truth) and the env rendered on prod. Key names only — values never print |
 | `hq env-apply` | — | `deploy + network` | Apply 1Password env changes to prod now: runs severino-hq-secrets.service (renders + restarts only if something changed; the hourly timer does this anyway) |
-| `hq logs` | `-f, --follow`<br>`--tail <N>` | `read + network` | Show app container logs (default tail 50) |
-| `hq restart` | — | `deploy + network` | `docker compose restart app` — no rebuild, no migrations. For stuck state (env changes need env-push: restart does not re-read .env) |
+| `hq logs` | `-f, --follow`<br>`--tail <N>` | `read + network` | Show HQ's logs: the journal of severino-hq-web.service, where the container's output goes (default last 50 lines) |
+| `hq restart` | — | `deploy + network` | Restart severino-hq-web.service on the release it runs; returns once HQ is healthy. No new image (landing on main is the deploy) |
 | `hq open` | — | `read` | Open $HQ_URL in the browser |
-| `hq shell` | — | `remote_write + network + interactive` | ssh -t into the HQ Django shell (poke the ORM) |
-| `hq superuser` | — | `remote_write + network + interactive` | ssh -t into HQ and run createsuperuser interactively |
+| `hq shell` | — | `remote_write + network + interactive` | Open the Django shell in the running HQ container (docker exec on HQ_SSH_HOST) |
+| `hq superuser` | — | `remote_write + network + interactive` | Run createsuperuser interactively in the running HQ container, as the install guide does |
 | `hq export [year] [md|json]` | `[year]`<br>`[md\|json]` | `local_write + network` | Download the year summary to ./ and print the path |
 
 **`hq life-sync` details**
@@ -398,12 +398,20 @@ The same surface agents reach over MCP, reached over the host shell with the ope
 **Examples**
 
 ```sh
-hq call list_managed_resources '{"limit":20}'  # what HQ manages
+hq call describe_resources  # what HQ can list, and each list's filters
+hq call list_resource '{"name":"infrastructure.resources","filters":{"limit":20}}'  # what HQ manages
+hq call get_findings  # what HQ claims is wrong, with remedies
 ```
 
 **`hq drift` details**
 
-HQ reconciles what it declares against what each provider reports. This reads that verdict; it never reads a provider itself.
+HQ reconciles what it declares against what each provider reports. This reads that verdict from HQ's infrastructure.resources list (list_resource); it never reads a provider itself. A resource counts when it is enabled and has been observed, and drifts when its last applied generation lags its declaration or its health is anything but healthy.
+
+For the wider set of claims HQ derives from the same picture (a resource silently not read, a sweep that stopped, a background job that failed), with their remedies, run hq call get_findings.
+
+**`hq restart` details**
+
+systemd is the only thing that starts the web container, and the unit is ready only once HQ answers its health check, so a restart that returns has a healthy HQ behind it. Each start is a fresh container on the same image, reading the environment as last rendered; to render 1Password changes first, run hq env-apply.
 
 **Examples**
 

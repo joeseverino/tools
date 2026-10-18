@@ -1,6 +1,6 @@
 // hq's configuration (config/hq.sh, overridable per variable from the
 // environment) and the small jq-compatible value helpers its reports share.
-import { die } from '../sdk/cli.ts';
+import { die, usageError } from '../sdk/cli.ts';
 import { loadShellConfig } from '../sdk/config.ts';
 import { isRecord } from '../sdk/guards.ts';
 import { codeHome } from '../sdk/paths.ts';
@@ -10,11 +10,16 @@ export interface HqEnv {
   localPath: string;
   schemaDoc: string;
   sshHost: string;
-  remotePath: string;
+  container: string;
   url: string;
   envItem: string;
   envVault: string;
 }
+
+// HQ's own name for its web container (controller/host/layout.go).
+const DEFAULT_CONTAINER = 'severino-hq';
+// It becomes part of a remote command line, so it is a plain name or nothing.
+const CONTAINER_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
 
 let cached: HqEnv | undefined;
 
@@ -26,15 +31,18 @@ export function loadHqEnv(): HqEnv {
 function readHqEnv(): HqEnv {
   process.env['CODE_HOME'] ??= codeHome;
   const { scalars } = loadShellConfig('hq', {
-    scalars: ['VAULT', 'HQ_LOCAL_PATH', 'HQ_SCHEMA_DOC', 'HQ_SSH_HOST', 'HQ_REMOTE_PATH', 'HQ_URL', 'HQ_ENV_ITEM', 'HQ_ENV_VAULT'],
+    scalars: ['VAULT', 'HQ_LOCAL_PATH', 'HQ_SCHEMA_DOC', 'HQ_SSH_HOST', 'HQ_CONTAINER', 'HQ_URL', 'HQ_ENV_ITEM', 'HQ_ENV_VAULT'],
   });
   const get = (name: string): string => scalars[name] ?? '';
+  const container = get('HQ_CONTAINER') || DEFAULT_CONTAINER;
+  // lib/hq-call reads it from the environment: one value for every crossing.
+  process.env['HQ_CONTAINER'] = container;
   return {
     vault: get('VAULT'),
     localPath: get('HQ_LOCAL_PATH'),
     schemaDoc: get('HQ_SCHEMA_DOC'),
     sshHost: get('HQ_SSH_HOST'),
-    remotePath: get('HQ_REMOTE_PATH'),
+    container,
     url: get('HQ_URL'),
     envItem: get('HQ_ENV_ITEM'),
     envVault: get('HQ_ENV_VAULT'),
@@ -43,7 +51,7 @@ function readHqEnv(): HqEnv {
 
 export function requireAdmin(env: HqEnv): void {
   if (!env.sshHost) die('error', 'HQ_SSH_HOST is required for host administration');
-  if (!env.remotePath) die('error', 'HQ_REMOTE_PATH is required for host administration');
+  if (!CONTAINER_NAME.test(env.container)) usageError(`HQ_CONTAINER is not a container name: ${env.container}`);
 }
 
 /** A value as `jq -r` prints it: strings raw, everything else as compact JSON. */

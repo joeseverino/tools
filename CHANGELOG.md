@@ -11,6 +11,13 @@
 - Bind `site manage` saves to the dashboard source fingerprint and route its MCP
   calls through the shared Node adapter, preventing stale-session overwrites
   when paired with severino-vault-mcp's stale-plan guard.
+- `hq` follows how Severino HQ runs now: `drift` reads the
+  `infrastructure.resources` list through `list_resource` (the retired
+  `list_managed_resources` tool is gone); `logs` reads the
+  `severino-hq-web.service` journal, `restart` restarts that unit, and `shell`,
+  `superuser` and `life-sync` run `manage.py` in the running container
+  (`HQ_CONTAINER`, default `severino-hq`). `env-diff` reads the environment
+  where the renderer writes it. `HQ_REMOTE_PATH` is no longer read.
 
 ## [1.5.0](https://github.com/joeseverino/tools/compare/v1.4.0...v1.5.0) (2026-08-11)
 

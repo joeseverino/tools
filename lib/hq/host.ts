@@ -2,7 +2,7 @@
 import { spawnSync } from 'node:child_process';
 import { statSync } from 'node:fs';
 import path from 'node:path';
-import { die } from '../sdk/cli.ts';
+import { die, usageError } from '../sdk/cli.ts';
 import { isRecord, parseJson } from '../sdk/guards.ts';
 import { msg } from '../sdk/output.ts';
 import { run, runInherit } from '../sdk/process.ts';
@@ -18,8 +18,20 @@ function lastLine(text: string): string {
   return lines[lines.length - 1] ?? '';
 }
 
-export function remoteCompose(remotePath: string, tail: string): string {
-  return `cd '${remotePath}' && sudo docker compose ${tail}`;
+// HQ's host layout (controller/host/layout.go): systemd runs the web container
+// under one unit, and the renderer writes its environment to a root-only tmpfs.
+export const WEB_UNIT = 'severino-hq-web.service';
+export const SECRETS_UNIT = 'severino-hq-secrets.service';
+export const RENDERED_ENV = '/run/severino-hq-secrets/web/severino_hq_env';
+
+/** A manage.py command in the running web container, as HQ's install guide runs one. */
+export function containerManage(container: string, command: string, mode: 'stdin' | 'tty'): string {
+  return `sudo docker exec ${mode === 'tty' ? '-it' : '-i'} ${container} python manage.py ${command}`;
+}
+
+/** The web unit's journal, where the container's output goes. */
+export function journal(lines: string, follow: boolean): string {
+  return `sudo journalctl -u ${WEB_UNIT} --no-pager ${follow ? '-f' : `-n ${lines}`}`;
 }
 
 export const lifeSync: Handler = () => {
@@ -42,9 +54,8 @@ export const lifeSync: Handler = () => {
 
   msg('dim', 'sending', Object.entries(data).map(([key, value]) => `${jqLength(value)} ${key}`).join(' · '));
 
-  // -T because stdin is a pipe: without it `docker compose exec` allocates a TTY
-  // and the document never reaches the command.
-  const sent = spawnSync('ssh', [env.sshHost, remoteCompose(env.remotePath, 'exec -T app python manage.py ingest_life_snapshot')], {
+  // -i without -t: stdin is the document, and a TTY would swallow it.
+  const sent = spawnSync('ssh', [env.sshHost, containerManage(env.container, 'ingest_life_snapshot', 'stdin')], {
     input: snapshot,
     stdio: ['pipe', 'inherit', 'inherit'],
   });
@@ -86,7 +97,7 @@ export const envDiff: Handler = (args, rt) => {
   requireAdmin(env);
   if (args[0] !== undefined && args[0] !== '') return rt.dieUnknown('flag', args[0], 'env-diff');
   if (!which('op')) die('error', '1Password CLI (op) is required for env-diff');
-  const renderedPath = `${env.remotePath}/secrets/severino_hq_env`;
+  const renderedPath = RENDERED_ENV;
 
   const item = run('op', ['item', 'get', env.envItem, '--vault', env.envVault, '--format', 'json']);
   if (!item.ok) die('error', `cannot read "${env.envItem}" from 1Password: ${lastLine(`${item.stdout}${item.stderr}`)}`);
@@ -112,10 +123,10 @@ export const envApply: Handler = (args, rt) => {
   const env = loadHqEnv();
   requireAdmin(env);
   if (args[0] !== undefined && args[0] !== '' && args[0] !== '--yes') return rt.dieUnknown('flag', args[0], 'env-apply');
-  msg('dim', 'applying', `severino-hq-secrets.service on ${env.sshHost}`);
-  const applied = runInherit('ssh', [env.sshHost, 'sudo systemctl start severino-hq-secrets.service && sudo systemctl status severino-hq-secrets.service --no-pager | tail -3']);
+  msg('dim', 'applying', `${SECRETS_UNIT} on ${env.sshHost}`);
+  const applied = runInherit('ssh', [env.sshHost, `sudo systemctl start ${SECRETS_UNIT} && sudo systemctl status ${SECRETS_UNIT} --no-pager | tail -3`]);
   if (applied !== 0) return applied;
-  const inspected = spawnSync('ssh', [env.sshHost, "sudo docker inspect --format '{{.State.Health.Status}}' severino-hq"], {
+  const inspected = spawnSync('ssh', [env.sshHost, `sudo docker inspect --format '{{.State.Health.Status}}' ${env.container}`], {
     encoding: 'utf8',
     stdio: ['inherit', 'pipe', 'ignore'],
   });
@@ -221,17 +232,20 @@ export const logs: Handler = (args, rt) => {
     } else if (arg.startsWith('--tail=')) tail = arg.slice('--tail='.length);
     else return rt.dieUnknown('flag', arg, 'logs');
   }
-  if (follow) return runInherit('ssh', ['-t', env.sshHost, remoteCompose(env.remotePath, 'logs app -f')]);
-  return runInherit('ssh', [env.sshHost, remoteCompose(env.remotePath, `logs app --tail ${tail}`)]);
+  if (!/^[0-9]+$/.test(tail)) return usageError(`--tail needs a number, got ${tail}`);
+  if (follow) return runInherit('ssh', ['-t', env.sshHost, journal(tail, true)]);
+  return runInherit('ssh', [env.sshHost, journal(tail, false)]);
 };
 
 export const restart: Handler = () => {
   const env = loadHqEnv();
   requireAdmin(env);
-  msg('dim', 'restarting', 'severino-hq');
-  const status = runInherit('ssh', [env.sshHost, remoteCompose(env.remotePath, 'restart app')]);
-  if (status !== 0) return status;
-  msg('green', 'restarted', 'severino-hq');
+  msg('dim', 'restarting', `${WEB_UNIT} on ${env.sshHost}`);
+  // The unit is Type=notify and ready only once HQ answers its health check,
+  // so this returns with a healthy HQ or fails.
+  const status = runInherit('ssh', [env.sshHost, `sudo systemctl restart ${WEB_UNIT}`]);
+  if (status !== 0) die('error', `${WEB_UNIT} did not come back healthy — check \`hq logs\``, status);
+  msg('green', 'restarted', 'severino-hq is healthy');
   return 0;
 };
 
@@ -245,11 +259,11 @@ export const open: Handler = () => {
 export const shell: Handler = () => {
   const env = loadHqEnv();
   requireAdmin(env);
-  return runInherit('ssh', ['-t', env.sshHost, remoteCompose(env.remotePath, 'exec app python manage.py shell')]);
+  return runInherit('ssh', ['-t', env.sshHost, containerManage(env.container, 'shell', 'tty')]);
 };
 
 export const superuser: Handler = () => {
   const env = loadHqEnv();
   requireAdmin(env);
-  return runInherit('ssh', ['-t', env.sshHost, remoteCompose(env.remotePath, 'exec app python manage.py createsuperuser')]);
+  return runInherit('ssh', ['-t', env.sshHost, containerManage(env.container, 'createsuperuser', 'tty')]);
 };

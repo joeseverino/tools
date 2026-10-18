@@ -73,10 +73,10 @@ JSON
 @test "hq call: sends the MCP tool contract and prints the tool's result" {
     printf '{"ok":true}\n' > "$BATS_TEST_TMPDIR/answer.json"
     fake_call "$BATS_TEST_TMPDIR/answer.json"
-    run hq_bin call list_managed_resources '{"limit":2}'
+    run hq_bin call list_resource '{"name":"infrastructure.resources","filters":{"limit":2}}'
     [ "$status" -eq 0 ]
     [ "$output" = '{"ok":true}' ]
-    [ "$(cat "$HQ_REQUEST")" = '{"tool":"list_managed_resources","arguments":{"limit":2}}' ]
+    [ "$(cat "$HQ_REQUEST")" = '{"tool":"list_resource","arguments":{"name":"infrastructure.resources","filters":{"limit":2}}}' ]
 }
 
 @test "hq call: no arguments sends an empty arguments object" {
@@ -102,6 +102,7 @@ JSON
     fake_call "$BATS_TEST_TMPDIR/resources.json"
     run hq_bin drift --json
     [ "$status" -eq 1 ]
+    [ "$(cat "$HQ_REQUEST")" = '{"tool":"list_resource","arguments":{"name":"infrastructure.resources","filters":{"limit":10000}}}' ]
     OUTPUT="$output" python3 - <<'PY'
 import json, os
 d = json.loads(os.environ["OUTPUT"])
@@ -116,4 +117,12 @@ PY
     run hq_bin drift
     [ "$status" -eq 0 ]
     [[ "$output" == *"in sync (2 checked)"* ]]
+}
+
+@test "hq drift: an answer without items is an error, not a clean bill" {
+    printf '{"ok":false,"error":"There is no tool named list_managed_resources."}\n' > "$BATS_TEST_TMPDIR/answer.json"
+    fake_call "$BATS_TEST_TMPDIR/answer.json"
+    run hq_bin drift
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"has no items"* ]]
 }

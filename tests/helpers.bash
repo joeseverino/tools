@@ -21,7 +21,7 @@ source "$TOOLS_HOME/lib/common.sh"
 # paths' config-source gate slipped through once. Tests that need a real value
 # set their own (setup_memory, the hq fixtures) after this.
 unset NOTES_HOME VAULT INBOX_DIR BACKUPS_HOME CODE_HOME HQ_SSH_HOST \
-      HQ_REMOTE_PATH HQ_URL HQ_VAULT_DIRS HQ_LOCAL_PATH HQ_SCHEMA_DOC \
+      HQ_CONTAINER HQ_URL HQ_VAULT_DIRS HQ_LOCAL_PATH HQ_SCHEMA_DOC \
       HQ_CALL 2>/dev/null || true
 
 # Repo bin first on $PATH (install dir stripped) and a clean git config — the

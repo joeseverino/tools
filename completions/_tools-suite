@@ -136,11 +136,11 @@ _tools_suite_contract() {
         'ship:Commit + push a small HQ change. The push IS the deploy: it triggers the gated pipeline (build → scan → deploy on green)'
         'env-diff:Key-level drift between the 1Password '\''severino-hq env'\'' item (the source of truth) and the env rendered on prod. Key names only — values never print'
         'env-apply:Apply 1Password env changes to prod now: runs severino-hq-secrets.service (renders + restarts only if something changed; the hourly timer does this anyway)'
-        'logs:Show app container logs (default tail 50)'
-        'restart:`docker compose restart app` — no rebuild, no migrations. For stuck state (env changes need env-push: restart does not re-read .env)'
+        'logs:Show HQ'\''s logs: the journal of severino-hq-web.service, where the container'\''s output goes (default last 50 lines)'
+        'restart:Restart severino-hq-web.service on the release it runs; returns once HQ is healthy. No new image (landing on main is the deploy)'
         'open:Open $HQ_URL in the browser'
-        'shell:ssh -t into the HQ Django shell (poke the ORM)'
-        'superuser:ssh -t into HQ and run createsuperuser interactively'
+        'shell:Open the Django shell in the running HQ container (docker exec on HQ_SSH_HOST)'
+        'superuser:Run createsuperuser interactively in the running HQ container, as the install guide does'
         'export:Download the year summary to ./ and print the path'
       )
       _arguments -C \

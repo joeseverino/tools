@@ -8,7 +8,6 @@ setup() {
     export TEST_BIN="$TEST_ROOT/bin"
     export NOTES_HOME="$TEST_ROOT/vault"
     export HQ_SSH_HOST="unused"
-    export HQ_REMOTE_PATH="/unused"
     export HQ_LOCAL_PATH="$TEST_ROOT/hq"
     export HQ_URL="https://hq.example.test"
     export MCP_ARGS_LOG="$TEST_ROOT/mcp-args.log"

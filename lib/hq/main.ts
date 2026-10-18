@@ -66,7 +66,11 @@ const commands: CommandSpec[] = [
     paras: [
       "The same surface agents reach over MCP, reached over the host shell with the operator's own SSH certificate. A tool that writes is gated by HQ exactly as it is over MCP, including changes held for approval.",
     ],
-    examples: [{ command: `hq call list_managed_resources '{"limit":20}'`, comment: 'what HQ manages' }],
+    examples: [
+      { command: 'hq call describe_resources', comment: "what HQ can list, and each list's filters" },
+      { command: `hq call list_resource '{"name":"infrastructure.resources","filters":{"limit":20}}'`, comment: 'what HQ manages' },
+      { command: 'hq call get_findings', comment: 'what HQ claims is wrong, with remedies' },
+    ],
   },
   {
     name: 'drift',
@@ -74,7 +78,10 @@ const commands: CommandSpec[] = [
     effect: 'read',
     network: true,
     options: [{ flags: ['--json'], help: 'Print the drifted resources as JSON' }],
-    paras: ['HQ reconciles what it declares against what each provider reports. This reads that verdict; it never reads a provider itself.'],
+    paras: [
+      "HQ reconciles what it declares against what each provider reports. This reads that verdict from HQ's infrastructure.resources list (list_resource); it never reads a provider itself. A resource counts when it is enabled and has been observed, and drifts when its last applied generation lags its declaration or its health is anything but healthy.",
+      'For the wider set of claims HQ derives from the same picture (a resource silently not read, a sweep that stopped, a background job that failed), with their remedies, run hq call get_findings.',
+    ],
   },
   {
     name: 'ship',
@@ -97,7 +104,7 @@ const commands: CommandSpec[] = [
   },
   {
     name: 'logs',
-    summary: 'Show app container logs (default tail 50)',
+    summary: "Show HQ's logs: the journal of severino-hq-web.service, where the container's output goes (default last 50 lines)",
     effect: 'read',
     network: true,
     options: [
@@ -107,13 +114,16 @@ const commands: CommandSpec[] = [
   },
   {
     name: 'restart',
-    summary: '`docker compose restart app` — no rebuild, no migrations. For stuck state (env changes need env-push: restart does not re-read .env)',
+    summary: 'Restart severino-hq-web.service on the release it runs; returns once HQ is healthy. No new image (landing on main is the deploy)',
     effect: 'deploy',
     network: true,
+    paras: [
+      'systemd is the only thing that starts the web container, and the unit is ready only once HQ answers its health check, so a restart that returns has a healthy HQ behind it. Each start is a fresh container on the same image, reading the environment as last rendered; to render 1Password changes first, run hq env-apply.',
+    ],
   },
   { name: 'open', summary: 'Open $HQ_URL in the browser', effect: 'read' },
-  { name: 'shell', summary: 'ssh -t into the HQ Django shell (poke the ORM)', effect: 'remote_write', network: true, interactive: true },
-  { name: 'superuser', summary: 'ssh -t into HQ and run createsuperuser interactively', effect: 'remote_write', network: true, interactive: true },
+  { name: 'shell', summary: 'Open the Django shell in the running HQ container (docker exec on HQ_SSH_HOST)', effect: 'remote_write', network: true, interactive: true },
+  { name: 'superuser', summary: 'Run createsuperuser interactively in the running HQ container, as the install guide does', effect: 'remote_write', network: true, interactive: true },
   {
     name: 'export',
     summary: 'Download the year summary to ./ and print the path',
@@ -134,7 +144,7 @@ export const spec: ToolSpec = {
   effect: 'read',
   synopsis: ['hq <command> [args]'],
   paras: [
-    'Severino HQ glue. Reads YAML frontmatter from the vault and upserts the HQ docs index. Also wraps the routine ssh + docker compose calls for inspecting the HQ deployment. It does not deploy: landing on main is the deploy.',
+    "Severino HQ glue. Reads YAML frontmatter from the vault and upserts the HQ docs index. Also wraps the routine operator calls on the HQ host over ssh: HQ's tools through manage.py hq_call, its systemd units, their journal, and manage.py in the running container. It does not deploy: landing on main is the deploy.",
   ],
   examples: [
     { command: 'hq sync', comment: 'most common — push vault → HQ' },
@@ -146,7 +156,6 @@ export const spec: ToolSpec = {
   env: [
     { name: 'NOTES_HOME', help: 'Vault root' },
     { name: 'HQ_SSH_HOST', help: 'SSH alias of the HQ server' },
-    { name: 'HQ_REMOTE_PATH', help: 'HQ checkout path on the server' },
     { name: 'HQ_LOCAL_PATH', help: 'Local HQ checkout' },
     { name: 'HQ_URL', help: 'Public URL of HQ' },
     { name: 'HQ_CALL', help: "Operator transport to HQ's tools (default: lib/hq-call over HQ_SSH_HOST)" },

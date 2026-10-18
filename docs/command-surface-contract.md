@@ -32,7 +32,7 @@ export const spec: ToolSpec = {
   effect: 'read',
   synopsis: ['hq <command>'],
   commands: [
-    { name: 'restart', summary: 'docker compose restart app, no rebuild, no migrations',
+    { name: 'restart', summary: 'Restart severino-hq-web.service; returns once HQ is healthy',
       effect: 'deploy', network: true },
     { name: 'create', summary: 'Create or update a Project or Asset in HQ',
       effect: 'remote_write', network: true,

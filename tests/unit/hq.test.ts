@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { callRequest, driftEntries, syncRequest } from '../../lib/hq/data.ts';
+import { DRIFT_REQUEST, callRequest, driftEntries, syncRequest } from '../../lib/hq/data.ts';
 import { failureMessage, jqLength, jqText, resultOk } from '../../lib/hq/env.ts';
-import { envDrift, itemKeys, renderedKeys, xargsStatus } from '../../lib/hq/host.ts';
+import { containerManage, envDrift, itemKeys, journal, renderedKeys, xargsStatus } from '../../lib/hq/host.ts';
 import { tool } from '../../lib/hq/main.ts';
 import { createHelp, createRequest, doctorReport, stateRecord, syncSummary, validateReport } from '../../lib/hq/report.ts';
 import { compareRecord, manifestHash, readRecord } from '../../lib/hq/state.ts';
@@ -44,6 +44,20 @@ test('driftEntries skips declared and disabled resources and explains a moved de
     ['app', 'declared generation 4, last applied 2'],
   ]);
   assert.deepEqual(Object.keys(drifted[0] ?? {}), ['key', 'kind', 'in_sync', 'health', 'reason']);
+});
+
+test('drift reads infrastructure.resources through list_resource', () => {
+  assert.deepEqual(DRIFT_REQUEST, { tool: 'list_resource', arguments: { name: 'infrastructure.resources', filters: { limit: 10000 } } });
+});
+
+test('host commands go through the web unit and the running container, never compose', () => {
+  assert.equal(journal('50', false), 'sudo journalctl -u severino-hq-web.service --no-pager -n 50');
+  assert.equal(journal('50', true), 'sudo journalctl -u severino-hq-web.service --no-pager -f');
+  assert.equal(containerManage('severino-hq', 'shell', 'tty'), 'sudo docker exec -it severino-hq python manage.py shell');
+  assert.equal(
+    containerManage('severino-hq', 'ingest_life_snapshot', 'stdin'),
+    'sudo docker exec -i severino-hq python manage.py ingest_life_snapshot',
+  );
 });
 
 test('jq-compatible helpers', () => {
