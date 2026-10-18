@@ -6,15 +6,14 @@ secrets with your own identity rather than a token of its own.
 
 ## What it touches
 
-- **HQ.** `hq call`, `hq drift`, `hq sync`, and the other HQ commands run HQ's
-  own tools over SSH (`lib/hq-call`). The login is your 12-hour SSH
-  certificate, signed through 1Password with Touch ID, and root on the host
-  comes from your forwarded agent. There is no shared token to steal, and a
-  write HQ holds for approval stays held.
-- **1Password.** Only `hq env-diff` and `hq dev`/`hq doctor --env` read the
-  `severino-hq env` item, through the 1Password CLI and its approval prompt.
-  `env-diff` prints key names only; the others print a fixed list of named,
-  non-secret settings (time zone, reporting windows).
+- **HQ.** `hq call`, `hq sync`, and the other HQ commands run HQ's own tools
+  over SSH (`lib/hq-call`). The login is your 12-hour SSH certificate, signed
+  through 1Password with Touch ID, and root on the host comes from your
+  forwarded agent. There is no shared token to steal, and a write HQ holds for
+  approval stays held. No command here changes the host itself: HQ's own
+  pipeline does.
+- **1Password.** No command reads a 1Password item; `tools doctor` only checks
+  that the CLI is installed.
 - **Everything else** (vault sync, the repo loop, diagrams, PDFs) handles
   repository content, not credentials.
 

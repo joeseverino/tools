@@ -50,10 +50,10 @@ tui() { node "$TOOLS_HOME/lib/tools/describe-tui.ts"; }
 }
 
 @test "replay: / filters tools by a command name across the toolchain" {
-    export DESCRIBE_TUI_KEYS='slash,s,u,p,e,r,u,s,e,r,enter'
+    export DESCRIBE_TUI_KEYS='slash,v,a,l,i,d,a,t,e,enter'
     run tui
     [ "$status" -eq 0 ]
-    # 'superuser' lives on hq's commands, not its name/description — the
+    # 'validate' lives on hq's commands, not its name/description — the
     # cross-tool command search narrows the list to hq.
     [[ "$output" == *"TOOLS (1)"* ]] || return 1
     [[ "$output" == *"hq"* ]] || return 1
@@ -74,14 +74,14 @@ tui() { node "$TOOLS_HOME/lib/tools/describe-tui.ts"; }
 @test "replay: selected command detail is separate from the stable command list" {
     export DESCRIBE_TUI_COLUMNS=150
     export DESCRIBE_TUI_ROWS=32
-    export DESCRIBE_TUI_KEYS='slash,s,u,p,e,r,u,s,e,r,enter,tab,down,down,down,down,down,down,down,down,down,down,down,down,down,down,down,down,down,down'
+    export DESCRIBE_TUI_KEYS='slash,v,a,l,i,d,a,t,e,enter,tab,down,down,down,down,down,down,down,down'
     run tui
     [ "$status" -eq 0 ]
     [[ "$output" == *"SELECTED"* ]] || return 1
-    [[ "$output" == *"export"* ]] || return 1
-    [[ "$output" == *"effect"*"local_write"* ]] || return 1
-    [[ "$output" == *"[year]"* ]] || return 1
-    [[ "$output" == *"copy"*"hq export [<year>] [<format>]"* ]]
+    [[ "$output" == *"call"* ]] || return 1
+    [[ "$output" == *"effect"*"remote_write"* ]] || return 1
+    [[ "$output" == *"[arguments]"* ]] || return 1
+    [[ "$output" == *"copy"*"hq call <tool> [<arguments>]"* ]]
 }
 
 @test "replay: Enter on a command copies a ready-to-paste invocation" {

@@ -1,8 +1,7 @@
 import type { CommandSpec, ToolSpec } from '../sdk/surface.ts';
 import type { Handler, ToolDefinition } from '../sdk/tool.ts';
-import { call, create, doctor, drift, exportSummary, manifest, schema, sync, validate } from './data.ts';
+import { call, create, doctor, manifest, schema, sync, validate } from './data.ts';
 import { loadHqEnv } from './env.ts';
-import { envApply, envDiff, lifeSync, logs, open, restart, shell, superuser } from './host.ts';
 
 const commands: CommandSpec[] = [
   { name: 'manifest', summary: 'Print the manifest JSON (frontmatter from every doc) to stdout — for inspection or piping elsewhere', effect: 'read' },
@@ -29,16 +28,6 @@ const commands: CommandSpec[] = [
     ],
   },
   { name: 'validate', summary: 'Report HQ registry entries (Projects/Assets) that no vault doc references. Read-only', effect: 'read', network: true },
-  {
-    name: 'life-sync',
-    summary: 'Emit the Life vault projection on this Mac and install it on HQ (renewals, goals, tasks, claims, vehicles)',
-    effect: 'remote_write',
-    network: true,
-    paras: [
-      'The Mac is the only machine that can read the vault, so the snapshot originates here. HQ reconciles by doc_id and prunes anything the document omits — so an empty or malformed snapshot is refused locally rather than sent, because sending it would delete the records it failed to mention.',
-    ],
-    examples: [{ command: 'hq life-sync', comment: "refresh HQ's Life records from the vault" }],
-  },
   {
     name: 'create',
     summary: 'Create or update a Project or Asset in HQ (idempotent upsert by slug)',
@@ -72,85 +61,29 @@ const commands: CommandSpec[] = [
       { command: 'hq call get_findings', comment: 'what HQ claims is wrong, with remedies' },
     ],
   },
-  {
-    name: 'drift',
-    summary: 'List managed resources HQ reports out of sync or unhealthy; exit 1 when any are',
-    effect: 'read',
-    network: true,
-    options: [{ flags: ['--json'], help: 'Print the drifted resources as JSON' }],
-    paras: [
-      "HQ reconciles what it declares against what each provider reports. This reads that verdict from HQ's infrastructure.resources list (list_resource); it never reads a provider itself. A resource counts when it is enabled and has been observed, and drifts when its last applied generation lags its declaration or its health is anything but healthy.",
-      'For the wider set of claims HQ derives from the same picture (a resource silently not read, a sweep that stopped, a background job that failed), with their remedies, run hq call get_findings.',
-    ],
-  },
-  {
-    name: 'env-diff',
-    summary: "Key-level drift between the 1Password 'severino-hq env' item (the source of truth) and the env rendered on prod. Key names only — values never print",
-    effect: 'read',
-    network: true,
-  },
-  {
-    name: 'env-apply',
-    summary: 'Apply 1Password env changes to prod now: runs severino-hq-secrets.service (renders + restarts only if something changed; the hourly timer does this anyway)',
-    effect: 'deploy',
-    network: true,
-  },
-  {
-    name: 'logs',
-    summary: "Show HQ's logs: the journal of severino-hq-web.service, where the container's output goes (default last 50 lines)",
-    effect: 'read',
-    network: true,
-    options: [
-      { flags: ['-f', '--follow'], help: 'Stream live output until Ctrl-C' },
-      { flags: ['--tail'], metavar: 'N', help: 'Number of lines to show (default 50; ignored with --follow)' },
-    ],
-  },
-  {
-    name: 'restart',
-    summary: 'Restart severino-hq-web.service on the release it runs; returns once HQ is healthy. No new image (landing on main is the deploy)',
-    effect: 'deploy',
-    network: true,
-    paras: [
-      'systemd is the only thing that starts the web container, and the unit is ready only once HQ answers its health check, so a restart that returns has a healthy HQ behind it. Each start is a fresh container on the same image, reading the environment as last rendered; to render 1Password changes first, run hq env-apply.',
-    ],
-  },
-  { name: 'open', summary: 'Open $HQ_URL in the browser', effect: 'read' },
-  { name: 'shell', summary: 'Open the Django shell in the running HQ container (docker exec on HQ_SSH_HOST)', effect: 'remote_write', network: true, interactive: true },
-  { name: 'superuser', summary: 'Run createsuperuser interactively in the running HQ container, as the install guide does', effect: 'remote_write', network: true, interactive: true },
-  {
-    name: 'export',
-    summary: 'Download the year summary to ./ and print the path',
-    effect: 'local_write',
-    network: true,
-    positionals: [
-      { name: 'year', optional: true, help: 'Year to export (default: current year)' },
-      { name: 'format', optional: true, choices: ['md', 'json'], help: 'Output format (default: md)' },
-    ],
-  },
 ];
 
 export const spec: ToolSpec = {
   name: 'hq',
-  description: 'Sync vault frontmatter to Severino HQ, plus routine HQ operational commands.',
+  description: 'Sync vault frontmatter to Severino HQ, and call HQ as the operator.',
   group: 'Integrations',
   order: 130,
   effect: 'read',
   synopsis: ['hq <command> [args]'],
   paras: [
-    "Severino HQ glue. Reads YAML frontmatter from the vault and upserts the HQ docs index. Also wraps the routine operator calls on the HQ host over ssh: HQ's tools through manage.py hq_call, its systemd units, their journal, and manage.py in the running container. It does not deploy: landing on main is the deploy.",
+    "Severino HQ glue. Reads YAML frontmatter from the vault and upserts the HQ docs index, and reaches HQ's tools as the operator through manage.py hq_call on the HQ host over ssh. It runs nothing on the host but HQ's own tools.",
   ],
   examples: [
     { command: 'hq sync', comment: 'most common — push vault → HQ' },
     { command: "hq manifest | jq '.[] | .doc_id'" },
     { command: 'hq doctor', comment: 'find docs missing frontmatter' },
-    { command: 'hq export 2026', comment: 'download year-summary-2026.md' },
+    { command: 'hq call get_findings', comment: 'what HQ claims is wrong, with remedies' },
   ],
   commands,
   env: [
     { name: 'NOTES_HOME', help: 'Vault root' },
     { name: 'HQ_SSH_HOST', help: 'SSH alias of the HQ server' },
     { name: 'HQ_LOCAL_PATH', help: 'Local HQ checkout' },
-    { name: 'HQ_URL', help: 'Public URL of HQ' },
     { name: 'HQ_CALL', help: "Operator transport to HQ's tools (default: lib/hq-call over HQ_SSH_HOST)" },
     { name: 'HQ_CONTAINER', help: 'HQ container on HQ_SSH_HOST (default: severino-hq)' },
   ],
@@ -173,18 +106,8 @@ export const tool: ToolDefinition = {
     doctor: configured(doctor),
     schema: configured(schema),
     validate: configured(validate),
-    'life-sync': configured(lifeSync),
     create: configured(create),
     call: configured(call),
-    drift: configured(drift),
-    'env-diff': configured(envDiff),
-    'env-apply': configured(envApply),
-    logs: configured(logs),
-    restart: configured(restart),
-    open: configured(open),
-    shell: configured(shell),
-    superuser: configured(superuser),
-    export: configured(exportSummary),
   },
   fallback: (args, rt) => {
     loadHqEnv();

@@ -7,10 +7,9 @@ setup() {
     export TEST_BIN="$TEST_ROOT/bin"
     export NOTES_HOME="$TEST_ROOT/vault"
     export HQ_LOCAL_PATH="$TEST_ROOT/hq"
-    export HQ_URL="https://hq.example.test"
     export HQ_CALL="$TEST_BIN/hq-call"
     export HQ_CALL_LOG="$TEST_ROOT/mcp-request.json"
-    mkdir -p "$TEST_BIN" "$NOTES_HOME" "$HQ_LOCAL_PATH/docs_index"
+    mkdir -p "$TEST_BIN" "$NOTES_HOME" "$HQ_LOCAL_PATH/hq/domains/docs_index"
     export PATH="$TEST_BIN:$PATH"
 
     cat > "$TEST_BIN/severino-vault-mcp" <<'SH'
@@ -35,7 +34,6 @@ case "$(jq -r .tool "$HQ_CALL_LOG")" in
       printf '%s\n' '{"ok":true,"created":true,"project":{"slug":"example"}}'
     fi ;;
   audit_registry) printf '%s\n' '{"ok":true,"projects_total":1,"assets_total":1,"orphan_projects":[],"orphan_assets":[]}' ;;
-  export_year_summary) printf '%s\n' '{"ok":true,"filename":"year-summary-2026.md","format":"md","content":"# 2026"}' ;;
   describe_capabilities) printf '%s\n' '{"ok":true,"capabilities":[{"name":"project.upsert","summary":"Idempotently create or update an HQ project by slug.","input_schema":{"required":["name"],"properties":{"slug":{"type":"string","default":""},"name":{"type":"string"},"status":{"type":"string","default":"idea"}}}}]}' ;;
 esac
 SH
@@ -82,16 +80,6 @@ hq_bin() { "$TOOLS_HOME/bin/hq" "$@"; }
     [ "$(jq -r .arguments.name "$HQ_CALL_LOG")" = "project.upsert" ]
     [ "$(jq -r .arguments.payload.repository_url "$HQ_CALL_LOG")" = "https://example.test/repo" ]
     [[ "$output" == *"example: created"* ]]
-}
-
-@test "hq export uses MCP and writes the returned canonical filename" {
-    cd "$TEST_ROOT"
-
-    run hq_bin export 2026 md
-
-    [ "$status" -eq 0 ]
-    [ "$(jq -r .tool "$HQ_CALL_LOG")" = "export_year_summary" ]
-    [ "$(cat year-summary-2026.md)" = "# 2026" ]
 }
 
 @test "hq create focused help renders the live capability schema" {

@@ -471,14 +471,14 @@ EOF
 }
 
 @test "tools describe <tool> <command> projects one command's contract (token-minimal AI path)" {
-    run "$TOOLS_HOME/bin/tools" describe hq restart
+    run "$TOOLS_HOME/bin/tools" describe hq sync
     [ "$status" -eq 0 ]
     echo "$output" | python3 -c '
 import json,sys
 o=json.load(sys.stdin)
 assert o["ok"] is True
-assert o["tool"]=="hq" and o["name"]=="restart"
-assert o["effect"]=="deploy" and o["network"] is True
+assert o["tool"]=="hq" and o["name"]=="sync"
+assert o["effect"]=="remote_write" and o["network"] is True
 # only the one command rides in — no sibling commands, no full surface
 assert "commands" not in o
 '
@@ -491,7 +491,7 @@ assert "commands" not in o
 import json,sys
 o=json.load(sys.stdin)
 assert o["ok"] is False
-assert "no command" in o["error"] and "restart" in o["error"]
+assert "no command" in o["error"] and "sync" in o["error"]
 '
 }
 
@@ -531,10 +531,10 @@ assert binset == set(names), (binset ^ set(names))
     # `<tool> <cmd> -h` must route to usage_command (the same renderer the main
     # screen uses) and return before any action — a help flag that fell through
     # to the action would reach HQ over SSH.
-    run env HQ_CALL=/nonexistent "$TOOLS_HOME/bin/hq" drift -h
+    run env HQ_CALL=/nonexistent "$TOOLS_HOME/bin/hq" sync -h
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Usage: hq drift"* ]] || return 1
-    [[ "$output" == *"out of sync or unhealthy"* ]] || return 1
+    [[ "$output" == *"Usage: hq sync"* ]] || return 1
+    [[ "$output" == *"idempotent and safe to re-run"* ]] || return 1
     [[ "$output" == *"-h, --help"* ]] || return 1
     # --help is the same render as -h here too.
     run env HQ_CALL=/nonexistent "$TOOLS_HOME/bin/hq" call --help

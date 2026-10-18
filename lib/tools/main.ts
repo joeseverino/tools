@@ -44,7 +44,7 @@ export const spec: ToolSpec = {
       network: true,
       options: [
         { flags: ['--all'], help: 'Cross-system rollup: also run hq doctor (exit 1 if any gate fails)' },
-        { flags: ['--live'], help: 'Implies --all; also ask HQ for managed resources that have drifted from what it declares (hq drift, over SSH)' },
+        { flags: ['--live'], help: 'Implies --all; also ask HQ what it claims is wrong (hq call get_findings, over SSH); exit 1 on any finding' },
         { flags: ['--json'], help: 'Machine-readable output (one object, "checks" array)' },
       ],
     },
@@ -77,7 +77,7 @@ export const spec: ToolSpec = {
       effect: 'read',
       positionals: [
         { name: 'tool', optional: true, help: 'Describe just one tool (delegates to <tool> --describe)' },
-        { name: 'command', optional: true, help: 'With a tool, project its contract to one command — the token-minimal AI path (tools describe hq restart)' },
+        { name: 'command', optional: true, help: 'With a tool, project its contract to one command — the token-minimal AI path (tools describe hq sync)' },
       ],
       options: [
         { flags: ['--pretty'], help: 'Indent the JSON for reading (default: compact, diff-stable)' },
@@ -88,7 +88,7 @@ export const spec: ToolSpec = {
         },
       ],
       examples: [
-        { command: 'tools describe hq restart', comment: "one command's contract — effect, args, examples" },
+        { command: 'tools describe hq sync', comment: "one command's contract — effect, args, examples" },
         { command: 'tools tui', comment: 'interactive explorer over the whole toolchain (alias of describe --tui)' },
       ],
     },

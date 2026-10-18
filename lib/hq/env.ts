@@ -1,6 +1,5 @@
 // hq's configuration (config/hq.sh, overridable per variable from the
-// environment) and the small jq-compatible value helpers its reports share.
-import { die, usageError } from '../sdk/cli.ts';
+// environment) and the jq-compatible value helpers its reports share.
 import { loadShellConfig } from '../sdk/config.ts';
 import { isRecord } from '../sdk/guards.ts';
 import { codeHome } from '../sdk/paths.ts';
@@ -9,17 +8,7 @@ export interface HqEnv {
   vault: string;
   localPath: string;
   schemaDoc: string;
-  sshHost: string;
-  container: string;
-  url: string;
-  envItem: string;
-  envVault: string;
 }
-
-// HQ's own name for its web container (controller/host/layout.go).
-const DEFAULT_CONTAINER = 'severino-hq';
-// It becomes part of a remote command line, so it is a plain name or nothing.
-const CONTAINER_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
 
 let cached: HqEnv | undefined;
 
@@ -28,45 +17,27 @@ export function loadHqEnv(): HqEnv {
   return cached;
 }
 
+// The transport (lib/hq-call) reads its host and container from the
+// environment, so a value set only in config/hq.sh is passed on to it.
+const TRANSPORT = ['HQ_SSH_HOST', 'HQ_CONTAINER'] as const;
+
 function readHqEnv(): HqEnv {
   process.env['CODE_HOME'] ??= codeHome;
   const { scalars } = loadShellConfig('hq', {
-    scalars: ['VAULT', 'HQ_LOCAL_PATH', 'HQ_SCHEMA_DOC', 'HQ_SSH_HOST', 'HQ_CONTAINER', 'HQ_URL', 'HQ_ENV_ITEM', 'HQ_ENV_VAULT'],
+    scalars: ['VAULT', 'HQ_LOCAL_PATH', 'HQ_SCHEMA_DOC', ...TRANSPORT],
   });
   const get = (name: string): string => scalars[name] ?? '';
-  const container = get('HQ_CONTAINER') || DEFAULT_CONTAINER;
-  // lib/hq-call reads it from the environment: one value for every crossing.
-  process.env['HQ_CONTAINER'] = container;
+  for (const name of TRANSPORT) if (get(name)) process.env[name] = get(name);
   return {
     vault: get('VAULT'),
     localPath: get('HQ_LOCAL_PATH'),
     schemaDoc: get('HQ_SCHEMA_DOC'),
-    sshHost: get('HQ_SSH_HOST'),
-    container,
-    url: get('HQ_URL'),
-    envItem: get('HQ_ENV_ITEM'),
-    envVault: get('HQ_ENV_VAULT'),
   };
-}
-
-export function requireAdmin(env: HqEnv): void {
-  if (!env.sshHost) die('error', 'HQ_SSH_HOST is required for host administration');
-  if (!CONTAINER_NAME.test(env.container)) usageError(`HQ_CONTAINER is not a container name: ${env.container}`);
 }
 
 /** A value as `jq -r` prints it: strings raw, everything else as compact JSON. */
 export function jqText(value: unknown): string {
   return typeof value === 'string' ? value : JSON.stringify(value ?? null);
-}
-
-/** jq's `length`: element count, key count, string length, absolute value, 0 for null. */
-export function jqLength(value: unknown): number {
-  if (value === null || value === undefined) return 0;
-  if (typeof value === 'string') return [...value].length;
-  if (typeof value === 'number') return Math.abs(value);
-  if (Array.isArray(value)) return value.length;
-  if (isRecord(value)) return Object.keys(value).length;
-  return 0;
 }
 
 export function resultOk(result: unknown): boolean {

@@ -1,11 +1,10 @@
 # shellcheck shell=bash
-# shellcheck disable=SC2034  # the semantic key/setting lists are read by bin/hq
-# config/hq.sh — Severino HQ sync tool configuration
+# config/hq.sh — configuration for the hq tool
 #
 # Copy to config/hq.sh and fill in the local values. Sourced by `hq`; each
 # variable can be overridden per-invocation. The real file is not tracked:
-# the checkout paths, addresses, and credential-store coordinates below are
-# specific to one machine and one operator.
+# the checkout paths and host alias below are specific to one machine and one
+# operator.
 
 : "${NOTES_HOME:?set in ~/.zshrc}"
 
@@ -16,9 +15,6 @@
 : "${CODE_HOME:?set by lib/sdk/core.sh}"
 : "${HQ_LOCAL_PATH:=$CODE_HOME/Projects/severino-hq}"
 
-# The indexed-dir list is the MCP's to derive (its config's indexed_dirs plus
-# the slim content dirs) — no HQ_VAULT_DIRS copy here; one list, one owner.
-
 # Human-readable frontmatter contract doc in the vault. `hq schema` checks its
 # enum lists against the canonical MCP schema so it can't silently drift.
 : "${HQ_SCHEMA_DOC:=$VAULT/02 Infrastructure/Severino HQ/Frontmatter Schema.md}"
@@ -27,20 +23,9 @@
 # match the entry in your ~/.ssh/config — e.g. `export HQ_SSH_HOST=hq-host`.
 : "${HQ_SSH_HOST:=}"
 
-# URL where HQ is served (used for the open-in-browser helper).
-# e.g. `export HQ_URL=https://hq.example.com`.
-: "${HQ_URL:?set in ~/.zshrc — URL where HQ is served}"
-
-# The credential-store item prod's env renders from (HQ's hq-secrets renderer,
-# severino-hq-secrets.service). `hq env-diff` reads it; one name, one owner.
-: "${HQ_ENV_ITEM:=}"
-: "${HQ_ENV_VAULT:=}"
-
-# Routine data-plane operations call HQ's tools as the operator, through a shell
-# on HQ_SSH_HOST: your own SSH certificate and agent, no shared token. Agents
-# use MCP under their own identities. HQ runs as one container under systemd
-# (severino-hq-web.service); `hq logs`, `restart`, `shell`, `superuser` and
-# `life-sync` reach it there. Defaults live with the code that uses them
-# (lib/hq-call, lib/hq); set these only to override.
+# HQ's tools are called as the operator, through a shell on HQ_SSH_HOST: your
+# own SSH certificate and agent, no shared token. Agents use MCP under their
+# own identities. The defaults live with the transport (lib/hq-call); set these
+# only to override.
 # export HQ_CONTAINER=<container name on HQ_SSH_HOST, default severino-hq>
 # export HQ_CALL=<an alternative transport, e.g. a test double>

@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { die, exit, usageError } from '../sdk/cli.ts';
 import { isRecord, parseJson } from '../sdk/guards.ts';
-import { msg, palette } from '../sdk/output.ts';
+import { msg } from '../sdk/output.ts';
 import { git } from '../git/index.ts';
 import type { Handler, ToolRuntime } from '../sdk/tool.ts';
-import { failureMessage, jqText, loadHqEnv, resultOk } from './env.ts';
+import { failureMessage, loadHqEnv, resultOk } from './env.ts';
 import type { HqEnv } from './env.ts';
 import { createHelp, createRequest, doctorReport, parseInput, stateRecord, syncSummary, validateReport } from './report.ts';
 import { syncFreshness, syncStateFile } from './state.ts';
@@ -34,47 +34,6 @@ function buildManifest(vault: string): string {
   return manifest.stdout;
 }
 
-export interface DriftEntry {
-  key: unknown;
-  kind: unknown;
-  in_sync: unknown;
-  health: unknown;
-  reason: string;
-}
-
-function truthy(value: unknown): boolean {
-  return value !== undefined && value !== null && value !== false;
-}
-
-function healthOf(item: Record<string, unknown>): Record<string, unknown> {
-  return isRecord(item['health']) ? item['health'] : {};
-}
-
-/** Resources HQ reconciles (enabled, not merely declared) that are unhealthy or lag their declaration. */
-export function driftEntries(items: readonly unknown[]): { drifted: DriftEntry[]; checked: number } {
-  const drifted: DriftEntry[] = [];
-  let checked = 0;
-  for (const item of items) {
-    if (!isRecord(item) || !truthy(item['enabled'])) continue;
-    const health = healthOf(item);
-    if (health['state'] === 'declared') continue;
-    checked += 1;
-    const inSync = truthy(item['in_sync']);
-    if (inSync && health['state'] === 'healthy') continue;
-    const message = health['message'];
-    drifted.push({
-      key: item['key'] ?? null,
-      kind: item['kind'] ?? null,
-      in_sync: item['in_sync'] ?? null,
-      health: health['label'] ?? null,
-      reason: inSync
-        ? (truthy(message) ? jqText(message) : '')
-        : `declared generation ${jqText(item['generation'])}, last applied ${jqText(item['observed_generation'])}`,
-    });
-  }
-  return { drifted, checked };
-}
-
 const TOOL_NAME = /^[a-z][a-z0-9_]*$/;
 
 /** The MCP request for `hq call`; null when the arguments are not one JSON object. */
@@ -97,32 +56,6 @@ export const call: Handler = (args, rt) => {
   const result = callTransport(request);
   process.stdout.write(result.stdout);
   return result.status;
-};
-
-// Everything HQ manages, each with what HQ expects and what is live. No bound in
-// the query schema, so one page holds the whole estate.
-export const DRIFT_REQUEST = { tool: 'list_resource', arguments: { name: 'infrastructure.resources', filters: { limit: 10000 } } };
-
-export const drift: Handler = (args, rt) => {
-  const flag = args[0] ?? '';
-  if (flag !== '' && flag !== '--json') return rt.dieUnknown('flag', flag, 'drift');
-  loadHqEnv();
-  const response = callTransport(DRIFT_REQUEST);
-  if (response.status !== 0) die('error', 'HQ did not answer list_resource infrastructure.resources');
-  const result = parseJson(response.stdout);
-  const items = isRecord(result) ? result['items'] : undefined;
-  if (!Array.isArray(items)) return die('error', "HQ's infrastructure.resources answer has no items");
-  const { drifted, checked } = driftEntries(items);
-  if (flag === '--json') process.stdout.write(`${JSON.stringify(drifted)}\n`);
-  else if (drifted.length === 0) msg('green', 'drift', `every resource HQ reconciles is in sync (${checked} checked)`);
-  else {
-    const p = palette();
-    for (const entry of drifted) {
-      const reason = entry.reason ? ` · ${entry.reason}` : '';
-      msg('yellow', jqText(entry.kind), `${jqText(entry.key)} ${p.DIM}${jqText(entry.health)}${reason}${p.RESET}`);
-    }
-  }
-  return drifted.length === 0 ? 0 : 1;
 };
 
 export const manifest: Handler = () => {
@@ -363,30 +296,5 @@ export const create: Handler = (args, rt: ToolRuntime) => {
   if (!resultOk(result)) die('error', failureMessage(result, 'HQ operation failed'));
   const created = isRecord(result) && result['created'] === true;
   msg('green', kind, `${slug}: ${created ? 'created' : 'updated'}`);
-  return 0;
-};
-
-export const exportSummary: Handler = (args, rt) => {
-  loadHqEnv();
-  const year = args[0] || String(new Date().getFullYear());
-  const format = args[1] || 'md';
-  let ext: string;
-  if (format === 'md' || format === 'markdown') ext = 'md';
-  else if (format === 'json') ext = 'json';
-  else return rt.dieUnknown('format', format, 'export');
-  const yearValue = parseJson(year);
-  if (yearValue === undefined) {
-    process.stderr.write('jq: Invalid JSON text passed to --argjson\n');
-    return 2;
-  }
-  const response = callTransport({ tool: 'export_year_summary', arguments: { year: yearValue, format: ext } });
-  if (response.status !== 0) return response.status;
-  const result = parseJson(response.stdout);
-  if (!resultOk(result)) die('error', failureMessage(result, 'report export failed'));
-  const record = isRecord(result) ? result : {};
-  const out = jqText(record['filename']);
-  writeFileSync(out, `${jqText(record['content'])}\n`);
-  msg('green', 'wrote', out);
-  process.stdout.write(`${out}\n`);
   return 0;
 };

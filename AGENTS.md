@@ -8,7 +8,7 @@ from the code every session.
 TypeScript tools under `lib/<tool>/` (Node 24 runs them directly, no build),
 each launched by a four-line extensionless `bin/<tool>` and sharing one look and
 feel. The toolchain owns nothing another system owns: infrastructure facts are
-HQ's (`hq call`, `hq drift`), publishing is the site repo's, and vault reads and
+HQ's (`hq call`), publishing is the site repo's, and vault reads and
 writes go through the vault MCP.
 
 ## Reusable SDK boundary
@@ -56,7 +56,7 @@ emitter is `severino-vault-mcp`'s `cli_introspect.describe_parser`.)
   `-h`/`--help` (the git-style main screen), `--describe` (the JSON) and
   `<cmd> -h` (that command's focused screen), runs the deploy gate, and only
   then dispatches. A help flag can never fall through to run an action
-  (`hq restart -h`, `hq drift -h`, `tools reinstall -h` all render, never
+  (`hq sync -h`, `hq call -h`, `tools reinstall -h` all render, never
   execute). Leaf versus subcommand is read from the spec's shape, so a tool
   never restates it. A leaf tool's bare invocation is the tool's own to define
   (`backup` runs, `diagram` prints its usage). `definitionDrift` fails the run
@@ -96,7 +96,7 @@ emitter is `severino-vault-mcp`'s `cli_introspect.describe_parser`.)
   restate them here. `effect` is a required field, so an omitted classification
   is a compile error and can never become an inferred read. It renders a terse
   `Effect:` line in the focused `-h`, a coloured chip in `--tui`, and rides into
-  the JSON. It is what lets an agent risk-gate `hq restart` (`deploy`) versus
+  the JSON. It is what lets an agent risk-gate `hq sync` (`remote_write`) versus
   `vault status` (`read`) before running either.
 - **Contract.** This repo emits the complete Cordon `schema_version 4` document,
   every optional field included (`paras`/`examples`/`delegates`, option
@@ -251,7 +251,7 @@ derive everywhere).
 
 The console script is on PATH (`uv tool install`); `severino-vault-mcp --help`
 lists its subcommands. Each prints JSON and exits 0/1 on `ok`. Infrastructure
-facts are not the MCP's: ask HQ (`hq call`, `hq drift`).
+facts are not the MCP's: ask HQ (`hq call`).
 
 **Shared frontmatter schema:** the MCP's `schema.py` is the one canonical enum
 contract; `severino-vault-mcp schema --json` emits it. `hq schema` regenerates
@@ -263,8 +263,10 @@ hand-maintain enum lists anywhere downstream.
 called through `lib/hq-call` (`$HQ_CALL`), the operator's transport to HQ's MCP
 tool surface over the host shell (their own SSH certificate, never a shared
 token, never an inline ORM script). `hq call <tool> [json]` exposes that surface
-directly; `hq drift` reads HQ's own reconciliation verdict. Keep the logic in HQ
-or the MCP; `lib/hq` transports, and `lib/hq/report.ts` formats what they emit.
+directly; `hq call get_findings` is HQ's own verdict on what is wrong. Keep the
+logic in HQ or the MCP; `lib/hq` transports, and `lib/hq/report.ts` formats
+what they emit. Nothing in `lib/hq` acts on the host itself: HQ's own pipeline
+does.
 
 **Cross-repo JSON contract** (keep both sides in sync):
 - One JSON object per call; exit 0 on success, 1 on failure.
@@ -394,7 +396,7 @@ defined once in `lib/sdk/ci.ts` (`applyCiEnv`, with `ci_shell_env` in
 `TOOLS_CI_BATS_VERSION` to fail the gate on a bats version other than CI's.
 `tools status --json` / `tools doctor --json`
 give machine-readable state. `tools doctor --all` is the cross-system rollup
-(`hq doctor`); `--live` adds `hq drift` (HQ's reconciliation verdict, over SSH).
+(`hq doctor`); `--live` adds HQ's findings (`hq call get_findings`, over SSH).
 
 For a fast inner loop while editing one area:
 - `bats tests/<file>.bats` — hermetic, ~seconds. Run it after editing a tool; it

@@ -26,14 +26,14 @@ can never drift (there is no prose to parse). See
 ```ts
 export const spec: ToolSpec = {
   name: 'hq',
-  description: 'Sync vault docs into Severino HQ and operate the deploy.',
+  description: 'Sync vault frontmatter to Severino HQ, and call HQ as the operator.',
   group: 'Integrations',            // aggregate group
   order: 130,                       // globally unique workflow order
   effect: 'read',
   synopsis: ['hq <command>'],
   commands: [
-    { name: 'restart', summary: 'Restart severino-hq-web.service; returns once HQ is healthy',
-      effect: 'deploy', network: true },
+    { name: 'validate', summary: 'Report HQ registry entries that no vault doc references',
+      effect: 'read', network: true },
     { name: 'create', summary: 'Create or update a Project or Asset in HQ',
       effect: 'remote_write', network: true,
       positionals: [{ name: 'kind', choices: ['project', 'asset'], help: 'What to create' }],
@@ -101,15 +101,15 @@ byte-deterministic (no timestamps), so a guard can diff it.
 Cordon's [effect ladder](https://github.com/joeseverino/cordon#the-effect-ladder)
 — `read → local_write → vault_write → remote_write → deploy`, plus the optional
 `network` / `interactive` tags — is the one fact an agent cannot infer from the
-flags, and the signal it gates on before running a command (`hq restart`
-(`deploy`) vs `vault status` (`read`)). See Cordon for the ladder's definitions
+flags, and the signal it gates on before running a command (`hq sync`
+(`remote_write`) vs `vault status` (`read`)). See Cordon for the ladder's definitions
 and the `network`-vs-dependency-install distinction; below is how this repo
 *declares and enforces* it.
 
 ![the effect contract](diagrams/effect-contract.png)
 
 ```ts
-{ name: 'restart', effect: 'deploy', network: true, summary: '…' }   // a command
+{ name: 'sync', effect: 'remote_write', network: true, summary: '…' } // a command
 { name: 'diagram', effect: 'local_write', /* … */ }                  // a leaf tool
 ```
 
@@ -129,16 +129,17 @@ contract, and it lives in the one intercept every tool already runs
 (`intercept` in `lib/sdk/tool.ts`): a new deploy command is gated the moment it
 declares its effect, with zero per-tool wiring. At a TTY it prompts `[y/N]`;
 non-interactive it **fails closed** unless `TOOLS_ASSUME_YES=1` is set (the
-bypass CI and intentional automation use), so a stray `hq restart` / `hq env-apply`
+bypass CI and intentional automation use), so a stray deploy command
 can't fire by accident, by hand or by an agent. Covered by `tool.test.ts` and, for the shell bridge, `describe.bats`, against a
 throwaway tool with one deploy and one read command.
 
 ## Scoped lookup — the token-minimal AI path
 
 ```console
-$ tools describe hq restart
-{"ok":true,"schema_version":4,"tool":"hq","name":"restart","args":[],
- "effect":"deploy","network":true,"paras":[],"examples":[]}
+$ tools describe hq validate
+{"ok":true,"schema_version":4,"tool":"hq","name":"validate","summary":"Report HQ
+ registry entries (Projects/Assets) that no vault doc references. Read-only",
+ "args":[],"effect":"read","network":true,"paras":[],"examples":[]}
 ```
 
 `tools describe <tool> <command>` projects the contract down to a single command

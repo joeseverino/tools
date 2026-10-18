@@ -11,13 +11,12 @@
 - Bind `site manage` saves to the dashboard source fingerprint and route its MCP
   calls through the shared Node adapter, preventing stale-session overwrites
   when paired with severino-vault-mcp's stale-plan guard.
-- `hq` follows how Severino HQ runs now: `drift` reads the
-  `infrastructure.resources` list through `list_resource` (the retired
-  `list_managed_resources` tool is gone); `logs` reads the
-  `severino-hq-web.service` journal, `restart` restarts that unit, and `shell`,
-  `superuser` and `life-sync` run `manage.py` in the running container
-  (`HQ_CONTAINER`, default `severino-hq`). `env-diff` reads the environment
-  where the renderer writes it. `HQ_REMOTE_PATH` is no longer read.
+- `hq` keeps `sync`, `manifest`, `doctor`, `validate`, `call`, `create` and
+  `schema`, and no longer acts on HQ's host. Removed: `drift` (HQ derives it:
+  `hq call get_findings`, which `tools doctor --live` now gates on), `export`,
+  `open`, `superuser`, `restart`, `env-apply`, `env-diff`, `logs`, `shell` and
+  `life-sync`. `HQ_URL`, `HQ_ENV_ITEM`, `HQ_ENV_VAULT` and `HQ_REMOTE_PATH` are
+  no longer read.
 - Remove `hq ship`. It committed and pushed the HQ checkout's current branch
   as a deploy, but HQ's `main` is protected and a merge is the deploy; change
   HQ through a pull request instead.

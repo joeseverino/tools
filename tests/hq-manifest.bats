@@ -9,7 +9,6 @@ setup() {
     export NOTES_HOME="$TEST_ROOT/vault"
     export HQ_SSH_HOST="unused"
     export HQ_LOCAL_PATH="$TEST_ROOT/hq"
-    export HQ_URL="https://hq.example.test"
     export MCP_ARGS_LOG="$TEST_ROOT/mcp-args.log"
     mkdir -p "$TEST_BIN" "$NOTES_HOME" "$HQ_LOCAL_PATH"
     export PATH="$TEST_BIN:$PATH"
@@ -64,7 +63,7 @@ fi
 exit 0
 SH
     chmod +x "$TEST_BIN/severino-vault-mcp"
-    mkdir -p "$HQ_LOCAL_PATH/docs_index"
+    mkdir -p "$HQ_LOCAL_PATH/hq/domains/docs_index"
 }
 
 @test "hq schema regenerates docs_index/schema.json from the MCP" {
@@ -74,14 +73,14 @@ SH
 
     [ "$status" -eq 0 ]
     [[ "$output" == *"wrote"* ]] || return 1
-    [ "$(cat "$HQ_LOCAL_PATH/docs_index/schema.json")" = \
+    [ "$(cat "$HQ_LOCAL_PATH/hq/domains/docs_index/schema.json")" = \
         '{"doc_types":["runbook"],"environments":["homelab","other"]}' ]
 }
 
 @test "hq schema --check passes when the committed copy matches the MCP" {
     _stub_schema_mcp
     printf '%s\n' '{"doc_types":["runbook"],"environments":["homelab","other"]}' \
-        > "$HQ_LOCAL_PATH/docs_index/schema.json"
+        > "$HQ_LOCAL_PATH/hq/domains/docs_index/schema.json"
 
     run hq_bin schema --check
 
@@ -92,7 +91,7 @@ SH
 @test "hq schema --check fails (exit 1) when the committed copy is stale" {
     _stub_schema_mcp
     printf '%s\n' '{"doc_types":["runbook"],"environments":["homelab"]}' \
-        > "$HQ_LOCAL_PATH/docs_index/schema.json"
+        > "$HQ_LOCAL_PATH/hq/domains/docs_index/schema.json"
 
     run hq_bin schema --check
 
@@ -106,7 +105,7 @@ SH
 exit 2
 SH
     chmod +x "$TEST_BIN/severino-vault-mcp"
-    mkdir -p "$HQ_LOCAL_PATH/docs_index"
+    mkdir -p "$HQ_LOCAL_PATH/hq/domains/docs_index"
 
     run hq_bin schema
 
@@ -162,8 +161,8 @@ esac
 exit 0
 SH
     chmod +x "$TEST_BIN/severino-vault-mcp"
-    mkdir -p "$HQ_LOCAL_PATH/docs_index"
-    printf '%s\n' '{"doc_types":["runbook"]}' > "$HQ_LOCAL_PATH/docs_index/schema.json"
+    mkdir -p "$HQ_LOCAL_PATH/hq/domains/docs_index"
+    printf '%s\n' '{"doc_types":["runbook"]}' > "$HQ_LOCAL_PATH/hq/domains/docs_index/schema.json"
     export HQ_SCHEMA_DOC="$TEST_ROOT/schema-doc.md"
     printf 'environment: homelab | lab\n' > "$HQ_SCHEMA_DOC"
 

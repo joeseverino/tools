@@ -47,7 +47,7 @@ SH
     [ ! -e "$SSH_LOG.args" ]
 }
 
-# ---- hq call / hq drift, through a stubbed transport -------------------------
+# ---- hq call, through a stubbed transport -------------------------
 
 # fake_call <file> — an HQ_CALL transport that records the request and answers
 # with the file's contents.
@@ -57,18 +57,7 @@ fake_call() {
     chmod +x "$HQ_CALL"
 }
 
-hq_bin() { NOTES_HOME="$BATS_TEST_TMPDIR" HQ_URL="https://hq.example.test" "$BATS_TEST_DIRNAME/../bin/hq" "$@"; }
-
-resources() {
-    cat > "$BATS_TEST_TMPDIR/resources.json" <<'JSON'
-{"count":4,"items":[
- {"key":"edge","kind":"machine","enabled":true,"in_sync":false,"generation":1,"observed_generation":0,"health":{"state":"declared","label":"Recorded"}},
- {"key":"dns","kind":"adguard.rewrite","enabled":true,"in_sync":true,"generation":1,"observed_generation":1,"health":{"state":"healthy","label":"Healthy"}},
- {"key":"off","kind":"caddy.route","enabled":false,"in_sync":false,"generation":2,"observed_generation":1,"health":{"state":"healthy","label":"Healthy"}},
- {"key":"app","kind":"portainer.container","enabled":true,"in_sync":"__SYNC__","generation":4,"observed_generation":2,"health":{"state":"healthy","label":"Healthy"}}]}
-JSON
-    sed -i '' "s/\"__SYNC__\"/$1/" "$BATS_TEST_TMPDIR/resources.json"
-}
+hq_bin() { NOTES_HOME="$BATS_TEST_TMPDIR" "$BATS_TEST_DIRNAME/../bin/hq" "$@"; }
 
 @test "hq call: sends the MCP tool contract and prints the tool's result" {
     printf '{"ok":true}\n' > "$BATS_TEST_TMPDIR/answer.json"
@@ -95,34 +84,4 @@ JSON
     run hq_bin call audit_registry '[1]'
     [ "$status" -eq 2 ]
     [ ! -e "$HQ_REQUEST" ]
-}
-
-@test "hq drift: declared records and disabled resources never count; a moved declaration does" {
-    resources false
-    fake_call "$BATS_TEST_TMPDIR/resources.json"
-    run hq_bin drift --json
-    [ "$status" -eq 1 ]
-    [ "$(cat "$HQ_REQUEST")" = '{"tool":"list_resource","arguments":{"name":"infrastructure.resources","filters":{"limit":10000}}}' ]
-    OUTPUT="$output" python3 - <<'PY'
-import json, os
-d = json.loads(os.environ["OUTPUT"])
-assert [r["key"] for r in d] == ["app"], d
-assert d[0]["reason"] == "declared generation 4, last applied 2"
-PY
-}
-
-@test "hq drift: exits 0 when everything HQ reconciles is in sync" {
-    resources true
-    fake_call "$BATS_TEST_TMPDIR/resources.json"
-    run hq_bin drift
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"in sync (2 checked)"* ]]
-}
-
-@test "hq drift: an answer without items is an error, not a clean bill" {
-    printf '{"ok":false,"error":"There is no tool named list_managed_resources."}\n' > "$BATS_TEST_TMPDIR/answer.json"
-    fake_call "$BATS_TEST_TMPDIR/answer.json"
-    run hq_bin drift
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"has no items"* ]]
 }

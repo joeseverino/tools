@@ -107,9 +107,9 @@ Infrastructure facts (DNS records and rewrites, proxy hosts, the tailnet
 policy, certificates, containers) belong to Severino HQ, which reads them from
 each provider and reconciles what it declares. The toolchain reaches HQ through
 `lib/hq-call`, HQ's own MCP tool contract carried over SSH with the operator's
-certificate: `hq call <tool> [json]` exposes every capability, and `hq drift`
-reads HQ's reconciliation verdict (what has moved past its last applied
-declaration, or gone unhealthy). `tools doctor --live` gates on it. Nothing here
+certificate: `hq call <tool> [json]` exposes every capability, and `hq call
+get_findings` is what HQ claims is wrong, drift included. `tools doctor --live`
+gates on it. Nothing here
 fetches a provider or keeps a cache of one.
 
 ## The MCP boundary
@@ -128,5 +128,6 @@ repo defines (a subset + the shared `schema_version` and `effect`), so
 `tools check` runs everything CI runs (`bash -n` / `zsh -n` over remaining shell, the strict
 TypeScript type-check, shellcheck, contract validation, the bats suite) plus the
 bench assertions (`--no-bench` skips them). `tools doctor --all` is the
-cross-system rollup (`hq doctor`); `--live` adds `hq drift`. `tools status
+cross-system rollup (`hq doctor`); `--live` adds HQ's findings
+(`hq call get_findings`). `tools status
 --json` / `tools doctor --json` give machine-readable state.
