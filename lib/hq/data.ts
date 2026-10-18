@@ -161,8 +161,8 @@ export const schema: Handler = (args, rt) => {
   const current = schemaOf();
   if (current === null) die('error', `installed severino-vault-mcp lacks \`schema\`; run \`${REINSTALL}\``);
 
-  const dest = path.join(env.localPath, 'docs_index/schema.json');
-  if (!isDirectory(path.join(env.localPath, 'docs_index'))) die('error', `HQ docs_index not found at ${env.localPath}/docs_index`);
+  const dest = path.join(env.localPath, 'hq/domains/docs_index/schema.json');
+  if (!isDirectory(path.join(env.localPath, 'hq/domains/docs_index'))) die('error', `HQ docs_index not found at ${env.localPath}/hq/domains/docs_index`);
 
   if (flag === '--check') {
     let failed = false;
@@ -217,7 +217,7 @@ function schemaDriftWarn(env: HqEnv): void {
   if (!svmcAvailable()) return;
   const current = schemaOf();
   if (current === null) return;
-  const committed = readOrNull(path.join(env.localPath, 'docs_index/schema.json'));
+  const committed = readOrNull(path.join(env.localPath, 'hq/domains/docs_index/schema.json'));
   if (committed === null) return;
   if (committed !== current) {
     msg('yellow', 'schema', 'HQ docs_index/schema.json lags the MCP — run `hq schema`, commit, deploy');
