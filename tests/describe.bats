@@ -452,7 +452,7 @@ PY'
 printf '%s\n' '{"ok":true,"schema_version":4,"repo":"tools","tools":[{"ok":false,"name":"broken","error":"no contract"}]}'
 EOF
     chmod +x "$fake/tools"
-    run env TOOLS_HOME="$BATS_TEST_TMPDIR" node "$TOOLS_HOME/lib/tools/generate-surfaces.ts" completions
+    run env TOOLS_BIN="$fake/tools" node "$TOOLS_HOME/lib/tools/generate-surfaces.ts" completions
     [ "$status" -eq 1 ]
     [[ "$output" == *"broken: no contract"* ]]
 }
@@ -465,7 +465,7 @@ EOF
 printf '%s\n' '{"ok":true,"schema_version":4,"repo":"tools","tools":[{"ok":true,"name":"broken"}]}'
 EOF
     chmod +x "$fake/tools"
-    run env TOOLS_HOME="$BATS_TEST_TMPDIR" node "$TOOLS_HOME/lib/tools/generate-surfaces.ts" completions
+    run env TOOLS_BIN="$fake/tools" node "$TOOLS_HOME/lib/tools/generate-surfaces.ts" completions
     [ "$status" -eq 1 ]
     [[ "$output" == *"broken/"* ]]
 }

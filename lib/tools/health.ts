@@ -4,9 +4,8 @@ import { existsSync, lstatSync, readlinkSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { isRecord } from '../sdk/guards.ts';
 import { blank, palette } from '../sdk/output.ts';
-import { toolsHome } from '../sdk/paths.ts';
+import { exportedToolsHome, toolsHome } from '../sdk/paths.ts';
 import { run, runJson } from '../sdk/process.ts';
-import { toolsHomeExported } from '../sdk/tool.ts';
 import { fingerprintVerdicts } from './capabilities.ts';
 import { summarize } from './contract-summary.ts';
 import { CheckReport } from '../sdk/report.ts';
@@ -76,7 +75,7 @@ export async function runDoctor(options: DoctorOptions, home = toolsHome): Promi
   if (!options.json) blank();
 
   const env: [string, string | undefined][] = [
-    ['TOOLS_HOME', toolsHomeExported ? process.env['TOOLS_HOME'] : undefined],
+    ['TOOLS_HOME', exportedToolsHome],
     ['NOTES_HOME', process.env['NOTES_HOME']],
     ['BACKUPS_HOME', process.env['BACKUPS_HOME']],
   ];

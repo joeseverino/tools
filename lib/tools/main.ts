@@ -26,7 +26,7 @@ export const spec: ToolSpec = {
   effect: 'read',
   synopsis: ['tools <command> [options]'],
   env: [
-    { name: 'TOOLS_HOME', help: 'Read from ~/.zshrc; root of this repo' },
+    { name: 'TOOLS_HOME', help: 'Set to this checkout for its children; how programs outside tools find it' },
     { name: 'TOOLS_INSTALL_DIR', help: 'Override install target (default: ~/.local/bin)' },
   ],
   commands: [

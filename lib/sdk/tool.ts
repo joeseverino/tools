@@ -9,9 +9,6 @@ import { findCommand, renderContract, scopeOf, serializeContract } from './surfa
 import type { ToolSpec } from './surface.ts';
 import { renderUsage, renderUsageFor, terminalWidth } from './usage.ts';
 
-/** Whether TOOLS_HOME came from the caller's environment rather than being derived from the checkout. */
-export const toolsHomeExported = Boolean(process.env['TOOLS_HOME']);
-
 export interface ToolRuntime {
   readonly spec: ToolSpec;
   usage(command?: string): string;
@@ -170,7 +167,7 @@ export async function runDefinition(def: ToolDefinition, argv: readonly string[]
 
 /** Entry point for a launcher: runs the tool and maps failures to exit codes. */
 export async function runTool(def: ToolDefinition, argv: readonly string[] = process.argv.slice(2)): Promise<void> {
-  process.env['TOOLS_HOME'] ??= toolsHome;
+  process.env['TOOLS_HOME'] = toolsHome;
   const problems = definitionDrift(def);
   try {
     if (problems.length) throw new CliError(problems.join('\n'), 70);

@@ -112,8 +112,7 @@ Layout rules:
 ```sh
 brew install zsh git rsync jq uv
 git clone https://github.com/joeseverino/tools ~/Code/Assets/tools
-export TOOLS_HOME=~/Code/Assets/tools        # in ~/.zshrc
-cd "$TOOLS_HOME" && npm ci
+cd ~/Code/Assets/tools && npm ci
 
 cp config/backup.sh.example config/backup.sh # then edit for your files
 cp config/hq.sh.example config/hq.sh         # then set the HQ host
@@ -132,8 +131,10 @@ export NOTES_HOME="$HOME/Documents/notes"     # the vault (a git repo)
 export BACKUPS_HOME="$HOME/Code/Assets/Backups"
 ```
 
-`CODE_HOME`, the root holding `Projects/` and `Assets/`, follows from
-`TOOLS_HOME` (two levels up) unless you set it. `config/vault.sh` derives the
+`TOOLS_HOME` is how programs outside this repo find tools; a tool itself always
+runs the checkout it was invoked from and exports that as `TOOLS_HOME` to its
+children. `CODE_HOME`, the root holding `Projects/` and `Assets/`, follows from
+the checkout (two levels up) unless you set it. `config/vault.sh` derives the
 vault paths from `NOTES_HOME`. Change a layout var and every tool follows; never
 edit the tracked configs for your own paths.
 

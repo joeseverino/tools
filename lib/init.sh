@@ -2,7 +2,7 @@
 # init.sh — bootstrap for shell tools that author their surface with the desc_*
 # DSL (TypeScript tools use lib/sdk/tool.ts instead).
 #
-#     source "${TOOLS_HOME:?set in ~/.zshrc}/lib/init.sh" <config-name> "$@"
+#     source "${TOOLS_HOME:?}/lib/init.sh" <config-name> "$@"
 #
 # Loads lib/common.sh and lib/describe.sh, then config/<config-name>.sh unless the
 # forwarded argv is a help or describe request. Pass an empty name for tools with
@@ -14,10 +14,8 @@
 # skip the config. `source ... "$@"` exposes the tool's argv here and restores the
 # caller's afterward, in bash and zsh alike.
 
-: "${TOOLS_HOME:?set in ~/.zshrc}"
-
 # shellcheck source=lib/common.sh
-source "$TOOLS_HOME/lib/common.sh"
+source "$(dirname -- "${BASH_SOURCE[0]:-$0}")/common.sh"
 # shellcheck source=lib/describe.sh
 source "$TOOLS_HOME/lib/describe.sh"
 

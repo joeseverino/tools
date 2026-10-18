@@ -23,12 +23,15 @@ narrowest module possible:
 | `tool.ts` | `runTool`: help and `--describe` interception, the deploy gate, command dispatch, `parsing` for `util.parseArgs` |
 | `cli.ts`, `output.ts`, `color.ts` | `CliError` and exit codes, status lines and `header`/`footer`, colour through `util.styleText` |
 | `process.ts`, `which.ts`, `guards.ts` | subprocesses, `command -v`, JSON validation |
-| `paths.ts`, `config.ts`, `ci.ts` | `TOOLS_HOME` / `CODE_HOME`, shell-sourced `config/<name>.sh`, the CI environment |
+| `paths.ts`, `config.ts`, `ci.ts` | `TOOLS_HOME` / `CODE_HOME` derived from the running checkout, shell-sourced `config/<name>.sh`, the CI environment |
 | `svmc.ts`, `result.ts` | the vault CLI crossing, the `result-v1` envelope |
 
 Shell consumers (sibling repos) source `lib/sdk.sh` or `lib/init.sh`: the `desc_*`
 DSL in `lib/describe.sh` streams its declarations to `lib/sdk/spec-cli.ts`, so
-shell tools render through the same code as the TypeScript ones. `core.sh`,
+shell tools render through the same code as the TypeScript ones. A checkout
+always runs its own files (`paths.ts` and `core.sh` derive `TOOLS_HOME` from
+where they live and export it to children); the exported `TOOLS_HOME` is how
+programs outside tools find it. `core.sh`,
 `svmc.sh` and `ci.sh` are the shell twins of the modules above; `common.sh`
 aggregates them for the bats harness.
 

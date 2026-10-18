@@ -2,12 +2,13 @@
 # Stable shell SDK core: presentation, errors, basic guards, and JSON scalars.
 # shellcheck disable=SC2034 # Public color constants are consumed by callers.
 
-# CODE_HOME is the root that holds Projects/ and Assets/. It follows from where
-# this checkout lives (Assets/tools), so no tool keeps its own default.
-if [[ -z "${CODE_HOME:-}" && -n "${TOOLS_HOME:-}" ]]; then
-    CODE_HOME="$(cd "$TOOLS_HOME/../.." && pwd)"
-fi
-export CODE_HOME
+# TOOLS_HOME is the checkout this file was sourced from, so a worktree or a
+# copy runs its own files whatever the caller exported; children inherit it.
+# CODE_HOME, the root that holds Projects/ and Assets/, follows from where the
+# checkout lives (Assets/tools) unless the caller sets it.
+TOOLS_HOME="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")/../.." && pwd -P)"
+CODE_HOME="${CODE_HOME:-$(cd -- "$TOOLS_HOME/../.." && pwd -P)}"
+export TOOLS_HOME CODE_HOME
 
 if [[ -t 1 ]]; then
     BOLD=$'\033[1m'; DIM=$'\033[2m'; RESET=$'\033[0m'

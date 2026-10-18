@@ -25,8 +25,7 @@ path_without() {
 #   git:  empty global + system config so the operator's machine doesn't leak
 #         (CI runs a clean config).
 ci_shell_env() {
-    : "${TOOLS_HOME:?ci_shell_env needs TOOLS_HOME}"
-    local bin="${TOOLS_HOME%/}/bin" install="${TOOLS_INSTALL_DIR:-$HOME/.local/bin}"
+        local bin="${TOOLS_HOME%/}/bin" install="${TOOLS_INSTALL_DIR:-$HOME/.local/bin}"
     local rest
     rest="$(path_without "$install" "$(path_without "$bin")")"
     export PATH="$bin:$rest"
