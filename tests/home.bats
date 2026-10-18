@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# home.bats — a checkout runs its own files: an exported TOOLS_HOME naming a
+# home.bats: a checkout runs its own files: an exported TOOLS_HOME naming a
 # different checkout changes nothing about which code, configs or tools run.
 
 load helpers

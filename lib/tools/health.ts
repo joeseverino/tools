@@ -147,7 +147,7 @@ export async function runDoctor(options: DoctorOptions, home = toolsHome): Promi
     if (options.live) {
       const findings = hqFindings(home);
       record(doctor.check('hq findings', findings.ok, findings.detail));
-    } else doctor.warn('hq findings', 'skipped — asks HQ over SSH; rerun with --live');
+    } else doctor.warn('hq findings', 'skipped: it asks HQ over SSH; rerun with --live');
   }
 
   return doctor.finish(failed);

@@ -53,7 +53,7 @@ tui() { node "$TOOLS_HOME/lib/tools/describe-tui.ts"; }
     export DESCRIBE_TUI_KEYS='slash,v,a,l,i,d,a,t,e,enter'
     run tui
     [ "$status" -eq 0 ]
-    # 'validate' lives on hq's commands, not its name/description — the
+    # 'validate' lives on hq's commands, not its name/description; the
     # cross-tool command search narrows the list to hq.
     [[ "$output" == *"TOOLS (1)"* ]] || return 1
     [[ "$output" == *"hq"* ]] || return 1

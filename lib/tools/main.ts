@@ -77,7 +77,7 @@ export const spec: ToolSpec = {
       effect: 'read',
       positionals: [
         { name: 'tool', optional: true, help: 'Describe just one tool (delegates to <tool> --describe)' },
-        { name: 'command', optional: true, help: 'With a tool, project its contract to one command — the token-minimal AI path (tools describe hq sync)' },
+        { name: 'command', optional: true, help: 'With a tool, project its contract to one command, the token-minimal AI path (tools describe hq sync)' },
       ],
       options: [
         { flags: ['--pretty'], help: 'Indent the JSON for reading (default: compact, diff-stable)' },
@@ -88,7 +88,7 @@ export const spec: ToolSpec = {
         },
       ],
       examples: [
-        { command: 'tools describe hq sync', comment: "one command's contract — effect, args, examples" },
+        { command: 'tools describe hq sync', comment: "one command's contract: effect, args, examples" },
         { command: 'tools tui', comment: 'interactive explorer over the whole toolchain (alias of describe --tui)' },
       ],
     },

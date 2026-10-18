@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# config/hq.sh — configuration for the hq tool
+# config/hq.sh: configuration for the hq tool
 #
 # Copy to config/hq.sh and fill in the local values. Sourced by `hq`; each
 # variable can be overridden per-invocation. The real file is not tracked:

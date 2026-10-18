@@ -199,7 +199,7 @@ Umbrella command for the personal CLI toolchain.
 **Examples**
 
 ```sh
-tools describe hq sync  # one command's contract — effect, args, examples
+tools describe hq sync  # one command's contract: effect, args, examples
 tools tui  # interactive explorer over the whole toolchain (alias of describe --tui)
 ```
 
