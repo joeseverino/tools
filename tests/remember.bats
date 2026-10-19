@@ -81,3 +81,17 @@ setup() {
     [[ "$output" == *"not found"* ]] || return 1
     [ ! -d "$BATS_TEST_TMPDIR/nope" ]
 }
+
+@test "inside a git worktree it files under the main checkout's project" {
+    home="$BATS_TEST_TMPDIR/home"
+    main="$BATS_TEST_TMPDIR/repo"
+    git init -q "$main"
+    git -C "$main" commit -q --allow-empty -m init
+    git -C "$main" worktree add -q "$main/.claude/worktrees/side"
+    enc="$(printf '%s' "$(cd "$main" && pwd -P)" | tr '/. ' '---')"
+    mkdir -p "$home/.claude/projects/$enc/memory"
+    run env -u CLAUDE_MEMORY_DIR -u CLAUDE_PROJECT_DIR HOME="$home" \
+        sh -c 'cd "$1" && shift && "$@"' _ "$main/.claude/worktrees/side" "$TOOLS_HOME/bin/remember" project from-worktree "From worktree" -b "body"
+    [ "$status" -eq 0 ]
+    [ -f "$home/.claude/projects/$enc/memory/project_from_worktree.md" ]
+}
