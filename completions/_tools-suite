@@ -172,7 +172,7 @@ _tools_suite_contract() {
         '{-b,--body}[Body text in lieu of stdin]:str:' \
         '{-f,--body-file}[Body text from file]:file:' \
         '{-F,--force}[Overwrite an existing memory (update in place)]' \
-        '--dir[Memory dir. Default: CLAUDE_MEMORY_DIR, else CLAUDE_PROJECT_DIR, else $PWD — encoded to ~/.claude/projects/<enc>/memory. No flag needed inside a Claude project.]:path:' \
+        '--dir[Memory dir. Default: CLAUDE_MEMORY_DIR, else CLAUDE_PROJECT_DIR, else $PWD (for a git worktree, its main checkout) — encoded to ~/.claude/projects/<enc>/memory. No flag needed inside a Claude project.]:path:' \
         '--list[Show the MEMORY.md index]' \
         '--forget[Delete the memory and its index entry]:slug:' \
         '1:user | feedback | project | reference:' \
