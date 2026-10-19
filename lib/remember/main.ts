@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { die } from '../sdk/cli.ts';
@@ -35,7 +36,7 @@ export const spec: ToolSpec = {
     {
       flags: ['--dir'],
       metavar: 'PATH',
-      help: 'Memory dir. Default: CLAUDE_MEMORY_DIR, else CLAUDE_PROJECT_DIR, else $PWD — encoded to ~/.claude/projects/<enc>/memory. No flag needed inside a Claude project.',
+      help: 'Memory dir. Default: CLAUDE_MEMORY_DIR, else CLAUDE_PROJECT_DIR, else $PWD (for a git worktree, its main checkout) — encoded to ~/.claude/projects/<enc>/memory. No flag needed inside a Claude project.',
     },
     { flags: ['--list'], help: 'Show the MEMORY.md index' },
     { flags: ['--forget'], metavar: 'SLUG', help: 'Delete the memory and its index entry' },
@@ -57,6 +58,14 @@ function isType(value: string): value is (typeof TYPES)[number] {
 /** Claude's memory dir for a project path: every /, . and space folds to '-'. */
 export function encodeClaudePath(projectPath: string, home: string): string {
   return `${home}/.claude/projects/${projectPath.replace(/[/. ]/g, '-')}/memory`;
+}
+
+/** The checkout a path belongs to: a git worktree's main checkout, as Claude
+ * Code files a worktree session's memory under the project it came from. */
+export function projectRoot(path: string): string {
+  const found = spawnSync('git', ['-C', path, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' });
+  const common = found.status === 0 ? found.stdout.trim() : '';
+  return common.endsWith('/.git') ? common.slice(0, -'/.git'.length) : path;
 }
 
 /** Strips a leading type prefix (applied in sequence) and underscores the rest. */
@@ -129,8 +138,7 @@ const run: Handler = (args, rt) => {
   if (targetDir === '') {
     const home = process.env['HOME'] ?? '';
     if (process.env['CLAUDE_MEMORY_DIR']) targetDir = process.env['CLAUDE_MEMORY_DIR'];
-    else if (process.env['CLAUDE_PROJECT_DIR']) targetDir = encodeClaudePath(process.env['CLAUDE_PROJECT_DIR'], home);
-    else targetDir = encodeClaudePath(process.cwd(), home);
+    else targetDir = encodeClaudePath(projectRoot(process.env['CLAUDE_PROJECT_DIR'] || process.cwd()), home);
   }
 
   if (!existsSync(targetDir) || !statSync(targetDir).isDirectory()) {

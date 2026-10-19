@@ -426,7 +426,7 @@ Usage: `remember <type> <slug> <title>`
 | `-b, --body <STR>` | Body text in lieu of stdin |
 | `-f, --body-file <FILE>` | Body text from file |
 | `-F, --force` | Overwrite an existing memory (update in place) |
-| `--dir <PATH>` | Memory dir. Default: CLAUDE_MEMORY_DIR, else CLAUDE_PROJECT_DIR, else $PWD — encoded to ~/.claude/projects/<enc>/memory. No flag needed inside a Claude project. |
+| `--dir <PATH>` | Memory dir. Default: CLAUDE_MEMORY_DIR, else CLAUDE_PROJECT_DIR, else $PWD (for a git worktree, its main checkout) — encoded to ~/.claude/projects/<enc>/memory. No flag needed inside a Claude project. |
 | `--list` | Show the MEMORY.md index |
 | `--forget <SLUG>` | Delete the memory and its index entry |
 | `<type>` | user \| feedback \| project \| reference |
