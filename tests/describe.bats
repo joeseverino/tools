@@ -595,3 +595,13 @@ SH
     run "$tool" look </dev/null
     [ "$status" -eq 0 ] && [ "$output" = "looked" ]
 }
+
+@test "every documented 'tools <command>' is a real subcommand" {
+    known="$("$TOOLS_HOME/bin/tools" --help | awk '/^Commands:/{on=1; next} on && /^  [a-z]/{print $1} on && /^$/{exit}')"
+    stale=""
+    for cmd in $(cat "$TOOLS_HOME"/README.md "$TOOLS_HOME"/AGENTS.md "$TOOLS_HOME"/docs/*.md \
+        | grep -oE '`tools [a-z][a-z-]*' | awk '{print $2}' | sort -u); do
+        printf '%s\n' "$known" | grep -qx "$cmd" || stale="$stale $cmd"
+    done
+    [ -z "$stale" ] || { echo "docs name missing tools subcommands:$stale"; return 1; }
+}

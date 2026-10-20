@@ -213,7 +213,7 @@ both stay in sync because there is only one implementation.
   overridden from the environment (`lib/sdk/config.ts` reads them).
 - `config/capabilities.json` — the one declaration of each sibling repository:
   path, install command, fingerprint, describe surface, `brief` section.
-  `tools reinstall`, `tools bump-engine`, `tools doctor`, `brief`, and the
+  `tools reinstall`, `tools doctor`, `brief`, and the
   contract graph all read it. Never add a second hardcoded repo list.
 - `config/` — per-tool defaults derived from layout env vars. Files ending
   `.example` are templates; their gitignored copies are user-specific.
