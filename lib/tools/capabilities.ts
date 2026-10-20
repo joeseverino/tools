@@ -68,7 +68,6 @@ export function repoPath(repo: Repository): string {
   const overrides: Record<string, string | undefined> = {
     'severino-vault-mcp': process.env['MCP_HOME'],
     'severino-life': process.env['LIFE_MCP_HOME'],
-    'vault-engine': process.env['VAULT_ENGINE_HOME'],
   };
   const override = overrides[repo.id];
   return override || path.join(codeHome, repo.path);

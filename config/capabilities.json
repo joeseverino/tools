@@ -2,10 +2,6 @@
   "capabilities_version": 1,
   "repositories": [
     {
-      "id": "vault-engine",
-      "path": "Assets/vault-engine"
-    },
-    {
       "id": "severino-vault-mcp",
       "path": "Assets/severino-vault-mcp",
       "describe": [
