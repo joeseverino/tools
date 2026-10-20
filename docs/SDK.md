@@ -161,7 +161,7 @@ remote mutations and deployments remain in their explicit governed workflows.
 
 - Cordon describes commands and effects.
 - result-v1 describes generic execution outcomes.
-- vault-engine owns vault governance mechanics, plans, and mutation receipts.
+- severino-vault-mcp owns vault governance: schemas, sensitivity, validated writes.
 - domain repositories own their vocabulary and business rules.
 - Tools SDK owns CLI/process/output composition only.
 
