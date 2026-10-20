@@ -86,7 +86,7 @@ tools/
 - **The fleet.** [`config/capabilities.json`](config/capabilities.json) declares
   each sibling repository once: where it lives, how it installs, how it reports
   its fingerprint, and what it contributes (a describe surface, a `brief`
-  section). `tools reinstall`, `tools bump-engine`, `tools doctor`, and `brief`
+  section). `tools reinstall`, `tools doctor`, and `brief`
   all read it, so a repository is added in one place.
 - **The contract.** Every tool conforms to
   [cordon](https://github.com/joeseverino/cordon)'s command-surface schema, and
