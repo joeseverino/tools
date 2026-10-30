@@ -133,7 +133,8 @@ const figure: Handler = (args, rt) => {
   requireBrand(home);
   const [specFile = '', ...rest] = args;
   if (!isFile(specFile)) die('error', `spec not found: ${specFile}`);
-  const engine = path.join(home, 'node_modules/branding-engine/bin/cli.mjs');
+  // npm links the engine's declared bin here, wherever the package keeps it.
+  const engine = path.join(home, 'node_modules/.bin/branding-engine');
   if (!isFile(engine)) die('error', `engine not installed; run \`npm install\` in ${home}`);
 
   let defaultTokens = path.join(home, 'kits/joe-severino/web/tokens.css');
