@@ -5,7 +5,7 @@ to this file, so Claude Code and any AGENTS.md-aware tool read the same source.
 Read this before editing; it answers the questions agents otherwise re-derive
 from the code every session.
 
-TypeScript tools under `lib/<tool>/` (Node 24 runs them directly, no build),
+TypeScript tools under `lib/<tool>/` (Node 26 runs them directly, no build),
 each launched by a four-line extensionless `bin/<tool>` and sharing one look and
 feel. The toolchain owns nothing another system owns: infrastructure facts are
 HQ's (`hq call`), publishing is the site repo's, and vault reads and
@@ -294,7 +294,7 @@ computed by the MCP's own code.
   `lib/sdk/output.ts` and `lib/sdk/cli.ts`.
 - Every tool answers `-h`/`--help` and `--describe` from its one spec (see the
   Command-surface contract above; `tools doctor` gates it).
-- Node code is TypeScript under `lib/`, run directly by Node 24 (no build) and
+- Node code is TypeScript under `lib/`, run directly by Node 26 (no build) and
   type-checked strictly (including `noPropertyAccessFromIndexSignature` and
   `noImplicitReturns`): no explicit `any`, no `@ts-*` suppressions, no casts on
   parsed JSON. JSON stays `unknown` until a guard from `lib/sdk/guards.ts`

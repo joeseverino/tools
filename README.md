@@ -24,7 +24,7 @@ shared runtime other repos use). House rules for editing are in
 - macOS, with `bash` (the shell-sourced `config/*.sh` files, `lib/hq-call`, and
   the test harness use it) and `zsh` 5 for completions.
 - `git`, `rsync`, `jq` (the hq bats suite), and `uv`.
-- Node 24 (the version in `.nvmrc`). The tools under `lib/` are TypeScript,
+- Node 26 (the version in `.nvmrc`). The tools under `lib/` are TypeScript,
   which Node runs directly. Run `npm ci` once for their pinned dependencies.
 - A local Chromium, Chrome, or Edge for `doc-to-pdf` and `diagram`. Neither
   downloads a browser.
