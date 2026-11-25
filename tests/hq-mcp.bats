@@ -28,13 +28,8 @@ SH
 tee "$HQ_CALL_LOG" >/dev/null
 case "$(jq -r .tool "$HQ_CALL_LOG")" in
   execute_capability)
-    if [[ "$(jq -r .arguments.name "$HQ_CALL_LOG")" == "hq.sync" ]]; then
-      printf '%s\n' '{"ok":true,"documentation":{"stats":{"created":1,"updated":0,"missing_relations":0,"orphans":[],"content_items_synced":1}},"topology":{"schema_version":3,"checksum":"1234567890abcdef","scheduled":[]}}'
-    else
-      printf '%s\n' '{"ok":true,"created":true,"project":{"slug":"example"}}'
-    fi ;;
+    printf '%s\n' '{"ok":true,"stats":{"created":1,"updated":0,"missing_relations":0,"orphans":[],"content_items_synced":1},"message":"Manifest imported: 1 new, 0 changed, 0 unchanged."}' ;;
   audit_registry) printf '%s\n' '{"ok":true,"projects_total":1,"assets_total":1,"orphan_projects":[],"orphan_assets":[]}' ;;
-  describe_capabilities) printf '%s\n' '{"ok":true,"capabilities":[{"name":"project.upsert","summary":"Idempotently create or update an HQ project by slug.","input_schema":{"required":["name"],"properties":{"slug":{"type":"string","default":""},"name":{"type":"string"},"status":{"type":"string","default":"idea"}}}}]}' ;;
 esac
 SH
     chmod +x "$HQ_CALL"
@@ -57,7 +52,7 @@ hq_bin() { "$TOOLS_HOME/bin/hq" "$@"; }
     run hq_bin sync
 
     [ "$status" -eq 0 ]
-    [ "$(jq -r .arguments.name "$HQ_CALL_LOG")" = "hq.sync" ]
+    [ "$(jq -r .arguments.name "$HQ_CALL_LOG")" = "documentation.sync" ]
     [ "$(jq -r '.arguments.payload.manifest[0].doc_id' "$HQ_CALL_LOG")" = "rb-one" ]
     [ "$(jq -r '.arguments.payload | has("topology")' "$HQ_CALL_LOG")" = "false" ]
     [[ "$output" == *"HQ is in sync"* ]] || return 1
@@ -71,22 +66,4 @@ hq_bin() { "$TOOLS_HOME/bin/hq" "$@"; }
     [ "$status" -eq 0 ]
     [ "$(jq -r .tool "$HQ_CALL_LOG")" = "audit_registry" ]
     [[ "$output" == *"every Project and Asset is referenced"* ]]
-}
-
-@test "hq create maps ergonomic aliases to the server-owned upsert schema" {
-    run hq_bin create project example --name Example --repo https://example.test/repo
-
-    [ "$status" -eq 0 ]
-    [ "$(jq -r .arguments.name "$HQ_CALL_LOG")" = "project.upsert" ]
-    [ "$(jq -r .arguments.payload.repository_url "$HQ_CALL_LOG")" = "https://example.test/repo" ]
-    [[ "$output" == *"example: created"* ]]
-}
-
-@test "hq create focused help renders the live capability schema" {
-    run hq_bin create project -h
-
-    [ "$status" -eq 0 ]
-    [ "$(jq -r .tool "$HQ_CALL_LOG")" = "describe_capabilities" ]
-    [[ "$output" == *"--name"*"required"* ]] || return 1
-    [[ "$output" == *"--status"*"default: 'idea'"* ]]
 }

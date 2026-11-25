@@ -6,10 +6,10 @@ import { die, exit, usageError } from '../sdk/cli.ts';
 import { isRecord, parseJson } from '../sdk/guards.ts';
 import { msg } from '../sdk/output.ts';
 import { git } from '../git/index.ts';
-import type { Handler, ToolRuntime } from '../sdk/tool.ts';
+import type { Handler } from '../sdk/tool.ts';
 import { failureMessage, loadHqEnv, resultOk } from './env.ts';
 import type { HqEnv } from './env.ts';
-import { createHelp, createRequest, doctorReport, parseInput, stateRecord, syncSummary, validateReport } from './report.ts';
+import { doctorReport, parseInput, stateRecord, syncSummary, validateReport } from './report.ts';
 import { syncFreshness, syncStateFile } from './state.ts';
 import { svmc, svmcAvailable } from '../sdk/svmc.ts';
 import { callTransport } from './transport.ts';
@@ -167,7 +167,7 @@ export function syncRequest(manifest: unknown, options: SyncOptions): unknown {
   return {
     tool: 'execute_capability',
     arguments: {
-      name: 'hq.sync',
+      name: 'documentation.sync',
       payload: {
         manifest,
         update_existing: options.update ? 1 : 0,
@@ -203,8 +203,7 @@ export const sync: Handler = (args, rt) => {
     if (response.status !== 0) return response.status;
     const result = parseJson(response.stdout);
     if (!resultOk(result)) die('error', failureMessage(result, 'HQ sync failed'));
-    const documentation = isRecord(result) ? result['documentation'] : undefined;
-    const stats = isRecord(documentation) ? documentation['stats'] ?? null : null;
+    const stats = isRecord(result) ? result['stats'] ?? null : null;
     process.stdout.write(syncSummary(parsed, stats, options.prune));
 
     const stateFile = syncStateFile();
@@ -271,30 +270,4 @@ export const validate: Handler = () => {
   loadHqEnv();
   msg('dim', 'validate', 'HQ registry ↔ vault docs');
   return pipeToReport({ tool: 'audit_registry', arguments: {} }, validateReport);
-};
-
-export const create: Handler = (args, rt: ToolRuntime) => {
-  const kind = args[0] ?? '';
-  if (kind === '') {
-    rt.printUsage('create');
-    return 0;
-  }
-  if (kind !== 'project' && kind !== 'asset') return rt.dieUnknown('kind', kind, 'create');
-  const rest = args.slice(1);
-  loadHqEnv();
-
-  if (rest[0] === '-h' || rest[0] === '--help') {
-    return pipeToReport({ tool: 'describe_capabilities', arguments: {} }, (catalog) => createHelp(catalog, kind));
-  }
-
-  const slug = rest[0];
-  if (slug === undefined) return die('error', `missing <slug>; try \`hq create ${kind} -h\``);
-  msg('dim', 'hq', `${kind}.upsert ${slug}`);
-  const response = callTransport(createRequest([kind, ...rest]));
-  if (response.status !== 0) return response.status;
-  const result = parseJson(response.stdout);
-  if (!resultOk(result)) die('error', failureMessage(result, 'HQ operation failed'));
-  const created = isRecord(result) && result['created'] === true;
-  msg('green', kind, `${slug}: ${created ? 'created' : 'updated'}`);
-  return 0;
 };

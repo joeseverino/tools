@@ -1,6 +1,6 @@
 import type { CommandSpec, ToolSpec } from '../sdk/surface.ts';
 import type { Handler, ToolDefinition } from '../sdk/tool.ts';
-import { call, create, doctor, manifest, schema, sync, validate } from './data.ts';
+import { call, doctor, manifest, schema, sync, validate } from './data.ts';
 import { loadHqEnv } from './env.ts';
 
 const commands: CommandSpec[] = [
@@ -28,21 +28,6 @@ const commands: CommandSpec[] = [
     ],
   },
   { name: 'validate', summary: 'Report HQ registry entries (Projects/Assets) that no vault doc references. Read-only', effect: 'read', network: true },
-  {
-    name: 'create',
-    summary: 'Create or update a Project or Asset in HQ (idempotent upsert by slug)',
-    effect: 'remote_write',
-    network: true,
-    positionals: [
-      { name: 'kind', choices: ['project', 'asset'], help: 'What to create' },
-      { name: 'slug', help: 'Registry slug (the create_project / create_asset key)' },
-    ],
-    delegates: "HQ's schema-validated project.upsert / asset.upsert MCP capabilities; field names and defaults are owned by HQ",
-    examples: [
-      { command: 'hq create project my-site --name "My Site" --category cloudflare --status published --url https://example.com' },
-      { command: 'hq create asset example-com --name "example.com" --category domain' },
-    ],
-  },
   {
     name: 'call',
     summary: "Call one HQ tool as the operator: the MCP tool contract, JSON arguments in, the tool's JSON result out",
@@ -106,7 +91,6 @@ export const tool: ToolDefinition = {
     doctor: configured(doctor),
     schema: configured(schema),
     validate: configured(validate),
-    create: configured(create),
     call: configured(call),
   },
   fallback: (args, rt) => {

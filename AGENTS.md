@@ -78,13 +78,11 @@ emitter is `severino-vault-mcp`'s `cli_introspect.describe_parser`.)
   enter the source of truth; add one entry per paragraph and never an empty one.
   The validator fails closed on a paragraph that ends mid-sentence or is empty
   (`lib/tools/describe-schema.ts`).
-- **Flags owned by another repo are pointed at, never restated.** `hq create`'s
-  fields are HQ's `project.upsert` / `asset.upsert` input schemas. Such commands
-  set `delegates: "<owner>"` instead of enumerating flags. It renders in the
-  focused `-h` ("Flags are owned elsewhere: ...") and rides into the JSON, so an
-  agent sees ownership without reading handlers. `hq create <kind> -h` falls
-  through to HQ (the help flag is not the second argument, so interception
-  skips it) and renders the owner's live field list.
+- **Flags owned by another repo are pointed at, never restated.** `brand kit`'s
+  flags are its cordon emitter's. Such commands set `delegates: "<owner>"`
+  instead of enumerating flags. It renders in the focused `-h` ("Flags are owned
+  elsewhere: ...") and rides into the JSON, so an agent sees ownership without
+  reading handlers.
 - **Unknown input is self-service and derived.** `rt.dieUnknown(kind, token,
   command?)` prints the error and then shows the valid surface from the spec:
   the command list for a bad command, a command's own options for a bad flag.

@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { callRequest, syncRequest } from '../../lib/hq/data.ts';
 import { failureMessage, jqText, resultOk } from '../../lib/hq/env.ts';
 import { tool } from '../../lib/hq/main.ts';
-import { createHelp, createRequest, doctorReport, stateRecord, syncSummary, validateReport } from '../../lib/hq/report.ts';
+import { doctorReport, stateRecord, syncSummary, validateReport } from '../../lib/hq/report.ts';
 import { compareRecord, manifestHash, readRecord } from '../../lib/hq/state.ts';
 import { definitionDrift } from '../../lib/sdk/tool.ts';
 
@@ -22,7 +22,7 @@ test('syncRequest sends numeric prune and update flags and the manifest', () => 
   assert.deepEqual(syncRequest([{ doc_id: 'a' }], { prune: true, update: false }), {
     tool: 'execute_capability',
     arguments: {
-      name: 'hq.sync',
+      name: 'documentation.sync',
       payload: { manifest: [{ doc_id: 'a' }], update_existing: 0, report_orphans: true, prune_orphans: 1, confirm_prune: 1 },
     },
   });
@@ -38,32 +38,6 @@ test('jq-compatible helpers', () => {
   assert.equal(failureMessage({ error: { message: 'boom' } }, 'fallback'), 'boom');
   assert.equal(failureMessage({ ok: false }, 'fallback'), 'fallback');
   assert.equal(failureMessage(undefined, 'fallback'), '');
-});
-
-test('createRequest maps ergonomic aliases to the upsert payload', () => {
-  assert.deepEqual(createRequest(['project', 'example', '--name', 'Example', '--repo', 'https://e.test/r', '--json']), {
-    tool: 'execute_capability',
-    arguments: { name: 'project.upsert', payload: { slug: 'example', name: 'Example', repository_url: 'https://e.test/r' } },
-  });
-  assert.throws(() => createRequest(['project', 'x', '--name']), /expected --field value/);
-  assert.throws(() => createRequest(['widget', 'x']), /usage: hq create/);
-});
-
-test('createHelp lists fields with required, default and enum detail', () => {
-  const catalog = {
-    capabilities: [
-      {
-        name: 'project.upsert',
-        summary: 'Create a project.',
-        input_schema: { required: ['name'], properties: { slug: { type: 'string' }, name: { type: 'string' }, status: { type: 'string', default: 'idea' }, cat: { enum: ['a', 'b'] } } },
-      },
-    ],
-  };
-  assert.equal(
-    createHelp(catalog, 'project'),
-    "Usage: hq create project <slug> [--field value ...]\n\nCreate a project.\n\nFields:\n  --name                       required; string\n  --status                     default: 'idea'; string\n  --cat                        one of: a, b\n",
-  );
-  assert.throws(() => createHelp(catalog, 'asset'), /does not advertise asset\.upsert/);
 });
 
 test('syncSummary reports changes, relations, content and cleanup', () => {
