@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { httpsUrl, parseRepoArgs, projectDoc, titleCase } from '../../lib/repo/main.ts';
+import { parseRepoArgs, projectDoc, titleCase } from '../../lib/repo/main.ts';
 
 const reject = (kind: string, token: string): never => {
   throw new Error(`${kind}:${token}`);
@@ -11,16 +11,10 @@ test('titleCase capitalises each hyphen-separated word', () => {
   assert.equal(titleCase('x'), 'X');
 });
 
-test('httpsUrl normalises GitHub ssh remotes and strips .git', () => {
-  assert.equal(httpsUrl('git@github.com:o/r.git'), 'https://github.com/o/r');
-  assert.equal(httpsUrl('https://github.com/o/r.git'), 'https://github.com/o/r');
-  assert.equal(httpsUrl(''), '');
-});
-
 test('parseRepoArgs reads flags, one slug, and rejects the rest', () => {
-  const parsed = parseRepoArgs(['demo', '--root', 'assets', '--track', 'node', '--name', 'N', '--public', '--local', '--no-register', '-n', '--category', 'c', '--description', 'd', '--path', '/p'], reject);
+  const parsed = parseRepoArgs(['demo', '--root', 'assets', '--track', 'node', '--name', 'N', '--public', '--local', '--no-register', '-n', '--description', 'd', '--path', '/p'], reject);
   assert.deepEqual(parsed, {
-    slug: 'demo', root: 'assets', track: 'node', name: 'N', category: 'c', description: 'd',
+    slug: 'demo', root: 'assets', track: 'node', name: 'N', description: 'd',
     visibility: '--public', local: true, register: false, dry: true, path: '/p',
   });
   assert.deepEqual(parseRepoArgs(['--root'], reject), { exit: 1 });

@@ -4,13 +4,11 @@ import path from 'node:path';
 import { SilentExit, die, usageError } from '../sdk/cli.ts';
 import { palette, msg } from '../sdk/output.ts';
 import { codeHome } from '../sdk/paths.ts';
-import { run } from '../sdk/process.ts';
 import type { ToolSpec } from '../sdk/surface.ts';
 import type { Handler, ToolDefinition } from '../sdk/tool.ts';
 
 const NAME_HELP = 'Display name (default: slug, title-cased)';
-const CATEGORY_HELP = 'HQ project category (default automation)';
-const DESCRIPTION_HELP = 'One-liner for the vault doc + HQ entry';
+const DESCRIPTION_HELP = 'One-liner for the vault doc';
 
 export const spec: ToolSpec = {
   name: 'repo',
@@ -21,13 +19,13 @@ export const spec: ToolSpec = {
   effect: 'remote_write',
   synopsis: ['repo new <slug> [options] | repo register <slug> [options]'],
   paras: [
-    "The fleet's front door. 'repo new' automates the cordon-starter README procedure end to end — copy the baseline, keep one emitter track, fresh git history, local guardrail hooks, initial commit, 'gh repo create', branch protection — then registers the repo in the vault project registry and HQ. 'repo register' is that registration half alone, for a repo that already exists on disk (the backfill path).",
-    "Registration writes '01 Projects/<slug>/index.md' (frontmatter per the vault schema; skipped if it exists), upserts the HQ Project record via 'hq create project', and runs 'hq sync' so relations resolve immediately. One entry path means no repo can be on disk but invisible to the registry.",
+    "The fleet's front door. 'repo new' automates the cordon-starter README procedure end to end — copy the baseline, keep one emitter track, fresh git history, local guardrail hooks, initial commit, 'gh repo create', branch protection — then registers the repo in the vault project registry. 'repo register' is that registration half alone, for a repo that already exists on disk (the backfill path).",
+    "Registration writes '01 Projects/<slug>/index.md' (frontmatter per the vault schema; skipped if it exists) and runs 'hq sync'. HQ makes the repo a project itself, from what its GitHub App reads. One entry path means no repo can be on disk but invisible to the registry.",
   ],
   examples: [
     { command: 'repo new my-tool --description "One-liner for the docs"', comment: 'private bash-track repo in Projects/, registered' },
-    { command: 'repo new my-mcp --root assets --track node --category automation', comment: 'node-track repo in Assets/' },
-    { command: 'repo register screencasts --category automation', comment: 'backfill an existing repo into the registry' },
+    { command: 'repo new my-mcp --root assets --track node', comment: 'node-track repo in Assets/' },
+    { command: 'repo register screencasts', comment: 'backfill an existing repo into the registry' },
     { command: 'repo new scratch --local --no-register -n', comment: 'dry-run a local-only scratch repo' },
   ],
   env: [
@@ -43,24 +41,22 @@ export const spec: ToolSpec = {
       options: [
         { flags: ['--root'], metavar: 'R', help: 'assets|projects — which Code root the repo lives under (default projects)' },
         { flags: ['--track'], metavar: 'T', help: 'bash|node — the emitter track to keep (default bash)' },
-        { flags: ['--name'], metavar: 'NAME', help: 'Display name for the vault doc + HQ (default: slug, title-cased)' },
-        { flags: ['--category'], metavar: 'CAT', help: CATEGORY_HELP },
+        { flags: ['--name'], metavar: 'NAME', help: 'Display name for the vault doc (default: slug, title-cased)' },
         { flags: ['--description'], metavar: 'TEXT', help: DESCRIPTION_HELP },
         { flags: ['--public'], help: 'Create the GitHub repo public (default private)' },
         { flags: ['--local'], help: 'Skip GitHub entirely — no gh create, no branch protection' },
-        { flags: ['--no-register'], help: 'Skip the vault doc + HQ registration' },
+        { flags: ['--no-register'], help: 'Skip the vault doc and hq sync' },
         { flags: ['-n', '--dry-run'], help: 'Print the plan; touch nothing' },
       ],
       positionals: [{ name: 'slug', help: 'kebab-case name — becomes the dir, the tool name, and the registry slug' }],
     },
     {
       name: 'register',
-      summary: 'Register an existing repo: vault project doc + HQ record + hq sync',
+      summary: 'Register an existing repo: vault project doc + hq sync',
       effect: 'remote_write',
       options: [
         { flags: ['--path'], metavar: 'DIR', help: 'Repo directory (default: $CODE_HOME/Assets/<slug> then $CODE_HOME/Projects/<slug>)' },
         { flags: ['--name'], metavar: 'NAME', help: NAME_HELP },
-        { flags: ['--category'], metavar: 'CAT', help: CATEGORY_HELP },
         { flags: ['--description'], metavar: 'TEXT', help: DESCRIPTION_HELP },
         { flags: ['-n', '--dry-run'], help: 'Print the plan; touch nothing' },
       ],
@@ -74,7 +70,6 @@ export interface RepoArgs {
   root: string;
   track: string;
   name: string;
-  category: string;
   description: string;
   visibility: '--private' | '--public';
   local: boolean;
@@ -83,12 +78,12 @@ export interface RepoArgs {
   path: string;
 }
 
-const VALUE_FLAGS = new Set(['--root', '--track', '--name', '--category', '--description', '--path']);
+const VALUE_FLAGS = new Set(['--root', '--track', '--name', '--description', '--path']);
 
 /** Parses the flags shared by `new` and `register`; an unknown token goes through `reject`. */
 export function parseRepoArgs(args: readonly string[], reject: (kind: string, token: string) => never): RepoArgs | { exit: number } {
   const parsed: RepoArgs = {
-    slug: '', root: 'projects', track: 'bash', name: '', category: 'automation', description: '',
+    slug: '', root: 'projects', track: 'bash', name: '', description: '',
     visibility: '--private', local: false, register: true, dry: false, path: '',
   };
   for (let index = 0; index < args.length; index += 1) {
@@ -101,7 +96,6 @@ export function parseRepoArgs(args: readonly string[], reject: (kind: string, to
         case '--root': parsed.root = value; break;
         case '--track': parsed.track = value; break;
         case '--name': parsed.name = value; break;
-        case '--category': parsed.category = value; break;
         case '--description': parsed.description = value; break;
         default: parsed.path = value;
       }
@@ -122,12 +116,6 @@ export function titleCase(slug: string): string {
     .filter(Boolean)
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ');
-}
-
-/** The origin remote as a display URL, ssh remotes normalised to https. */
-export function httpsUrl(remote: string): string {
-  const url = remote.replace(/\.git$/, '');
-  return url.startsWith('git@github.com:') ? `https://github.com/${url.slice('git@github.com:'.length)}` : url;
 }
 
 export function projectDoc(args: Pick<RepoArgs, 'slug' | 'name' | 'description'>, dir: string, reviewed: string): string {
@@ -187,8 +175,6 @@ function quiet(bin: string, args: string[], cwd: string): boolean {
 function registerRepo(args: RepoArgs, dir: string): void {
   const notesHome = process.env['NOTES_HOME'];
   if (!notesHome) die('error', 'NOTES_HOME: set in ~/.zshrc');
-  const remote = run('git', ['-C', dir, 'remote', 'get-url', 'origin']);
-  const url = remote.ok ? httpsUrl(remote.stdout.replace(/\n+$/, '')) : '';
   const indexDir = path.join(notesHome, '01 Projects', args.slug);
   const index = path.join(indexDir, 'index.md');
 
@@ -200,13 +186,8 @@ function registerRepo(args: RepoArgs, dir: string): void {
     msg('green', 'vault', `01 Projects/${args.slug}/index.md`);
   }
 
-  const hqArgs = ['create', 'project', args.slug, '--name', args.name, '--category', args.category, '--status', 'active'];
-  if (url) hqArgs.push('--repo', url);
-  if (args.description) hqArgs.push('--description', args.description);
-  must(stdoutHidden('hq', hqArgs));
-  msg('green', 'hq', `project record upserted (${args.category}, active)`);
   must(stdoutHidden('hq', ['sync']));
-  msg('green', 'synced', `relations to '${args.slug}' resolve`);
+  msg('green', 'synced', 'vault → HQ');
 }
 
 function rewriteSlug(file: string, from: string, to: string): void {
@@ -308,7 +289,7 @@ const handle: Handler = (argv, rt) => {
     }
     if (!dir || !existsSync(dir) || !statSync(dir).isDirectory()) return die('register', `no repo at $CODE_HOME/{Assets,Projects}/${args.slug} (or --path)`, 1);
     if (args.dry) {
-      msg('dim', 'dry-run', `would register ${dir} as '${args.slug}' (${args.category}) + hq sync`);
+      msg('dim', 'dry-run', `would register ${dir} as '${args.slug}' + hq sync`);
       return 0;
     }
     registerRepo(args, dir);
@@ -323,7 +304,7 @@ const handle: Handler = (argv, rt) => {
   if (args.dry) {
     msg('dim', 'dry-run', `would create ${dest} from ${starter} (${args.track} track)`);
     if (!args.local) msg('dim', 'dry-run', `would 'gh repo create ${args.slug} ${args.visibility.slice(2)}' + branch protection`);
-    if (args.register) msg('dim', 'dry-run', `would register '${args.slug}' (${args.category}) + hq sync`);
+    if (args.register) msg('dim', 'dry-run', `would register '${args.slug}' + hq sync`);
     return 0;
   }
 

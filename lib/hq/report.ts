@@ -1,12 +1,9 @@
-// The JSON shaping and plain-text reports behind `hq`: the create request, the
-// sync summary and state record, the doctor and validate reports, and
-// `hq create <kind> -h`.
+// The plain-text reports behind `hq`: the sync summary and state record, and
+// the doctor and validate reports.
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { CliError } from '../sdk/cli.ts';
 import { isRecord, isStringArray } from '../sdk/guards.ts';
-
-type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
 function fail(message: string, code = 2): never {
   throw new CliError(`hq: ${message}`, code);
@@ -22,80 +19,6 @@ export function parseInput(text: string): unknown {
 
 function optionalNumber(value: unknown): boolean {
   return value === undefined || typeof value === 'number';
-}
-
-const ALIASES: Record<string, Record<string, string>> = {
-  project: { technologies: 'technologies_used', repo: 'repository_url', url: 'public_url' },
-  asset: {
-    name: 'item_name',
-    cost: 'total_cost',
-    business_use: 'business_use_percentage',
-    payment: 'payment_method',
-    serial: 'serial_number',
-  },
-};
-
-/** The human `hq create` surface as one canonical MCP request. */
-export function createRequest(argv: readonly string[]): unknown {
-  const [kind = '', slug, ...rest] = argv;
-  const aliases = ALIASES[kind];
-  if (!aliases || slug === undefined) fail('usage: hq create {project,asset} <slug> [--field value ...]');
-  const payload: Record<string, string> = { slug };
-  while (rest.length) {
-    const flag = rest.shift() ?? '';
-    if (flag === '--json') continue;
-    if (!flag.startsWith('--') || !rest.length) fail(`expected --field value, got '${flag}'`);
-    const key = flag.slice(2).replaceAll('-', '_');
-    payload[aliases[key] ?? key] = rest.shift() ?? '';
-  }
-  return { tool: 'execute_capability', arguments: { name: `${kind}.upsert`, payload } };
-}
-
-// Field defaults are shown the way Python's repr prints them.
-export function pyRepr(value: Json): string {
-  if (value === null) return 'None';
-  if (value === true) return 'True';
-  if (value === false) return 'False';
-  if (typeof value === 'string') return `'${value.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`;
-  if (Array.isArray(value)) return `[${value.map(pyRepr).join(', ')}]`;
-  if (typeof value === 'object') return `{${Object.entries(value).map(([k, v]) => `${pyRepr(k)}: ${pyRepr(v)}`).join(', ')}}`;
-  return String(value);
-}
-
-interface FieldSpec { default?: Json; enum?: Json[]; format?: string; type?: string }
-interface Capability {
-  name: string;
-  summary: string;
-  input_schema: { required?: string[]; properties?: Record<string, FieldSpec> };
-}
-
-function isCapability(value: unknown): value is Capability {
-  return isRecord(value)
-    && typeof value['name'] === 'string'
-    && typeof value['summary'] === 'string'
-    && isRecord(value['input_schema']);
-}
-
-export function createHelp(catalog: unknown, kind: string): string {
-  if (!isRecord(catalog) || !Array.isArray(catalog['capabilities']) || !catalog['capabilities'].every(isCapability)) {
-    return fail('capability catalog has an unexpected shape', 1);
-  }
-  const capability = catalog['capabilities'].find((item) => item.name === `${kind}.upsert`);
-  if (!capability) fail(`HQ does not advertise ${kind}.upsert`, 1);
-  const schema = capability.input_schema;
-  const required = new Set(schema.required ?? []);
-  const lines = [`Usage: hq create ${kind} <slug> [--field value ...]`, '', capability.summary, '', 'Fields:'];
-  for (const [field, spec] of Object.entries(schema.properties ?? {})) {
-    if (field === 'slug') continue;
-    const detail: string[] = [];
-    if (required.has(field)) detail.push('required');
-    if ('default' in spec && spec.default !== undefined) detail.push(`default: ${pyRepr(spec.default)}`);
-    if (spec.enum?.length) detail.push(`one of: ${spec.enum.map(String).join(', ')}`);
-    else if (spec.format) detail.push(spec.format);
-    else if (spec.type) detail.push(spec.type);
-    lines.push(`  ${`--${field.replaceAll('_', '-')}`.padEnd(28)} ${detail.join('; ')}`);
-  }
-  return `${lines.join('\n')}\n`;
 }
 
 interface SyncStats {

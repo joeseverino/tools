@@ -89,13 +89,12 @@ EOF
     [ "$(git -C "$dest" rev-list --count HEAD)" = "1" ]
     [ "$(git -C "$dest" branch --show-current)" = "main" ]
 
-    # Registration: vault doc + HQ create + sync, GitHub created.
+    # Registration: vault doc + sync, GitHub created.
     index="$NOTES_HOME/01 Projects/demo-tool/index.md"
     [ -f "$index" ]
     grep -q "doc_id: project-demo-tool" "$index"
     grep -q "A demo." "$index"
     grep -q "gh repo create demo-tool --private --source=. --push" "$STUB_LOG"
-    grep -q "hq create project demo-tool --name Demo Tool" "$STUB_LOG"
     grep -q "hq sync" "$STUB_LOG"
 }
 
@@ -144,14 +143,12 @@ EOF
     git -C "$dir" init -qb main
     git -C "$dir" remote add origin git@github.com:joeseverino/oldie.git
 
-    run repo register oldie --category automation --description "Backfilled."
+    run repo register oldie --description "Backfilled."
     [ "$status" -eq 0 ]
 
     index="$NOTES_HOME/01 Projects/oldie/index.md"
     [ -f "$index" ]
     grep -q "doc_id: project-oldie" "$index"
-    grep -q "hq create project oldie" "$STUB_LOG"
-    grep -q -- "--repo https://github.com/joeseverino/oldie" "$STUB_LOG"
     grep -q "hq sync" "$STUB_LOG"
 }
 

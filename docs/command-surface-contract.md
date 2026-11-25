@@ -34,10 +34,10 @@ export const spec: ToolSpec = {
   commands: [
     { name: 'validate', summary: 'Report HQ registry entries that no vault doc references',
       effect: 'read', network: true },
-    { name: 'create', summary: 'Create or update a Project or Asset in HQ',
+    { name: 'call', summary: 'Call one HQ tool as the operator',
       effect: 'remote_write', network: true,
-      positionals: [{ name: 'kind', choices: ['project', 'asset'], help: 'What to create' }],
-      delegates: "HQ's capability schemas; run 'hq create <kind> -h' for the live fields" },
+      positionals: [{ name: 'tool', help: 'HQ tool name' }],
+      delegates: "HQ's MCP tool contract; run 'hq call describe_capabilities' for the live tools" },
   ],
 };
 ```

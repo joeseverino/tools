@@ -440,7 +440,7 @@ PY'
 @test "README reference renders contract prose, examples, and metavariables" {
     run bash -c 'grep -q "remember feedback use-rg-and-fd" "$TOOLS_HOME/README.md" &&
                  grep -q -- "--dir <PATH>" "$TOOLS_HOME/README.md" &&
-                 grep -q "hq create project my-site" "$TOOLS_HOME/README.md"'
+                 grep -q "hq call get_findings" "$TOOLS_HOME/README.md"'
     [ "$status" -eq 0 ]
 }
 
